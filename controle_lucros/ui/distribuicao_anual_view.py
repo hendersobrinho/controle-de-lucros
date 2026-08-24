@@ -667,7 +667,13 @@ class DistribuicaoAnualView(QWidget):
             caminho += ".xlsx"
 
         linhas = [
-            {"cpf": linha["socio_cpf"], "nome": linha["socio_nome"], "valor_distribuido": linha["valor_distribuido"]}
+            {
+                "cpf": linha["socio_cpf"],
+                "nome": linha["socio_nome"],
+                "valor_distribuido": linha["valor_distribuido"],
+                "pro_labore": linha["pro_labore"],
+                "irrf": linha["irrf"],
+            }
             for linha in self._linhas
             if linha["data_saida"] is None
         ]
@@ -725,7 +731,10 @@ class DistribuicaoAnualView(QWidget):
 
         try:
             for linha, socio_id in resolvidos:
-                repo.salvar_distribuicao(self.conn, empresa_id, ano_base, socio_id, linha["valor_distribuido"])
+                repo.salvar_distribuicao(
+                    self.conn, empresa_id, ano_base, socio_id, linha["valor_distribuido"],
+                    pro_labore=linha.get("pro_labore") or 0.0, irrf=linha.get("irrf") or 0.0,
+                )
         except ValueError as exc:
             QMessageBox.warning(self, "Erro ao importar", str(exc))
             self._carregar()

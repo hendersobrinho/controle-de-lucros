@@ -4,6 +4,7 @@ import openpyxl
 import pytest
 
 from controle_lucros.planilha import (
+    COLUNAS_CADASTRO,
     exportar_modelo_cadastro,
     exportar_modelo_distribuicao,
     exportar_relatorio_excel,
@@ -211,3 +212,77 @@ def test_importar_cadastro_ignora_linhas_sem_empresa_ou_socio(tmp_path):
     wb.save(caminho)
 
     assert importar_cadastro(caminho) == []
+
+
+def test_exportar_e_reimportar_cadastro_completo_com_saida_e_distribuicao(tmp_path):
+    """Cobre a lista completa que precisa dar pra importar de uma vez:
+    capital, cotas, percentual, data de entrada, data de saída, e a
+    distribuição (valor/pró-labore/IRRF) daquele ano."""
+    caminho = tmp_path / "cadastro.xlsx"
+    linhas = [
+        {
+            "numero_chamada": "001", "empresa_nome": "ACME LTDA", "cnpj": "00.000.000/0001-00",
+            "capital_social": 10000, "quantidade_cotas": 1000,
+            "socio_nome": "Fulano de Tal", "socio_cpf": "111.111.111-11", "tipo_pessoa": "fisica",
+            "percentual_capital": 100.0, "cotas_socio": 1000,
+            "data_entrada": "2020-01-01", "data_saida": "2025-06-15",
+            "ano_base": 2025, "valor_distribuido": 50000.0, "pro_labore": 12000.0, "irrf": 1800.0,
+        }
+    ]
+    exportar_modelo_cadastro(caminho, linhas)
+
+    (linha,) = importar_cadastro(caminho)
+    assert linha["data_entrada"] == "2020-01-01"
+    assert linha["data_saida"] == "2025-06-15"
+    assert linha["ano_base"] == 2025
+    assert linha["valor_distribuido"] == 50000.0
+    assert linha["pro_labore"] == 12000.0
+    assert linha["irrf"] == 1800.0
+    assert linha["capital_social"] == 10000
+    assert linha["cotas_socio"] == 1000
+    assert linha["percentual_capital"] == 100.0
+
+
+def test_importar_cadastro_data_de_saida_vazia_fica_none(tmp_path):
+    """Ausência de data de saída não pode virar "saiu hoje" — precisa ficar
+    None, sinalizando que o sócio continua ativo."""
+    caminho = tmp_path / "cadastro.xlsx"
+    exportar_modelo_cadastro(caminho, [
+        {"numero_chamada": "001", "empresa_nome": "ACME LTDA", "socio_nome": "Fulano", "socio_cpf": "111.111.111-11"}
+    ])
+    (linha,) = importar_cadastro(caminho)
+    assert linha["data_saida"] is None
+    assert linha["ano_base"] is None
+
+
+def test_importar_cadastro_ano_base_invalido_da_erro_claro(tmp_path):
+    caminho = tmp_path / "cadastro.csv"
+    with open(caminho, "w", newline="", encoding="utf-8") as f:
+        escritor = csv.writer(f, delimiter=";")
+        escritor.writerow(COLUNAS_CADASTRO)
+        escritor.writerow(["001", "ACME LTDA", "", "1000", "100", "Fulano", "111.111.111-11", "fisica", "100", "100", "", "", "não é ano", "0", "0", "0"])
+
+    with pytest.raises(ValueError, match="ano base"):
+        importar_cadastro(caminho)
+
+
+def test_exportar_e_reimportar_modelo_distribuicao_com_pro_labore_e_irrf(tmp_path):
+    caminho = tmp_path / "distribuicao.xlsx"
+    exportar_modelo_distribuicao(caminho, [
+        {"cpf": "111.111.111-11", "nome": "Fulano", "valor_distribuido": 30000, "pro_labore": 12000, "irrf": 1800},
+    ])
+    (linha,) = importar_distribuicao(caminho)
+    assert linha["valor_distribuido"] == 30000
+    assert linha["pro_labore"] == 12000
+    assert linha["irrf"] == 1800
+
+
+def test_importar_distribuicao_sem_pro_labore_e_irrf_fica_zero(tmp_path):
+    caminho = tmp_path / "distribuicao.csv"
+    with open(caminho, "w", newline="", encoding="utf-8") as f:
+        escritor = csv.writer(f, delimiter=";")
+        escritor.writerow(["CPF", "Sócio", "Valor Distribuído"])
+        escritor.writerow(["111.111.111-11", "Fulano", "1000"])
+    (linha,) = importar_distribuicao(caminho)
+    assert linha["pro_labore"] == 0.0
+    assert linha["irrf"] == 0.0

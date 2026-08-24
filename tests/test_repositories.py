@@ -411,6 +411,11 @@ def _linha_cadastro(**overrides) -> dict:
         percentual_capital=100.0,
         cotas_socio=1000,
         data_entrada="2024-01-01",
+        data_saida=None,
+        ano_base=None,
+        valor_distribuido=0.0,
+        pro_labore=0.0,
+        irrf=0.0,
     )
     dados.update(overrides)
     return dados
@@ -434,7 +439,7 @@ def test_importacao_cadastro_reconhece_empresa_e_socio_existentes(conn):
     assert pronta["socio_id"] == socio_id
 
     aplicado = repo.aplicar_importacao_cadastro(conn, resultado["prontas"])
-    assert aplicado == {"empresas_criadas": 0, "vinculos_criados": 1, "vinculos_ja_existentes": 0}
+    assert aplicado == {"empresas_criadas": 0, "vinculos_criados": 1, "vinculos_ja_existentes": 0, "vinculos_encerrados": 0, "distribuicoes_lancadas": 0}
     vinculos = repo.listar_vinculos_empresa(conn, empresa_id)
     assert len(vinculos) == 1
     assert vinculos[0].socio_id == socio_id
@@ -454,7 +459,7 @@ def test_importacao_cadastro_nao_duplica_vinculo_ja_ativo(conn):
 
     resultado = repo.preparar_importacao_cadastro(conn, [_linha_cadastro()])
     aplicado = repo.aplicar_importacao_cadastro(conn, resultado["prontas"])
-    assert aplicado == {"empresas_criadas": 0, "vinculos_criados": 0, "vinculos_ja_existentes": 1}
+    assert aplicado == {"empresas_criadas": 0, "vinculos_criados": 0, "vinculos_ja_existentes": 1, "vinculos_encerrados": 0, "distribuicoes_lancadas": 0}
     assert len(repo.listar_vinculos_empresa(conn, empresa_id)) == 1
 
 
@@ -857,3 +862,103 @@ def test_periodo_trancado_bloqueia_alteracao_contratual(conn):
     repo.fechar_periodo(conn, empresa_id, 2023)
     with pytest.raises(ValueError, match="trancado"):
         repo.excluir_alteracao(conn, alteracao_id)
+
+
+def test_importacao_cadastro_registra_saida_de_socio_ja_vinculado(conn):
+    """A lista completa que precisa dar pra importar: se a linha da
+    planilha trouxer data de saída pra um sócio que JÁ está vinculado
+    (importado antes, ou cadastrado manualmente), o vínculo é encerrado —
+    não fica preso achando que "já existe" e ignorando a saída."""
+    empresa_id = _nova_empresa(conn)
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="Fulano de Tal", cpf="111.111.111-11"))
+    repo.salvar_vinculo(
+        conn,
+        VinculoSocietario(
+            id=None, empresa_id=empresa_id, socio_id=socio_id,
+            percentual_capital=100.0, quantidade_cotas=1000,
+            data_entrada="2020-01-01", data_saida=None,
+        ),
+    )
+
+    resultado = repo.preparar_importacao_cadastro(conn, [_linha_cadastro(data_saida="2025-06-15")])
+    aplicado = repo.aplicar_importacao_cadastro(conn, resultado["prontas"])
+
+    assert aplicado["vinculos_criados"] == 0
+    assert aplicado["vinculos_ja_existentes"] == 1
+    assert aplicado["vinculos_encerrados"] == 1
+
+    (vinculo,) = repo.listar_vinculos_empresa(conn, empresa_id)
+    assert vinculo.data_saida == "2025-06-15"
+
+
+def test_importacao_cadastro_cria_vinculo_ja_encerrado_quando_entrada_e_saida_vem_juntas(conn):
+    """Sócio novo que já entrou e saiu dentro do período coberto pela
+    planilha (raro, mas acontece) — precisa criar o vínculo já fechado."""
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="Fulano de Tal", cpf="111.111.111-11"))
+    resultado = repo.preparar_importacao_cadastro(
+        conn, [_linha_cadastro(data_entrada="2025-01-01", data_saida="2025-06-15")]
+    )
+    aplicado = repo.aplicar_importacao_cadastro(conn, resultado["prontas"])
+
+    assert aplicado["vinculos_criados"] == 1
+    assert aplicado["vinculos_encerrados"] == 1
+
+    (vinculo,) = repo.listar_vinculos_empresa(conn, next(e.id for e in repo.listar_empresas(conn)))
+    assert vinculo.data_entrada == "2025-01-01"
+    assert vinculo.data_saida == "2025-06-15"
+
+
+def test_importacao_cadastro_lanca_distribuicao_do_ano(conn):
+    empresa_id = _nova_empresa(conn)
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="Fulano de Tal", cpf="111.111.111-11"))
+
+    resultado = repo.preparar_importacao_cadastro(
+        conn,
+        [_linha_cadastro(ano_base=2025, valor_distribuido=50000.0, pro_labore=12000.0, irrf=1800.0)],
+    )
+    aplicado = repo.aplicar_importacao_cadastro(conn, resultado["prontas"])
+
+    assert aplicado["distribuicoes_lancadas"] == 1
+    (distribuicao,) = repo.listar_distribuicoes(conn, empresa_id, 2025)
+    assert distribuicao.socio_id == socio_id
+    assert distribuicao.valor_distribuido == 50000.0
+    assert distribuicao.pro_labore == 12000.0
+    assert distribuicao.irrf == 1800.0
+
+
+def test_importacao_cadastro_sem_ano_base_nao_lanca_distribuicao(conn):
+    """Sem ano base não tem como saber a qual ano o valor pertence — a
+    linha vira só cadastro/vínculo, sem lançar distribuição nenhuma."""
+    _nova_empresa(conn)
+    resultado = repo.preparar_importacao_cadastro(conn, [_linha_cadastro(valor_distribuido=50000.0)])
+    aplicado = repo.aplicar_importacao_cadastro(conn, resultado["prontas"])
+    assert aplicado["distribuicoes_lancadas"] == 0
+
+
+def test_excluir_vinculo_bloqueado_por_alteracao_fechada(conn):
+    """Excluir era mais permissivo que editar: dava pra excluir um vínculo
+    amarrado a uma alteração contratual fechada, mesmo sem poder editá-lo.
+    Exclusão é uma edição mais drástica — precisa da mesma trava."""
+    empresa_id = _nova_empresa(conn)
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="Fulano", cpf="111.111.111-11"))
+    alteracao_id = repo.salvar_alteracao(
+        conn, AlteracaoContratual(id=None, empresa_id=empresa_id, numero=1, data="2024-01-10",
+                                   nome_empresa="ACME LTDA", capital_social=10000, quantidade_cotas=1000,
+                                   descricao="Fundação")
+    )
+    vinculo_id = repo.salvar_vinculo(
+        conn,
+        VinculoSocietario(
+            id=None, empresa_id=empresa_id, socio_id=socio_id,
+            percentual_capital=100.0, quantidade_cotas=1000,
+            data_entrada="2024-01-10", data_saida=None, alteracao_entrada_id=alteracao_id,
+        ),
+    )
+    repo.fechar_alteracao(conn, alteracao_id)
+
+    with pytest.raises(ValueError):
+        repo.excluir_vinculo(conn, vinculo_id)
+
+    repo.reabrir_alteracao(conn, alteracao_id)
+    repo.excluir_vinculo(conn, vinculo_id)
+    assert repo.listar_vinculos_empresa(conn, empresa_id) == []

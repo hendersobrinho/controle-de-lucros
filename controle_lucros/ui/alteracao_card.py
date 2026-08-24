@@ -160,6 +160,18 @@ class AlteracaoCard(QWidget):
         self.btn_salvar.setProperty("role", "primario")
         self.btn_salvar.clicked.connect(self._salvar)
 
+        self.btn_cancelar = QPushButton("Cancelar")
+        self.btn_cancelar.clicked.connect(self._cancelar)
+
+        self.btn_excluir = QPushButton("Excluir alteração")
+        self.btn_excluir.setProperty("role", "perigo")
+        self.btn_excluir.clicked.connect(self._excluir)
+
+        linha_salvar = QHBoxLayout()
+        linha_salvar.addWidget(self.btn_salvar, 1)
+        linha_salvar.addWidget(self.btn_cancelar)
+        linha_salvar.addWidget(self.btn_excluir)
+
         secao_socios = QLabel("Sócios após esta alteração")
         secao_socios.setProperty("role", "secao")
 
@@ -187,7 +199,7 @@ class AlteracaoCard(QWidget):
         miolo.addLayout(cabecalho)
         miolo.addWidget(_hairline())
         miolo.addLayout(form)
-        miolo.addWidget(self.btn_salvar)
+        miolo.addLayout(linha_salvar)
         miolo.addWidget(_hairline())
         miolo.addWidget(secao_socios)
         miolo.addWidget(self.tabela_socios)
@@ -241,6 +253,10 @@ class AlteracaoCard(QWidget):
         self.btn_incluir_socio.setEnabled(editavel and self.alteracao is not None)
         self.btn_saida_socio.setEnabled(editavel and self.alteracao is not None)
 
+        self.btn_cancelar.setVisible(self.alteracao is None)
+        self.btn_excluir.setVisible(self.alteracao is not None)
+        self.btn_excluir.setEnabled(editavel and self.alteracao is not None)
+
         self._preencher_tabela_socios()
 
     def _preencher_tabela_socios(self) -> None:
@@ -293,6 +309,31 @@ class AlteracaoCard(QWidget):
         registro.id = novo_id
         self.alteracao = registro
         self._preencher()
+        self._ao_mudar(self)
+
+    def _cancelar(self) -> None:
+        """Só existe no rascunho — descarta o card sem gravar nada no banco
+        e volta pra última alteração de verdade (ou o carrossel vazio, se
+        essa empresa ainda não tiver nenhuma)."""
+        if self.alteracao is not None:
+            return
+        self._ao_mudar(self)
+
+    def _excluir(self) -> None:
+        if self.alteracao is None:
+            return
+        resposta = QMessageBox.question(
+            self,
+            "Excluir alteração contratual",
+            f"Excluir a alteração contratual Nº {self.alteracao.numero}? Isso não pode ser desfeito.",
+        )
+        if resposta != QMessageBox.Yes:
+            return
+        try:
+            repo.excluir_alteracao(self.conn, self.alteracao.id)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Erro ao excluir", str(exc))
+            return
         self._ao_mudar(self)
 
     def _alternar_trancamento(self) -> None:

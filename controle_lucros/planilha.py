@@ -10,34 +10,45 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-COLUNAS_DISTRIBUICAO = ["CPF", "Sócio", "Valor Distribuído"]
+COLUNAS_DISTRIBUICAO = ["CPF", "Sócio", "Valor Distribuído", "Pró-labore", "IRRF"]
 
 COLUNAS_CADASTRO = [
     "Nº Chamada", "Empresa", "CNPJ", "Capital Social", "Qtd. Cotas da Empresa",
     "Sócio", "CPF/CNPJ do Sócio", "Tipo (física/jurídica)",
-    "% Capital do Sócio", "Cotas do Sócio", "Data de Entrada",
+    "% Capital do Sócio", "Cotas do Sócio", "Data de Entrada", "Data de Saída",
+    "Ano Base", "Valor Distribuído", "Pró-labore", "IRRF",
 ]
 
 
 def exportar_modelo_distribuicao(caminho: Path, linhas: list[dict]) -> None:
     """Gera um .xlsx pronto pra preencher: uma linha por sócio informado, já
-    com CPF e nome preenchidos — só falta digitar o valor distribuído."""
+    com CPF e nome preenchidos — só falta digitar o valor distribuído (e,
+    se houver, pró-labore/IRRF)."""
     workbook = openpyxl.Workbook()
     aba = workbook.active
     aba.title = "Distribuição"
     aba.append(COLUNAS_DISTRIBUICAO)
     for linha in linhas:
-        aba.append([linha.get("cpf", ""), linha.get("nome", ""), linha.get("valor_distribuido") or 0])
-    for coluna, largura in zip("ABC", (20, 32, 20)):
+        aba.append(
+            [
+                linha.get("cpf", ""),
+                linha.get("nome", ""),
+                linha.get("valor_distribuido") or 0,
+                linha.get("pro_labore") or 0,
+                linha.get("irrf") or 0,
+            ]
+        )
+    for coluna, largura in zip("ABCDE", (20, 32, 18, 14, 14)):
         aba.column_dimensions[coluna].width = largura
     workbook.save(caminho)
 
 
 def importar_distribuicao(caminho: Path) -> list[dict]:
     """Lê uma planilha (.xlsx ou .csv) com colunas CPF / Sócio / Valor
-    Distribuído (nessa ordem ou não, identificadas pelo cabeçalho) e retorna
-    uma lista de {"cpf", "nome", "valor_distribuido"}. Não valida contra o
-    banco — isso é responsabilidade de quem chama."""
+    Distribuído / Pró-labore / IRRF (nessa ordem ou não, identificadas pelo
+    cabeçalho — as duas últimas são opcionais) e retorna uma lista de
+    {"cpf", "nome", "valor_distribuido", "pro_labore", "irrf"}. Não valida
+    contra o banco — isso é responsabilidade de quem chama."""
     caminho = Path(caminho)
     linhas_brutas = _ler_csv(caminho) if caminho.suffix.lower() == ".csv" else _ler_xlsx(caminho)
     linhas_brutas = [linha for linha in linhas_brutas if any(c not in (None, "") for c in linha)]
@@ -49,6 +60,8 @@ def importar_distribuicao(caminho: Path) -> list[dict]:
     indice_cpf = _indice_coluna(cabecalho, ["cpf"])
     indice_nome = _indice_coluna(cabecalho, ["sócio", "socio", "nome"])
     indice_valor = _indice_coluna(cabecalho, ["valor distribuído", "valor distribuido", "valor"])
+    indice_pro_labore = _indice_coluna(cabecalho, ["pró-labore", "pro-labore", "pro labore", "prolabore"])
+    indice_irrf = _indice_coluna(cabecalho, ["irrf"])
 
     if indice_valor is None:
         raise ValueError(
@@ -57,6 +70,14 @@ def importar_distribuicao(caminho: Path) -> list[dict]:
         )
     if indice_cpf is None and indice_nome is None:
         raise ValueError('A planilha precisa ter uma coluna "CPF" ou "Sócio" pra identificar cada linha.')
+
+    def numero_opcional(linha: list, indice: int | None, numero_linha: int, rotulo: str) -> float:
+        if indice is None or indice >= len(linha):
+            return 0.0
+        try:
+            return _para_numero(linha[indice])
+        except ValueError:
+            raise ValueError(f'Linha {numero_linha}: {rotulo} inválido "{linha[indice]}".') from None
 
     resultado = []
     for numero_linha, linha in enumerate(linhas_brutas[1:], start=2):
@@ -69,7 +90,15 @@ def importar_distribuicao(caminho: Path) -> list[dict]:
             raise ValueError(f'Linha {numero_linha}: valor inválido "{valor_bruto}".') from None
         if not cpf and not nome:
             continue
-        resultado.append({"cpf": cpf, "nome": nome, "valor_distribuido": valor})
+        resultado.append(
+            {
+                "cpf": cpf,
+                "nome": nome,
+                "valor_distribuido": valor,
+                "pro_labore": numero_opcional(linha, indice_pro_labore, numero_linha, "pró-labore"),
+                "irrf": numero_opcional(linha, indice_irrf, numero_linha, "IRRF"),
+            }
+        )
     return resultado
 
 
@@ -109,7 +138,9 @@ def exportar_modelo_cadastro(caminho: Path, linhas: list[dict] | None = None) ->
     """Gera um .xlsx pronto pra preencher com o cadastro em massa de empresas,
     sócios e vínculos: uma linha por (empresa, sócio). Sem linhas, sai só com
     o cabeçalho — útil pra cadastrar do zero. Com linhas (cadastro atual),
-    serve de referência/edição."""
+    serve de referência/edição. Data de Saída, Ano Base, Valor Distribuído,
+    Pró-labore e IRRF são opcionais — só preenche quem tiver saído da
+    sociedade ou tiver uma distribuição daquele ano pra lançar junto."""
     workbook = openpyxl.Workbook()
     aba = workbook.active
     aba.title = "Cadastro"
@@ -128,9 +159,16 @@ def exportar_modelo_cadastro(caminho: Path, linhas: list[dict] | None = None) ->
                 linha.get("percentual_capital") or 0,
                 linha.get("cotas_socio") or 0,
                 linha.get("data_entrada", ""),
+                linha.get("data_saida", ""),
+                linha.get("ano_base", ""),
+                linha.get("valor_distribuido") or 0,
+                linha.get("pro_labore") or 0,
+                linha.get("irrf") or 0,
             ]
         )
-    for coluna, largura in zip("ABCDEFGHIJK", (10, 28, 20, 16, 16, 28, 20, 14, 14, 14, 14)):
+    for coluna, largura in zip(
+        "ABCDEFGHIJKLMNOP", (10, 28, 20, 16, 16, 28, 20, 14, 14, 14, 14, 14, 10, 16, 14, 14)
+    ):
         aba.column_dimensions[coluna].width = largura
     workbook.save(caminho)
 
@@ -160,6 +198,11 @@ def importar_cadastro(caminho: Path) -> list[dict]:
         "percentual_capital": _indice_coluna(cabecalho, ["% capital do sócio", "% capital do socio", "percentual capital", "% capital"]),
         "cotas_socio": _indice_coluna(cabecalho, ["cotas do sócio", "cotas do socio"]),
         "data_entrada": _indice_coluna(cabecalho, ["data de entrada", "data entrada"]),
+        "data_saida": _indice_coluna(cabecalho, ["data de saída", "data de saida", "data saída", "data saida"]),
+        "ano_base": _indice_coluna(cabecalho, ["ano base", "ano_base", "ano"]),
+        "valor_distribuido": _indice_coluna(cabecalho, ["valor distribuído", "valor distribuido", "valor"]),
+        "pro_labore": _indice_coluna(cabecalho, ["pró-labore", "pro-labore", "pro labore", "prolabore"]),
+        "irrf": _indice_coluna(cabecalho, ["irrf"]),
     }
 
     if idx["empresa_nome"] is None:
@@ -176,6 +219,15 @@ def importar_cadastro(caminho: Path) -> list[dict]:
             return ""
         return str(linha[i]).strip()
 
+    def numero_opcional(linha: list, chave: str, numero_linha: int, rotulo: str) -> float:
+        i = idx[chave]
+        if i is None or i >= len(linha) or linha[i] in (None, ""):
+            return 0.0
+        try:
+            return _para_numero(linha[i])
+        except ValueError:
+            raise ValueError(f'Linha {numero_linha}: {rotulo} inválido "{linha[i]}".') from None
+
     resultado = []
     for numero_linha, linha in enumerate(linhas_brutas[1:], start=2):
         empresa_nome = texto(linha, "empresa_nome")
@@ -183,17 +235,16 @@ def importar_cadastro(caminho: Path) -> list[dict]:
         if not empresa_nome or not socio_nome:
             continue
 
-        i_capital = idx["capital_social"]
-        i_cotas = idx["quantidade_cotas"]
-        i_pct = idx["percentual_capital"]
-        i_cotas_socio = idx["cotas_socio"]
         try:
-            capital_social = _para_numero(linha[i_capital]) if i_capital is not None and i_capital < len(linha) else 0.0
-            quantidade_cotas = _para_numero(linha[i_cotas]) if i_cotas is not None and i_cotas < len(linha) else 0.0
-            percentual_capital = _para_numero(linha[i_pct]) if i_pct is not None and i_pct < len(linha) else 0.0
-            cotas_socio = _para_numero(linha[i_cotas_socio]) if i_cotas_socio is not None and i_cotas_socio < len(linha) else 0.0
+            capital_social = numero_opcional(linha, "capital_social", numero_linha, "capital social")
+            quantidade_cotas = numero_opcional(linha, "quantidade_cotas", numero_linha, "quantidade de cotas")
+            percentual_capital = numero_opcional(linha, "percentual_capital", numero_linha, "percentual de capital")
+            cotas_socio = numero_opcional(linha, "cotas_socio", numero_linha, "cotas do sócio")
+            valor_distribuido = numero_opcional(linha, "valor_distribuido", numero_linha, "valor distribuído")
+            pro_labore = numero_opcional(linha, "pro_labore", numero_linha, "pró-labore")
+            irrf = numero_opcional(linha, "irrf", numero_linha, "IRRF")
         except ValueError:
-            raise ValueError(f"Linha {numero_linha}: valor numérico inválido.") from None
+            raise
 
         i_data = idx["data_entrada"]
         data_bruta = linha[i_data] if i_data is not None and i_data < len(linha) else None
@@ -201,6 +252,22 @@ def importar_cadastro(caminho: Path) -> list[dict]:
             data_entrada = _para_data(data_bruta)
         except ValueError:
             raise ValueError(f'Linha {numero_linha}: data de entrada inválida "{data_bruta}".') from None
+
+        i_saida = idx["data_saida"]
+        saida_bruta = linha[i_saida] if i_saida is not None and i_saida < len(linha) else None
+        try:
+            data_saida = _para_data_opcional(saida_bruta)
+        except ValueError:
+            raise ValueError(f'Linha {numero_linha}: data de saída inválida "{saida_bruta}".') from None
+
+        i_ano = idx["ano_base"]
+        ano_bruto = linha[i_ano] if i_ano is not None and i_ano < len(linha) else None
+        ano_base = None
+        if ano_bruto not in (None, ""):
+            try:
+                ano_base = int(_para_numero(ano_bruto))
+            except ValueError:
+                raise ValueError(f'Linha {numero_linha}: ano base inválido "{ano_bruto}".') from None
 
         tipo_bruto = texto(linha, "tipo_pessoa").lower()
         tipo_pessoa = "juridica" if tipo_bruto.startswith(("j", "pj")) else "fisica"
@@ -216,6 +283,11 @@ def importar_cadastro(caminho: Path) -> list[dict]:
                 "socio_cpf": texto(linha, "socio_cpf"),
                 "tipo_pessoa": tipo_pessoa,
                 "percentual_capital": percentual_capital,
+                "data_saida": data_saida,
+                "ano_base": ano_base,
+                "valor_distribuido": valor_distribuido,
+                "pro_labore": pro_labore,
+                "irrf": irrf,
                 "cotas_socio": cotas_socio,
                 "data_entrada": data_entrada,
             }
@@ -223,14 +295,12 @@ def importar_cadastro(caminho: Path) -> list[dict]:
     return resultado
 
 
-def _para_data(valor) -> str:
+def _converter_data(valor) -> str:
     """Aceita datetime/date (openpyxl já converte células de data) ou texto
-    em dd/mm/aaaa ou aaaa-mm-dd. Vazio vira hoje — toda linha de vínculo
-    precisa de uma data de entrada."""
+    em dd/mm/aaaa ou aaaa-mm-dd. Não aceita vazio — quem chama decide o que
+    fazer nesse caso (ver _para_data e _para_data_opcional)."""
     import datetime as _dt
 
-    if valor is None or valor == "":
-        return _dt.date.today().isoformat()
     if isinstance(valor, _dt.datetime):
         return valor.date().isoformat()
     if isinstance(valor, _dt.date):
@@ -240,6 +310,24 @@ def _para_data(valor) -> str:
         dia, mes, ano = texto.split("/")
         return _dt.date(int(ano), int(mes), int(dia)).isoformat()
     return _dt.date.fromisoformat(texto).isoformat()
+
+
+def _para_data(valor) -> str:
+    """Vazio vira hoje — toda linha de vínculo precisa de uma data de
+    entrada, então na ausência de uma informada assume-se a data atual."""
+    import datetime as _dt
+
+    if valor is None or valor == "":
+        return _dt.date.today().isoformat()
+    return _converter_data(valor)
+
+
+def _para_data_opcional(valor) -> str | None:
+    """Vazio vira None — ausência de data de saída significa que o sócio
+    continua ativo, bem diferente de "saiu hoje"."""
+    if valor is None or valor == "":
+        return None
+    return _converter_data(valor)
 
 
 def exportar_relatorio_excel(

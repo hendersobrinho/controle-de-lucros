@@ -192,11 +192,13 @@ class ImportacaoCadastroView(QWidget):
         titulo.setProperty("role", "secao")
 
         explicacao = QLabel(
-            "Cadastre empresas, sócios e vínculos de uma vez a partir de uma planilha — uma linha por "
-            "(empresa, sócio). A empresa é reconhecida pelo nº de chamada, CNPJ ou nome e é criada "
-            "automaticamente se ainda não existir; o sócio é reconhecido pelo CPF ou nome e nunca é "
-            "criado sem confirmação, pra nunca duplicar cadastro. Comece exportando o modelo, preencha "
-            "e importe de volta."
+            "Cadastre empresas, sócios, vínculos e distribuição de uma vez a partir de uma planilha — uma "
+            "linha por (empresa, sócio). A empresa é reconhecida pelo nº de chamada, CNPJ ou nome e é "
+            "criada automaticamente se ainda não existir; o sócio é reconhecido pelo CPF ou nome e nunca é "
+            "criado sem confirmação, pra nunca duplicar cadastro. Capital, cotas, percentual e data de "
+            "entrada são obrigatórios; data de saída, ano base, valor distribuído, pró-labore e IRRF são "
+            "opcionais — preencha só quem tiver saído da sociedade ou tiver uma distribuição daquele ano "
+            "pra lançar junto. Comece exportando o modelo, preencha e importe de volta."
         )
         explicacao.setWordWrap(True)
         explicacao.setProperty("role", "subtitulo")
@@ -330,7 +332,9 @@ class ImportacaoCadastroView(QWidget):
         resumo = (
             f"{aplicado['empresas_criadas']} empresa(s) nova(s) · "
             f"{aplicado['vinculos_criados']} vínculo(s) criado(s) · "
-            f"{aplicado['vinculos_ja_existentes']} já existiam (ignorados)."
+            f"{aplicado['vinculos_ja_existentes']} já existiam (ignorados) · "
+            f"{aplicado['vinculos_encerrados']} vínculo(s) com saída registrada · "
+            f"{aplicado['distribuicoes_lancadas']} distribuição(ões) lançada(s)."
         )
         if nao_aplicadas > 0:
             resumo += f"\n{nao_aplicadas} linha(s) não foram aplicadas."

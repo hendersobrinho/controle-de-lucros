@@ -376,11 +376,16 @@ class SociosTab(QWidget):
         self.btn_encerrar.setProperty("role", "perigo")
         self.btn_encerrar.clicked.connect(self._encerrar_vinculo)
 
+        self.btn_excluir_vinculo = QPushButton("Excluir vínculo")
+        self.btn_excluir_vinculo.setProperty("role", "perigo")
+        self.btn_excluir_vinculo.clicked.connect(self._excluir_vinculo)
+
         botoes = QHBoxLayout()
         botoes.addWidget(self.btn_associar)
         botoes.addWidget(self.btn_editar)
         botoes.addWidget(self.btn_atualizar_cotas)
         botoes.addWidget(self.btn_encerrar)
+        botoes.addWidget(self.btn_excluir_vinculo)
         botoes.addStretch()
         col.addLayout(botoes)
 
@@ -462,7 +467,11 @@ class SociosTab(QWidget):
         resposta = QMessageBox.question(self, "Excluir", "Confirma a exclusão do sócio selecionado?")
         if resposta != QMessageBox.Yes:
             return
-        repo.excluir_socio(self.conn, self._socio_atual_id)
+        try:
+            repo.excluir_socio(self.conn, self._socio_atual_id)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Erro ao excluir", str(exc))
+            return
         self._novo_socio()
         self.atualizar()
 
@@ -531,6 +540,7 @@ class SociosTab(QWidget):
         self.btn_editar.setEnabled(self._vinculo_selecionado() is not None)
         self.btn_atualizar_cotas.setEnabled(vinculo_ativo_selecionado)
         self.btn_encerrar.setEnabled(vinculo_ativo_selecionado)
+        self.btn_excluir_vinculo.setEnabled(self._vinculo_selecionado() is not None)
 
     def _vinculo_selecionado(self) -> VinculoSocietario | None:
         linhas = self.tabela_vinculos.selectionModel().selectedRows() if self.tabela_vinculos.selectionModel() else []
@@ -611,5 +621,30 @@ class SociosTab(QWidget):
             repo.encerrar_vinculo_registrando_alteracao(self.conn, vinculo, data_saida, descricao or "Saída de sócio")
         except ValueError as exc:
             QMessageBox.warning(self, "Erro ao encerrar vínculo", str(exc))
+            return
+        self._atualizar_painel_vinculos()
+
+    def _excluir_vinculo(self) -> None:
+        """Apaga o vínculo de vez — diferente de "Encerrar", que só marca a
+        saída preservando o histórico. Serve pra corrigir um vínculo criado
+        por engano (empresa errada, sócio errado, etc.), não pra registrar
+        uma saída de verdade."""
+        vinculo = self._vinculo_selecionado()
+        if vinculo is None:
+            return
+        empresa = repo.buscar_empresa(self.conn, vinculo.empresa_id)
+        resposta = QMessageBox.question(
+            self,
+            "Excluir vínculo",
+            f"Excluir de vez o vínculo com {empresa.nome if empresa else '?'}? Isso apaga o registro, "
+            "diferente de \"Encerrar vínculo\" (que preserva o histórico marcando a saída). Use isso só "
+            "pra corrigir um vínculo cadastrado por engano.",
+        )
+        if resposta != QMessageBox.Yes:
+            return
+        try:
+            repo.excluir_vinculo(self.conn, vinculo.id)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Erro ao excluir vínculo", str(exc))
             return
         self._atualizar_painel_vinculos()

@@ -408,6 +408,8 @@ def excluir_vinculo(conn: sqlite3.Connection, vinculo_id: int) -> None:
         _garantir_periodo_aberto(conn, vinculo.empresa_id, vinculo.data_entrada)
         if vinculo.data_saida is not None:
             _garantir_periodo_aberto(conn, vinculo.empresa_id, vinculo.data_saida)
+        _garantir_alteracao_editavel(conn, vinculo.alteracao_entrada_id)
+        _garantir_alteracao_editavel(conn, vinculo.alteracao_saida_id)
     conn.execute("DELETE FROM vinculo_societario WHERE id=?", (vinculo_id,))
     _registrar_log(conn, "excluir", "vinculo_societario", vinculo_id, "")
     conn.commit()
@@ -895,12 +897,17 @@ def preparar_importacao_cadastro(conn: sqlite3.Connection, linhas: list[dict]) -
 def aplicar_importacao_cadastro(conn: sqlite3.Connection, linhas_resolvidas: list[dict]) -> dict:
     """Aplica linhas já resolvidas (empresa existente em "empresa_existente",
     ou dados pra criar uma nova; "socio_id" já definido): cria a empresa se
-    for nova (reaproveitando entre linhas da mesma planilha) e cria o vínculo
+    for nova (reaproveitando entre linhas da mesma planilha), cria o vínculo
     só se o sócio ainda não tiver vínculo ativo com essa empresa — nunca
-    duplica nem a empresa nem o vínculo."""
+    duplica nem a empresa nem o vínculo. Se a linha trouxer "data_saida",
+    encerra o vínculo (o recém-criado ou o que já existia). Se trouxer
+    "ano_base" com valor distribuído, pró-labore ou IRRF, lança a
+    distribuição daquele ano pra esse sócio."""
     empresas_criadas = 0
     vinculos_criados = 0
     vinculos_ja_existentes = 0
+    vinculos_encerrados = 0
+    distribuicoes_lancadas = 0
     cache_empresa_nova: dict[tuple[str, str], int] = {}
 
     for linha in linhas_resolvidas:
@@ -925,32 +932,55 @@ def aplicar_importacao_cadastro(conn: sqlite3.Connection, linhas_resolvidas: lis
                 cache_empresa_nova[chave] = empresa_id
                 empresas_criadas += 1
 
-        ja_vinculado = any(
-            v.socio_id == linha["socio_id"] and v.data_saida is None
-            for v in listar_vinculos_empresa(conn, empresa_id)
-        )
-        if ja_vinculado:
-            vinculos_ja_existentes += 1
-            continue
-
-        salvar_vinculo(
-            conn,
-            VinculoSocietario(
-                id=None,
-                empresa_id=empresa_id,
-                socio_id=linha["socio_id"],
-                percentual_capital=linha["percentual_capital"],
-                quantidade_cotas=linha["cotas_socio"] or None,
-                data_entrada=linha["data_entrada"],
-                data_saida=None,
+        vinculo_ativo = next(
+            (
+                v
+                for v in listar_vinculos_empresa(conn, empresa_id)
+                if v.socio_id == linha["socio_id"] and v.data_saida is None
             ),
+            None,
         )
-        vinculos_criados += 1
+
+        if vinculo_ativo is None:
+            novo_id = salvar_vinculo(
+                conn,
+                VinculoSocietario(
+                    id=None,
+                    empresa_id=empresa_id,
+                    socio_id=linha["socio_id"],
+                    percentual_capital=linha["percentual_capital"],
+                    quantidade_cotas=linha["cotas_socio"] or None,
+                    data_entrada=linha["data_entrada"],
+                    data_saida=None,
+                ),
+            )
+            vinculos_criados += 1
+            vinculo_ativo = buscar_vinculo(conn, novo_id)
+        else:
+            vinculos_ja_existentes += 1
+
+        if linha.get("data_saida"):
+            encerrar_vinculo(conn, vinculo_ativo.id, linha["data_saida"], None)
+            vinculos_encerrados += 1
+
+        if linha.get("ano_base") and (linha.get("valor_distribuido") or linha.get("pro_labore") or linha.get("irrf")):
+            salvar_distribuicao(
+                conn,
+                empresa_id,
+                linha["ano_base"],
+                linha["socio_id"],
+                linha.get("valor_distribuido") or 0.0,
+                pro_labore=linha.get("pro_labore") or 0.0,
+                irrf=linha.get("irrf") or 0.0,
+            )
+            distribuicoes_lancadas += 1
 
     return {
         "empresas_criadas": empresas_criadas,
         "vinculos_criados": vinculos_criados,
         "vinculos_ja_existentes": vinculos_ja_existentes,
+        "vinculos_encerrados": vinculos_encerrados,
+        "distribuicoes_lancadas": distribuicoes_lancadas,
     }
 
 

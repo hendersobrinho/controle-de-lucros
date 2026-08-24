@@ -66,7 +66,7 @@ def test_mesmo_socio_novo_em_varias_empresas_vira_um_cartao_so(conn, monkeypatch
     assert {r["socio_id"] for r in resolvidos} == {socios[0].id}
 
     aplicado = repo.aplicar_importacao_cadastro(conn, resultado["prontas"] + resolvidos)
-    assert aplicado == {"empresas_criadas": 3, "vinculos_criados": 3, "vinculos_ja_existentes": 0}
+    assert aplicado == {"empresas_criadas": 3, "vinculos_criados": 3, "vinculos_ja_existentes": 0, "vinculos_encerrados": 0, "distribuicoes_lancadas": 0}
 
     for empresa in repo.listar_empresas(conn):
         (vinculo,) = repo.listar_vinculos_empresa(conn, empresa.id)
