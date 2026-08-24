@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+data/
+*.db
+*.db-shm
+*.db-wal
+.pytest_cache/
+
+# saída do PyInstaller — gerada localmente a cada build, não é código-fonte
+build/
+dist/

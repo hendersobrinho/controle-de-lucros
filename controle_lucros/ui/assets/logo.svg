@@ -1,0 +1,31 @@
+<svg width="100%" viewBox="0 0 680 680" xmlns="http://www.w3.org/2000/svg" role="img"><title>Logo cifrão em estilo flat com sombra longa sobre fundo circular azul</title><desc>Círculo azul com anel externo mais claro, sombra diagonal longa e cifrão branco grande, bem centralizado, em estilo flat com leve efeito 3D</desc>
+<defs>
+<clipPath id="circleClip3">
+<circle cx="340" cy="340" r="300"/>
+</clipPath>
+</defs>
+
+<circle cx="340" cy="340" r="300" fill="#4fa3e3"/>
+
+<circle cx="340" cy="340" r="255" fill="#2f7fd6"/>
+
+<g clip-path="url(#circleClip3)">
+<polygon points="340,340 640,340 640,640 340,640" fill="#000000" opacity="0.14"/>
+<polygon points="340,340 340,640 40,640" fill="#000000" opacity="0.06"/>
+</g>
+
+<circle cx="340" cy="340" r="300" fill="none" stroke="#1e40af" stroke-width="1" opacity="0.15"/>
+
+<g transform="translate(348,348)">
+<g fill="#1a3a66" opacity="0.25">
+<path d="M91 -87 C91 -114 55 -129 8 -129 C-47 -129 -79 -107 -79 -70 C-79 -34 -40 -23 8 -13 C62 -1 99 17 99 60 C99 104 59 130 8 130 C-47 130 -79 108 -79 75" fill="none" stroke="#1a3a66" stroke-width="60" stroke-linecap="round"/>
+<line x1="8" y1="-165" x2="8" y2="165" stroke="#1a3a66" stroke-width="39" stroke-linecap="round"/>
+</g>
+</g>
+
+<g transform="translate(340,340)">
+<path d="M91 -87 C91 -114 55 -129 8 -129 C-47 -129 -79 -107 -79 -70 C-79 -34 -40 -23 8 -13 C62 -1 99 17 99 60 C99 104 59 130 8 130 C-47 130 -79 108 -79 75" fill="none" stroke="#ffffff" stroke-width="60" stroke-linecap="round"/>
+<line x1="8" y1="-165" x2="8" y2="165" stroke="#ffffff" stroke-width="39" stroke-linecap="round"/>
+</g>
+
+</svg>
