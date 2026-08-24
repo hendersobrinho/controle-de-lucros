@@ -6,7 +6,7 @@ from __future__ import annotations
 import datetime as dt
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QDate, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -34,7 +34,6 @@ from .. import repositories as repo
 from ..models import TIPOS_MOVIMENTACAO, TIPOS_MOVIMENTACAO_LABEL, Movimentacao, Socio
 from ..planilha import exportar_modelo_distribuicao, importar_distribuicao
 from .common import formatar_numero, formatar_valor_br, preencher_combo
-from .socios_tab import _DialogoAtualizarCotas
 from .theme import ENTROU_BG, ENTROU_FG, SAIU_BG, SAIU_FG, SEAL_GREEN
 from .theme import estado as tema_estado
 
@@ -53,43 +52,36 @@ COLUNAS = [
 ]
 
 
-class _DialogoDistribuicao(QDialog):
-    def __init__(self, socio_nome: str, valor_atual: float, pro_labore_atual: float, irrf_atual: float, parent=None):
+class _DialogoDataVigencia(QDialog):
+    """Uma data só, perguntada uma vez pra todo o lote de mudanças de %
+    capital/cotas salvas junto na edição em linha — é a data efetiva da
+    alteração contratual gerada por trás pra preservar o histórico."""
+
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(f"Distribuição de lucro — {socio_nome}")
-        self.setMinimumWidth(340)
+        self.setWindowTitle("Data da alteração")
+        self.setMinimumWidth(320)
 
-        self.valor = QDoubleSpinBox()
-        self.valor.setMaximum(1_000_000_000)
-        self.valor.setDecimals(2)
-        self.valor.setPrefix("R$ ")
-        formatar_numero(self.valor)
-        self.valor.setValue(valor_atual)
+        self.data = QDateEdit(calendarPopup=True)
+        self.data.setDisplayFormat("dd/MM/yyyy")
+        self.data.setDate(dt.date.today())
 
-        self.pro_labore = QDoubleSpinBox()
-        self.pro_labore.setMaximum(1_000_000_000)
-        self.pro_labore.setDecimals(2)
-        self.pro_labore.setPrefix("R$ ")
-        formatar_numero(self.pro_labore)
-        self.pro_labore.setValue(pro_labore_atual)
-
-        self.irrf = QDoubleSpinBox()
-        self.irrf.setMaximum(1_000_000_000)
-        self.irrf.setDecimals(2)
-        self.irrf.setPrefix("R$ ")
-        formatar_numero(self.irrf)
-        self.irrf.setValue(irrf_atual)
+        aviso = QLabel(
+            "Uma ou mais linhas mudaram % de capital ou cotas — isso gera uma alteração "
+            "contratual no histórico da empresa. A partir de quando essa mudança vale?"
+        )
+        aviso.setWordWrap(True)
+        aviso.setProperty("role", "subtitulo")
 
         form = QFormLayout()
-        form.addRow("Valor distribuído no ano", self.valor)
-        form.addRow("Pró-labore no ano", self.pro_labore)
-        form.addRow("IRRF retido no ano", self.irrf)
+        form.addRow("Data de vigência", self.data)
 
         botoes = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         botoes.accepted.connect(self.accept)
         botoes.rejected.connect(self.reject)
 
         layout = QVBoxLayout(self)
+        layout.addWidget(aviso)
         layout.addLayout(form)
         layout.addWidget(botoes)
 
@@ -381,15 +373,22 @@ class DistribuicaoAnualView(QWidget):
         self.tabela.verticalHeader().setVisible(False)
         self.tabela.itemSelectionChanged.connect(self._atualizar_disponibilidade_botoes)
 
-        self.btn_distribuicao = QPushButton("Editar distribuição")
-        self.btn_distribuicao.setProperty("role", "primario")
-        self.btn_distribuicao.clicked.connect(self._editar_distribuicao)
+        self._editando = False
+        self._widgets_edicao: list[dict] = []
+
+        self.btn_editar = QPushButton("Editar")
+        self.btn_editar.setProperty("role", "primario")
+        self.btn_editar.clicked.connect(self._iniciar_edicao)
+
+        self.btn_salvar_edicao = QPushButton("Salvar")
+        self.btn_salvar_edicao.setProperty("role", "primario")
+        self.btn_salvar_edicao.clicked.connect(self._salvar_edicao)
+
+        self.btn_cancelar_edicao = QPushButton("Cancelar")
+        self.btn_cancelar_edicao.clicked.connect(self._cancelar_edicao)
 
         self.btn_movimentacoes = QPushButton("Gerenciar movimentações")
         self.btn_movimentacoes.clicked.connect(self._gerenciar_movimentacoes)
-
-        self.btn_atualizar_cotas = QPushButton("Atualizar cotas do sócio")
-        self.btn_atualizar_cotas.clicked.connect(self._atualizar_cotas)
 
         self.btn_exportar_modelo = QPushButton("Exportar modelo")
         self.btn_exportar_modelo.clicked.connect(self._exportar_modelo)
@@ -398,9 +397,10 @@ class DistribuicaoAnualView(QWidget):
         self.btn_importar.clicked.connect(self._importar_planilha)
 
         botoes = QHBoxLayout()
-        botoes.addWidget(self.btn_distribuicao)
+        botoes.addWidget(self.btn_editar)
+        botoes.addWidget(self.btn_salvar_edicao)
+        botoes.addWidget(self.btn_cancelar_edicao)
         botoes.addWidget(self.btn_movimentacoes)
-        botoes.addWidget(self.btn_atualizar_cotas)
         botoes.addSpacing(8)
         botoes.addWidget(self.btn_exportar_modelo)
         botoes.addWidget(self.btn_importar)
@@ -456,6 +456,8 @@ class DistribuicaoAnualView(QWidget):
             self._carregar()
 
     def _carregar(self) -> None:
+        self._editando = False
+        self._widgets_edicao = []
         empresa_id = self.empresa.currentData()
         if empresa_id is None:
             self._linhas = []
@@ -525,7 +527,9 @@ class DistribuicaoAnualView(QWidget):
         self.tabela.setRowCount(len(self._linhas))
         for row, linha in enumerate(self._linhas):
             situacao = "Ativo"
-            if linha["saiu_no_ano"]:
+            if linha["reentrou_no_ano"]:
+                situacao = f"Saiu em {linha['data_saida_anterior']} e reentrou em {linha['data_entrada']}"
+            elif linha["saiu_no_ano"]:
                 situacao = "Saiu este ano"
             elif linha["entrou_no_ano"]:
                 situacao = "Entrou este ano"
@@ -562,13 +566,21 @@ class DistribuicaoAnualView(QWidget):
 
     def _atualizar_disponibilidade_botoes(self) -> None:
         linha = self._linha_selecionada()
-        editavel = not self._periodo_fechado
-        self.btn_distribuicao.setEnabled(linha is not None and editavel)
-        self.btn_movimentacoes.setEnabled(linha is not None and editavel)
-        self.btn_atualizar_cotas.setEnabled(linha is not None and linha["data_saida"] is None and editavel)
         tem_empresa = self.empresa.currentData() is not None
-        self.btn_exportar_modelo.setEnabled(tem_empresa)
-        self.btn_importar.setEnabled(tem_empresa and editavel)
+        editavel = not self._periodo_fechado
+
+        self.btn_editar.setVisible(not self._editando)
+        self.btn_salvar_edicao.setVisible(self._editando)
+        self.btn_cancelar_edicao.setVisible(self._editando)
+        self.btn_editar.setEnabled(tem_empresa and editavel and bool(self._linhas))
+
+        self.btn_movimentacoes.setEnabled(linha is not None and editavel and not self._editando)
+        self.btn_exportar_modelo.setEnabled(tem_empresa and not self._editando)
+        self.btn_importar.setEnabled(tem_empresa and editavel and not self._editando)
+
+        self.empresa.setEnabled(not self._editando)
+        self.ano.setEnabled(not self._editando)
+        self.btn_trancar.setEnabled(not self._editando)
 
     def _alternar_trancamento(self) -> None:
         empresa_id = self.empresa.currentData()
@@ -602,28 +614,6 @@ class DistribuicaoAnualView(QWidget):
             return None
         return self._linhas[linhas[0].row()]
 
-    def _editar_distribuicao(self) -> None:
-        linha = self._linha_selecionada()
-        if linha is None:
-            return
-        dialogo = _DialogoDistribuicao(linha["socio_nome"], linha["valor_distribuido"], linha["pro_labore"], linha["irrf"], self)
-        if dialogo.exec() != QDialog.Accepted:
-            return
-        try:
-            repo.salvar_distribuicao(
-                self.conn,
-                self.empresa.currentData(),
-                self.ano.value(),
-                linha["socio_id"],
-                dialogo.valor.value(),
-                pro_labore=dialogo.pro_labore.value(),
-                irrf=dialogo.irrf.value(),
-            )
-        except ValueError as exc:
-            QMessageBox.warning(self, "Erro ao salvar distribuição", str(exc))
-            return
-        self._carregar()
-
     def _gerenciar_movimentacoes(self) -> None:
         linha = self._linha_selecionada()
         if linha is None:
@@ -634,23 +624,171 @@ class DistribuicaoAnualView(QWidget):
         dialogo.exec()
         self._carregar()
 
-    def _atualizar_cotas(self) -> None:
-        linha = self._linha_selecionada()
-        if linha is None or linha["data_saida"] is not None:
+    # ---------------------------------------------------------- edição em linha --
+    def _iniciar_edicao(self) -> None:
+        if not self._linhas:
             return
-        vinculo = repo.buscar_vinculo(self.conn, linha["vinculo_id"])
-        if vinculo is None:
-            return
-        dialogo = _DialogoAtualizarCotas(self.conn, vinculo, self.empresa.currentText(), self)
-        if dialogo.exec() != QDialog.Accepted:
-            return
-        percentual, cotas, data, descricao = dialogo.dados()
-        try:
-            repo.atualizar_cotas_vinculo(self.conn, vinculo, percentual, cotas, data, descricao or "Atualização de cotas")
-        except ValueError as exc:
-            QMessageBox.warning(self, "Erro ao atualizar cotas", str(exc))
-            return
+        self._editando = True
+        self._widgets_edicao = []
+
+        for row, linha in enumerate(self._linhas):
+            socio_ativo = linha["data_saida"] is None
+
+            pct = QDoubleSpinBox()
+            pct.setMaximum(100)
+            pct.setDecimals(4)
+            formatar_numero(pct)
+            pct.setValue(linha["percentual_capital"])
+            pct.setEnabled(socio_ativo)
+
+            cotas = QDoubleSpinBox()
+            cotas.setMaximum(1_000_000_000)
+            cotas.setDecimals(0)
+            formatar_numero(cotas)
+            cotas.setValue(linha["quantidade_cotas"])
+            cotas.setEnabled(socio_ativo)
+
+            valor = QDoubleSpinBox()
+            valor.setMaximum(1_000_000_000)
+            valor.setDecimals(2)
+            valor.setPrefix("R$ ")
+            formatar_numero(valor)
+            valor.setValue(linha["valor_distribuido"])
+
+            pro_labore = QDoubleSpinBox()
+            pro_labore.setMaximum(1_000_000_000)
+            pro_labore.setDecimals(2)
+            pro_labore.setPrefix("R$ ")
+            formatar_numero(pro_labore)
+            pro_labore.setValue(linha["pro_labore"])
+
+            irrf = QDoubleSpinBox()
+            irrf.setMaximum(1_000_000_000)
+            irrf.setDecimals(2)
+            irrf.setPrefix("R$ ")
+            formatar_numero(irrf)
+            irrf.setValue(linha["irrf"])
+
+            saida = QDateEdit(calendarPopup=True)
+            saida.setDisplayFormat("dd/MM/yyyy")
+            saida.setMinimumDate(QDate(1900, 1, 1))
+            saida.setSpecialValueText("— (ativo)")
+            if linha["data_saida"]:
+                saida.setDate(QDate.fromString(linha["data_saida"], "yyyy-MM-dd"))
+            else:
+                saida.setDate(saida.minimumDate())
+
+            self.tabela.setCellWidget(row, 2, pct)
+            self.tabela.setCellWidget(row, 3, cotas)
+            self.tabela.setCellWidget(row, 4, valor)
+            self.tabela.setCellWidget(row, 5, pro_labore)
+            self.tabela.setCellWidget(row, 6, irrf)
+            self.tabela.setCellWidget(row, 9, saida)
+
+            self._widgets_edicao.append(
+                {"percentual": pct, "cotas": cotas, "valor": valor, "pro_labore": pro_labore, "irrf": irrf, "data_saida": saida}
+            )
+
+        for col, largura in ((2, 110), (3, 100), (4, 150), (5, 140), (6, 140), (9, 130)):
+            if self.tabela.columnWidth(col) < largura:
+                self.tabela.setColumnWidth(col, largura)
+
+        self._atualizar_disponibilidade_botoes()
+
+    def _cancelar_edicao(self) -> None:
         self._carregar()
+
+    @staticmethod
+    def _mudou(novo: float, antigo: float, tolerancia: float = 1e-6) -> bool:
+        return abs((novo or 0) - (antigo or 0)) > tolerancia
+
+    def _salvar_edicao(self) -> None:
+        empresa_id = self.empresa.currentData()
+        ano_base = self.ano.value()
+
+        mudancas_distribuicao = []
+        mudancas_vinculo = []
+
+        for row, linha in enumerate(self._linhas):
+            widgets = self._widgets_edicao[row]
+
+            novo_valor = widgets["valor"].value()
+            novo_pro_labore = widgets["pro_labore"].value()
+            novo_irrf = widgets["irrf"].value()
+            if (
+                self._mudou(novo_valor, linha["valor_distribuido"])
+                or self._mudou(novo_pro_labore, linha["pro_labore"])
+                or self._mudou(novo_irrf, linha["irrf"])
+            ):
+                mudancas_distribuicao.append((linha, novo_valor, novo_pro_labore, novo_irrf))
+
+            socio_ativo = linha["data_saida"] is None
+            novo_pct = widgets["percentual"].value()
+            novas_cotas = widgets["cotas"].value()
+            pct_ou_cotas_mudou = socio_ativo and (
+                self._mudou(novo_pct, linha["percentual_capital"]) or self._mudou(novas_cotas, linha["quantidade_cotas"])
+            )
+
+            saida_widget = widgets["data_saida"]
+            nova_saida = None if saida_widget.date() == saida_widget.minimumDate() else saida_widget.date().toString("yyyy-MM-dd")
+            saida_mudou = nova_saida != linha["data_saida"]
+
+            if pct_ou_cotas_mudou or saida_mudou:
+                mudancas_vinculo.append(
+                    {
+                        "linha": linha,
+                        "novo_pct": novo_pct,
+                        "novas_cotas": novas_cotas,
+                        "nova_saida": nova_saida,
+                        "pct_ou_cotas_mudou": pct_ou_cotas_mudou,
+                        "saida_mudou": saida_mudou,
+                    }
+                )
+
+        if not mudancas_distribuicao and not mudancas_vinculo:
+            QMessageBox.information(self, "Salvar", "Nenhuma alteração pra salvar.")
+            self._carregar()
+            return
+
+        data_vigencia = None
+        if any(m["pct_ou_cotas_mudou"] for m in mudancas_vinculo):
+            dialogo_data = _DialogoDataVigencia(self)
+            if dialogo_data.exec() != QDialog.Accepted:
+                return
+            data_vigencia = dialogo_data.data.date().toString("yyyy-MM-dd")
+
+        try:
+            for linha, valor, pro_labore, irrf in mudancas_distribuicao:
+                repo.salvar_distribuicao(
+                    self.conn, empresa_id, ano_base, linha["socio_id"], valor, pro_labore=pro_labore, irrf=irrf
+                )
+
+            for mudanca in mudancas_vinculo:
+                linha = mudanca["linha"]
+                vinculo_id_atual = linha["vinculo_id"]
+                if mudanca["pct_ou_cotas_mudou"]:
+                    vinculo = repo.buscar_vinculo(self.conn, vinculo_id_atual)
+                    vinculo_id_atual = repo.atualizar_cotas_vinculo(
+                        self.conn, vinculo, mudanca["novo_pct"], mudanca["novas_cotas"], data_vigencia,
+                        "Atualização de cotas (editado na Distribuição anual)",
+                    )
+                if mudanca["saida_mudou"]:
+                    vinculo = repo.buscar_vinculo(self.conn, vinculo_id_atual)
+                    if linha["data_saida"] is None and mudanca["nova_saida"] is not None:
+                        repo.encerrar_vinculo_registrando_alteracao(
+                            self.conn, vinculo, mudanca["nova_saida"], "Saída de sócio (editado na Distribuição anual)"
+                        )
+                    else:
+                        vinculo.data_saida = mudanca["nova_saida"]
+                        repo.salvar_vinculo(self.conn, vinculo)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Erro ao salvar", str(exc))
+            self._carregar()
+            return
+
+        total_mudancas = len(mudancas_distribuicao) + len(mudancas_vinculo)
+        self._carregar()
+        QMessageBox.information(self, "Salvo", f"{total_mudancas} linha(s) com alteração salvas com sucesso.")
 
     def _exportar_modelo(self) -> None:
         empresa_id = self.empresa.currentData()

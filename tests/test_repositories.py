@@ -962,3 +962,67 @@ def test_excluir_vinculo_bloqueado_por_alteracao_fechada(conn):
     repo.reabrir_alteracao(conn, alteracao_id)
     repo.excluir_vinculo(conn, vinculo_id)
     assert repo.listar_vinculos_empresa(conn, empresa_id) == []
+
+
+def test_panorama_detecta_saida_e_reentrada_dentro_do_mesmo_ano(conn):
+    """Bug real reportado: sócio que sai e reentra dentro do MESMO ano (não
+    anos depois) ficava ativo no fim do ano, e a saída anterior sumia da
+    visão anual — mostrava só "Entrou este ano", escondendo que ele também
+    tinha saído dias antes."""
+    empresa_id = _nova_empresa(conn)
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="Fernando Costa Guzzo", cpf="134.092.497-88"))
+
+    repo.salvar_vinculo(
+        conn,
+        VinculoSocietario(
+            id=None, empresa_id=empresa_id, socio_id=socio_id,
+            percentual_capital=0.51, quantidade_cotas=51,
+            data_entrada="2023-01-01", data_saida="2025-08-24",
+        ),
+    )
+    repo.salvar_vinculo(
+        conn,
+        VinculoSocietario(
+            id=None, empresa_id=empresa_id, socio_id=socio_id,
+            percentual_capital=0.51, quantidade_cotas=51,
+            data_entrada="2025-08-26", data_saida=None,
+        ),
+    )
+    repo.salvar_distribuicao(conn, empresa_id, 2025, socio_id, 67950)
+
+    (linha,) = repo.panorama_distribuicao_anual(conn, empresa_id, 2025)
+    assert linha["entrou_no_ano"] is True
+    assert linha["reentrou_no_ano"] is True
+    assert linha["data_saida_anterior"] == "2025-08-24"
+    assert linha["data_entrada"] == "2025-08-26"
+    assert linha["data_saida"] is None  # continua ativo
+
+
+def test_panorama_saida_anterior_fora_do_ano_nao_conta_como_reentrada(conn):
+    """Se a saída anterior foi em outro ano (não neste), não é uma
+    reentrada "deste ano" — só uma continuação normal da sociedade."""
+    empresa_id = _nova_empresa(conn)
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="Fulano", cpf="111.111.111-11"))
+
+    repo.salvar_vinculo(
+        conn,
+        VinculoSocietario(
+            id=None, empresa_id=empresa_id, socio_id=socio_id,
+            percentual_capital=50.0, quantidade_cotas=50,
+            data_entrada="2020-01-01", data_saida="2022-06-01",
+        ),
+    )
+    repo.salvar_vinculo(
+        conn,
+        VinculoSocietario(
+            id=None, empresa_id=empresa_id, socio_id=socio_id,
+            percentual_capital=50.0, quantidade_cotas=50,
+            data_entrada="2022-09-01", data_saida=None,
+        ),
+    )
+    repo.salvar_distribuicao(conn, empresa_id, 2025, socio_id, 10000)
+
+    (linha,) = repo.panorama_distribuicao_anual(conn, empresa_id, 2025)
+    assert linha["entrou_no_ano"] is False
+    assert linha["reentrou_no_ano"] is False
+    assert linha["data_saida_anterior"] is None

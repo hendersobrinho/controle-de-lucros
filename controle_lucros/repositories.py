@@ -753,6 +753,18 @@ def _inicio_do_vinculo_continuo(todos: list[sqlite3.Row], vinculo_atual: sqlite3
         atual = anterior
 
 
+def _saida_anterior_ao_vinculo_continuo(todos: list[sqlite3.Row], primeira_entrada: str) -> str | None:
+    """Se o sócio já tinha saído de vez antes de reentrar (a passagem atual
+    começou em primeira_entrada, sem ligação contígua com nada antes), acha
+    a data dessa saída anterior — é o outro lado do mesmo evento de
+    reentrada, senão a saída simplesmente some da visão anual quando o
+    sócio volta a ficar ativo no mesmo período analisado."""
+    anteriores = [v for v in todos if v["data_saida"] is not None and v["data_saida"] < primeira_entrada]
+    if not anteriores:
+        return None
+    return max(anteriores, key=lambda v: v["data_saida"])["data_saida"]
+
+
 def panorama_distribuicao_anual(conn: sqlite3.Connection, empresa_id: int, ano_base: int) -> list[dict]:
     """Uma linha por sócio (não por segmento de vínculo) que teve alguma
     participação no ano: cotas/percentual vigentes ao final do ano (ou no
@@ -798,6 +810,8 @@ def panorama_distribuicao_anual(conn: sqlite3.Connection, empresa_id: int, ano_b
             continue
 
         primeira_entrada = _inicio_do_vinculo_continuo(todos, vinculo_atual)
+        saida_anterior = _saida_anterior_ao_vinculo_continuo(todos, primeira_entrada)
+        reentrou_no_ano = saida_anterior is not None and inicio <= saida_anterior <= fim
 
         distribuicao = distribuicoes.get(socio_id)
         valor_distribuido = distribuicao.valor_distribuido if distribuicao else 0.0
@@ -824,6 +838,8 @@ def panorama_distribuicao_anual(conn: sqlite3.Connection, empresa_id: int, ano_b
                 "data_saida": None if ainda_ativo else vinculo_atual["data_saida"],
                 "entrou_no_ano": inicio <= primeira_entrada <= fim,
                 "saiu_no_ano": (not ainda_ativo) and inicio <= vinculo_atual["data_saida"] <= fim,
+                "reentrou_no_ano": reentrou_no_ano,
+                "data_saida_anterior": saida_anterior if reentrou_no_ano else None,
             }
         )
     linhas.sort(key=lambda l: l["socio_nome"])
