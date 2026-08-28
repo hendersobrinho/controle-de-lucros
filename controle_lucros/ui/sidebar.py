@@ -52,6 +52,7 @@ class Sidebar(QFrame):
         layout.addWidget(self._botao_usuarios)
         self._botao_backup = self._item("Backup", "sistema.backup", sub=True)
         layout.addWidget(self._botao_backup)
+        layout.addWidget(self._item("Sobre", "sistema.sobre", sub=True))
 
         layout.addStretch()
 

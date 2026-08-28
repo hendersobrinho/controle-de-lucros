@@ -744,12 +744,21 @@ def _inicio_do_vinculo_continuo(todos: list[sqlite3.Row], vinculo_atual: sqlite3
     vínculo no mesmo dia (data_saida do segmento anterior == data_entrada do
     novo) — isso não conta como reentrada, então continua andando pra trás.
     Uma saída de verdade deixa uma lacuna (o próximo segmento começa depois),
-    e aí para: aquela data_entrada é a reentrada real do sócio."""
+    e aí para: aquela data_entrada é a reentrada real do sócio.
+
+    `visitados` evita loop infinito: uma correção no mesmo dia (cotas
+    atualizadas no mesmo dia em que o vínculo começou) deixa um segmento
+    com data_entrada == data_saida, que bateria consigo mesmo pra sempre
+    sem essa trava."""
     atual = vinculo_atual
+    visitados = {atual["id"]}
     while True:
-        anterior = next((v for v in todos if v["data_saida"] == atual["data_entrada"]), None)
+        anterior = next(
+            (v for v in todos if v["id"] not in visitados and v["data_saida"] == atual["data_entrada"]), None
+        )
         if anterior is None:
             return atual["data_entrada"]
+        visitados.add(anterior["id"])
         atual = anterior
 
 

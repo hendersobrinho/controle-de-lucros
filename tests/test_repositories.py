@@ -1026,3 +1026,32 @@ def test_panorama_saida_anterior_fora_do_ano_nao_conta_como_reentrada(conn):
     assert linha["entrou_no_ano"] is False
     assert linha["reentrou_no_ano"] is False
     assert linha["data_saida_anterior"] is None
+
+
+def test_panorama_nao_trava_com_vinculo_de_data_entrada_igual_saida(conn):
+    """Bug real que travava o app a 100% de CPU pra sempre: um vínculo com
+    data_entrada == data_saida (correção de cotas no mesmo dia em que o
+    sócio entrou) fazia _inicio_do_vinculo_continuo bater consigo mesmo
+    como "segmento anterior" e nunca sair do laço."""
+    empresa_id = _nova_empresa(conn)
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="Fulano", cpf="111.111.111-11"))
+
+    # simula o cenario real: vinculo fechado no mesmo dia que comecou
+    # (ex.: atualizar_cotas_vinculo com data == data_entrada do vinculo)
+    conn.execute(
+        """INSERT INTO vinculo_societario
+           (empresa_id, socio_id, percentual_capital, quantidade_cotas, data_entrada, data_saida)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (empresa_id, socio_id, 8.0, 10, "2026-08-24", "2026-08-24"),
+    )
+    conn.execute(
+        """INSERT INTO vinculo_societario
+           (empresa_id, socio_id, percentual_capital, quantidade_cotas, data_entrada, data_saida)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (empresa_id, socio_id, 8.0, 10, "2026-08-24", None),
+    )
+    conn.commit()
+
+    linhas = repo.panorama_distribuicao_anual(conn, empresa_id, 2026)  # nao pode travar
+    assert len(linhas) == 1
+    assert linhas[0]["reentrou_no_ano"] is False

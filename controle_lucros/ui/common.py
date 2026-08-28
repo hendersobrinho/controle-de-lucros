@@ -4,6 +4,7 @@ from __future__ import annotations
 from PySide6.QtCore import QLocale, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QAbstractSpinBox,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
@@ -40,6 +41,7 @@ def formatar_numero(spin: QDoubleSpinBox) -> None:
     — pra números grandes (capital, cotas, valores) ficarem legíveis."""
     spin.setLocale(LOCALE_BR)
     spin.setGroupSeparatorShown(True)
+    spin.setButtonSymbols(QAbstractSpinBox.NoButtons)
 
 
 def configurar_campo_cnpj(campo: QLineEdit) -> None:

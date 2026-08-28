@@ -13,6 +13,7 @@ from .importacao_cadastro_view import ImportacaoCadastroView
 from .log_atividades_view import LogAtividadesView
 from .login import DialogoTrocarMinhaSenha
 from .sidebar import Sidebar
+from .sobre_view import SobreView
 from .socios_tab import SociosTab
 from .theme import estado as tema_estado
 from .usuarios_tab import UsuariosTab
@@ -28,6 +29,7 @@ TITULOS = {
     "sistema.log": "Log de atividades",
     "sistema.usuarios": "Usuários",
     "sistema.backup": "Backup",
+    "sistema.sobre": "Sobre",
 }
 
 
@@ -50,6 +52,7 @@ class MainWindow(QMainWindow):
         self.log_atividades = LogAtividadesView(conn)
         self.usuarios_tab = UsuariosTab(conn)
         self.backup_view = BackupView(conn)
+        self.sobre_view = SobreView()
         self.cadastro.definir_callback_selecao(lambda empresa: self.alteracoes.selecionar_empresa(empresa.id))
 
         self._paginas = {
@@ -63,6 +66,7 @@ class MainWindow(QMainWindow):
             "sistema.log": self.log_atividades,
             "sistema.usuarios": self.usuarios_tab,
             "sistema.backup": self.backup_view,
+            "sistema.sobre": self.sobre_view,
         }
 
         self.pilha = QStackedWidget()

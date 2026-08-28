@@ -57,18 +57,25 @@ class _DialogoDataVigencia(QDialog):
     capital/cotas salvas junto na edição em linha — é a data efetiva da
     alteração contratual gerada por trás pra preservar o histórico."""
 
-    def __init__(self, parent=None):
+    def __init__(self, ano_base: int, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Data da alteração")
         self.setMinimumWidth(320)
 
         self.data = QDateEdit(calendarPopup=True)
         self.data.setDisplayFormat("dd/MM/yyyy")
-        self.data.setDate(dt.date.today())
+        # sugere uma data dentro do ano que está sendo editado — "hoje" é
+        # furada quando o ano em edição é passado: a mudança só passaria a
+        # valer dali pra frente, e a tela desse ano continuaria mostrando o
+        # valor antigo, parecendo que "não salvou nada".
+        hoje = dt.date.today()
+        data_padrao = hoje if ano_base == hoje.year else dt.date(ano_base, 12, 31)
+        self.data.setDate(data_padrao)
 
         aviso = QLabel(
-            "Uma ou mais linhas mudaram % de capital ou cotas — isso gera uma alteração "
-            "contratual no histórico da empresa. A partir de quando essa mudança vale?"
+            f"Uma ou mais linhas mudaram % de capital ou cotas — isso gera uma alteração "
+            f"contratual no histórico da empresa. A partir de quando essa mudança vale? Pra "
+            f"aparecer na distribuição de {ano_base}, a data precisa cair dentro desse ano."
         )
         aviso.setWordWrap(True)
         aviso.setProperty("role", "subtitulo")
@@ -458,6 +465,9 @@ class DistribuicaoAnualView(QWidget):
     def _carregar(self) -> None:
         self._editando = False
         self._widgets_edicao = []
+        for row in range(self.tabela.rowCount()):
+            for col in (2, 3, 4, 5, 6, 9):
+                self.tabela.removeCellWidget(row, col)
         empresa_id = self.empresa.currentData()
         if empresa_id is None:
             self._linhas = []
@@ -562,6 +572,7 @@ class DistribuicaoAnualView(QWidget):
                     item.setForeground(QColor(cor_texto))
                 self.tabela.setItem(row, col, item)
         self.tabela.resizeColumnsToContents()
+        self.tabela.resizeRowsToContents()
         self._atualizar_disponibilidade_botoes()
 
     def _atualizar_disponibilidade_botoes(self) -> None:
@@ -693,6 +704,11 @@ class DistribuicaoAnualView(QWidget):
             if self.tabela.columnWidth(col) < largura:
                 self.tabela.setColumnWidth(col, largura)
 
+        altura = QDoubleSpinBox().sizeHint().height() + 8
+        for row in range(len(self._linhas)):
+            if self.tabela.rowHeight(row) < altura:
+                self.tabela.setRowHeight(row, altura)
+
         self._atualizar_disponibilidade_botoes()
 
     def _cancelar_edicao(self) -> None:
@@ -752,10 +768,20 @@ class DistribuicaoAnualView(QWidget):
 
         data_vigencia = None
         if any(m["pct_ou_cotas_mudou"] for m in mudancas_vinculo):
-            dialogo_data = _DialogoDataVigencia(self)
+            dialogo_data = _DialogoDataVigencia(ano_base, self)
             if dialogo_data.exec() != QDialog.Accepted:
                 return
             data_vigencia = dialogo_data.data.date().toString("yyyy-MM-dd")
+            if not (f"{ano_base}-01-01" <= data_vigencia <= f"{ano_base}-12-31"):
+                resposta = QMessageBox.question(
+                    self, "Data fora do ano",
+                    f"A data escolhida ({dialogo_data.data.date().toString('dd/MM/yyyy')}) não está dentro de "
+                    f"{ano_base} — o novo percentual/cotas vai valer a partir dela, mas essa tela continuará "
+                    f"mostrando os valores de {ano_base} até essa data chegar (ou já ter passado, se for antes "
+                    f"do ano). Quer continuar mesmo assim?",
+                )
+                if resposta != QMessageBox.Yes:
+                    return
 
         try:
             for linha, valor, pro_labore, irrf in mudancas_distribuicao:

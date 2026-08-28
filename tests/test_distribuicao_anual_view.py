@@ -74,7 +74,9 @@ def test_editar_valor_distribuido_nao_pede_data(conn, cenario, monkeypatch):
     view._widgets_edicao[idx]["valor"].setValue(15000)
 
     chamou_dialogo = {"sim": False}
-    monkeypatch.setattr(mod, "_DialogoDataVigencia", lambda parent=None: chamou_dialogo.__setitem__("sim", True))
+    monkeypatch.setattr(
+        mod, "_DialogoDataVigencia", lambda ano_base, parent=None: chamou_dialogo.__setitem__("sim", True)
+    )
     monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: None))
 
     view._salvar_edicao()
@@ -94,7 +96,7 @@ def test_editar_percentual_pede_data_e_gera_alteracao(conn, cenario, monkeypatch
     view._widgets_edicao[idx]["cotas"].setValue(700)
 
     class DialogoFake:
-        def __init__(self, parent=None):
+        def __init__(self, ano_base, parent=None):
             self.data = type("D", (), {"date": lambda self: QDate(2025, 6, 1)})()
 
         def exec(self):
@@ -119,7 +121,7 @@ def test_cancelar_data_vigencia_nao_aplica_nada(conn, cenario, monkeypatch):
     view._widgets_edicao[idx]["percentual"].setValue(70.0)
 
     class DialogoRejeitado:
-        def __init__(self, parent=None):
+        def __init__(self, ano_base, parent=None):
             pass
 
         def exec(self):
@@ -163,3 +165,63 @@ def test_periodo_trancado_desabilita_editar(conn, cenario):
     repo.fechar_periodo(conn, cenario["empresa_id"], 2025)
     view = _view(conn)
     assert view.btn_editar.isEnabled() is False
+
+
+def test_dialogo_data_vigencia_sugere_data_dentro_do_ano_editado():
+    """Bug real reportado: o diálogo sugeria "hoje" mesmo editando um ano
+    passado — a mudança de cotas/percentual só passava a valer a partir de
+    hoje (fora do ano visto na tela), então a tela daquele ano continuava
+    mostrando o valor antigo, parecendo que "não salvou nada"."""
+    dialogo_ano_passado = mod._DialogoDataVigencia(2020)
+    assert dialogo_ano_passado.data.date().year() == 2020
+    assert dialogo_ano_passado.data.date().month() == 12
+    assert dialogo_ano_passado.data.date().day() == 31
+
+    ano_atual = mod.dt.date.today().year
+    dialogo_ano_atual = mod._DialogoDataVigencia(ano_atual)
+    assert dialogo_ano_atual.data.date().toPython() == mod.dt.date.today()
+
+
+def test_salvar_remove_widgets_de_edicao_e_tranca_tabela(conn, cenario, monkeypatch):
+    """Bug real: depois de salvar, os campos continuavam editáveis porque
+    setItem() não remove um cellWidget já plantado na mesma célula — o
+    QDoubleSpinBox ficava por cima do item somente-leitura, aceitando clique."""
+    view = _view(conn)
+    view.show()
+    view._iniciar_edicao()
+    idx, _ = _linha(view, cenario["s1"])
+    view._widgets_edicao[idx]["valor"].setValue(15000)
+    assert view.tabela.cellWidget(idx, 4) is not None
+
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: None))
+    view._salvar_edicao()
+
+    assert view._editando is False
+    assert view.btn_editar.isVisible()
+    for col in (2, 3, 4, 5, 6, 9):
+        assert view.tabela.cellWidget(idx, col) is None
+
+
+def test_editar_percentual_com_data_dentro_do_ano_aparece_no_mesmo_ano(conn, cenario, monkeypatch):
+    """A ponta a ponta do bug: mudar % capital/cotas com uma data de
+    vigência DENTRO do ano_base tem que refletir na visão anual desse
+    mesmo ano — não só numa alteração perdida em outro período."""
+    view = _view(conn)
+    view._iniciar_edicao()
+    idx, _ = _linha(view, cenario["s1"])
+    view._widgets_edicao[idx]["percentual"].setValue(70.0)
+    view._widgets_edicao[idx]["cotas"].setValue(700)
+
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: None))
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))
+
+    # simula o dialogo real aceito com a data padrao (sem o usuario mexer)
+    dialogo_real = mod._DialogoDataVigencia(2025)
+    monkeypatch.setattr(mod, "_DialogoDataVigencia", lambda ano_base, parent=None: dialogo_real)
+    monkeypatch.setattr(dialogo_real, "exec", lambda: QDialog.Accepted)
+
+    view._salvar_edicao()
+
+    linhas = repo.panorama_distribuicao_anual(conn, cenario["empresa_id"], 2025)
+    (linha_s1,) = [l for l in linhas if l["socio_id"] == cenario["s1"]]
+    assert linha_s1["percentual_capital"] == 70.0
