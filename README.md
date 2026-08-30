@@ -65,7 +65,7 @@ Em builds mais antigas de PyInstaller isso pode não detectar esses módulos
 do Qt sozinho. Se acontecer, gere de novo assim:
 
 ```bat
-pyinstaller --clean --hidden-import PySide6.QtCharts --hidden-import PySide6.QtPrintSupport controle_lucros.spec
+pyinstaller --clean --hidden-import PySide6.QtCharts --hidden-import PySide6.QtPrintSupport --hidden-import PySide6.QtSvgWidgets controle_lucros.spec
 ```
 
 ## Rodar os testes
