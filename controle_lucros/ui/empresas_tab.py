@@ -9,7 +9,7 @@ from .common import CrudTab, cnpj_valido_ou_vazio, configurar_campo_cnpj, format
 
 class EmpresasTab(CrudTab):
     colunas = [
-        ("Nº chamada", "numero_chamada"),
+        ("Nº empresa", "numero_chamada"),
         ("Nome", "nome"),
         ("CNPJ", "cnpj"),
         ("Capital social", "capital_social"),
@@ -40,7 +40,7 @@ class EmpresasTab(CrudTab):
         self.cotas.setDecimals(0)
         formatar_numero(self.cotas)
 
-        form_layout.addRow("Nº de chamada", self.numero_chamada)
+        form_layout.addRow("Nº da empresa", self.numero_chamada)
         form_layout.addRow("Nome da empresa", self.nome)
         form_layout.addRow("CNPJ", self.cnpj)
         form_layout.addRow("Capital social (fundação)", self.capital)
@@ -50,7 +50,7 @@ class EmpresasTab(CrudTab):
         return repo.listar_empresas(self.conn)
 
     def placeholder_busca(self) -> str:
-        return "Buscar por nome ou nº de chamada…"
+        return "Buscar por nome ou nº da empresa…"
 
     def corresponde_busca(self, registro: Empresa, termo: str) -> bool:
         return termo in registro.nome.lower() or termo in (registro.numero_chamada or "").lower()
@@ -90,7 +90,7 @@ class EmpresasTab(CrudTab):
         if not registro.nome:
             raise ValueError("Informe o nome da empresa.")
         if not registro.numero_chamada:
-            raise ValueError("Informe o número de chamada.")
+            raise ValueError("Informe o número da empresa.")
         repo.salvar_empresa(self.conn, registro)
 
     def excluir_registro(self, id_) -> None:

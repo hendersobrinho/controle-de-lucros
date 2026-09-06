@@ -13,7 +13,7 @@ from openpyxl.utils import get_column_letter
 COLUNAS_DISTRIBUICAO = ["CPF", "Sócio", "Valor Distribuído", "Pró-labore", "IRRF"]
 
 COLUNAS_CADASTRO = [
-    "Nº Chamada", "Empresa", "CNPJ", "Capital Social", "Qtd. Cotas da Empresa",
+    "Nº Empresa", "Empresa", "CNPJ", "Capital Social", "Qtd. Cotas da Empresa",
     "Sócio", "CPF/CNPJ do Sócio", "Tipo (física/jurídica)",
     "% Capital do Sócio", "Cotas do Sócio", "Data de Entrada", "Data de Saída",
     "Ano Base", "Valor Distribuído", "Pró-labore", "IRRF",
@@ -187,7 +187,14 @@ def importar_cadastro(caminho: Path) -> list[dict]:
 
     cabecalho = [str(c or "").strip().lower() for c in linhas_brutas[0]]
     idx = {
-        "numero_chamada": _indice_coluna(cabecalho, ["nº chamada", "numero chamada", "n° chamada", "chamada"]),
+        # "chamada" continua na lista: planilhas exportadas antes da mudança de
+        # nome trazem o cabeçalho antigo, e recusá-las obrigaria a refazer
+        # arquivo que já está preenchido.
+        "numero_chamada": _indice_coluna(
+            cabecalho,
+            ["nº empresa", "numero empresa", "n° empresa", "número da empresa", "numero da empresa",
+             "nº chamada", "numero chamada", "n° chamada", "chamada"],
+        ),
         "empresa_nome": _indice_coluna(cabecalho, ["empresa", "nome da empresa", "razão social"]),
         "cnpj": _indice_coluna(cabecalho, ["cnpj"]),
         "capital_social": _indice_coluna(cabecalho, ["capital social", "capital"]),

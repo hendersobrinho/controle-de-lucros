@@ -180,6 +180,13 @@ def build_stylesheet() -> str:
         font-size: 12px;
     }}
 
+    /* Rótulo de campo desabilitado recua junto com o campo. Sem isto o
+       formulário bloqueado fica com os rótulos em contraste cheio ao lado de
+       campos apagados, e a tela não parece bloqueada — parece quebrada. */
+    QLabel:disabled {{
+        color: {p["INK_MUTED"]};
+    }}
+
     QLabel[role="secao"] {{
         font-family: {FONT_DISPLAY};
         font-size: 15px;

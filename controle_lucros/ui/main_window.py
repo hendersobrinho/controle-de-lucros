@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QStackedWidget, QVBoxLayout, QWidget
 
 from ..models import Usuario
@@ -8,10 +9,12 @@ from .backup_view import BackupView
 from .dashboard_empresa import DashboardEmpresaView
 from .dashboard_visao_geral import DashboardVisaoGeralView
 from .distribuicao_anual_view import DistribuicaoAnualView
+from .distribuicao_trimestral_view import DistribuicaoTrimestralView
 from .empresas_tab import EmpresasTab
 from .importacao_cadastro_view import ImportacaoCadastroView
 from .log_atividades_view import LogAtividadesView
 from .login import DialogoTrocarMinhaSenha
+from .manual import DialogoManual, topico_da_pagina
 from .sidebar import Sidebar
 from .sobre_view import SobreView
 from .socios_tab import SociosTab
@@ -24,6 +27,7 @@ TITULOS = {
     "empresas.importar": "Empresas  ·  Importação em massa",
     "socios": "Sócios",
     "distribuicao": "Distribuição anual",
+    "distribuicao.trimestral": "Distribuição trimestral",
     "dashboard.geral": "Dashboard  ·  Visão geral",
     "dashboard.empresa": "Dashboard  ·  Análise por empresa",
     "sistema.log": "Log de atividades",
@@ -47,6 +51,7 @@ class MainWindow(QMainWindow):
         self.importacao_cadastro = ImportacaoCadastroView(conn)
         self.socios_tab = SociosTab(conn)
         self.distribuicao = DistribuicaoAnualView(conn)
+        self.distribuicao_trimestral = DistribuicaoTrimestralView(conn)
         self.dashboard_geral = DashboardVisaoGeralView(conn)
         self.dashboard_empresa = DashboardEmpresaView(conn)
         self.log_atividades = LogAtividadesView(conn)
@@ -61,6 +66,7 @@ class MainWindow(QMainWindow):
             "empresas.importar": self.importacao_cadastro,
             "socios": self.socios_tab,
             "distribuicao": self.distribuicao,
+            "distribuicao.trimestral": self.distribuicao_trimestral,
             "dashboard.geral": self.dashboard_geral,
             "dashboard.empresa": self.dashboard_empresa,
             "sistema.log": self.log_atividades,
@@ -99,12 +105,19 @@ class MainWindow(QMainWindow):
         layout.addWidget(conteudo, 1)
         self.setCentralWidget(central)
 
+        # F1 é o atalho que todo mundo tenta primeiro quando trava numa tela;
+        # abre o manual já no tópico da página aberta, porque a dúvida quase
+        # sempre é sobre o que está na frente da pessoa.
+        self._pagina_atual = "empresas.cadastro"
+        QShortcut(QKeySequence.HelpContents, self, activated=self.abrir_manual)
+
         self._ir_para("empresas.cadastro")
 
     def _ir_para(self, chave: str) -> None:
         if chave in ("sistema.usuarios", "sistema.backup") and not self.usuario.admin:
             return
         pagina = self._paginas[chave]
+        self._pagina_atual = chave
         self.pilha.setCurrentWidget(pagina)
         self.titulo_pagina.setText(TITULOS[chave])
         self.sidebar.marcar(chave)
@@ -118,6 +131,9 @@ class MainWindow(QMainWindow):
         pagina = self.pilha.currentWidget()
         if hasattr(pagina, "atualizar"):
             pagina.atualizar()
+
+    def abrir_manual(self) -> None:
+        DialogoManual(topico_da_pagina(self._pagina_atual), self).exec()
 
     def _trocar_senha(self) -> None:
         dialogo = DialogoTrocarMinhaSenha(self.conn, self.usuario, self)

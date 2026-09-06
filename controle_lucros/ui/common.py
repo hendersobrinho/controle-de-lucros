@@ -1,4 +1,10 @@
-"""Aba genérica de CRUD: tabela de registros + formulário de edição."""
+"""Aba genérica de CRUD: tabela de registros + formulário de edição.
+
+O formulário tem três estados visíveis (ver aplicar_modo_formulario): enquanto
+nada está selecionado ele fica desabilitado e o destaque de botão primário vai
+pro "Novo" — sem isso, a tela abre com campos aparentemente editáveis e nada
+indicando que digitar ali por cima de um registro selecionado ALTERA aquele
+registro em vez de criar um novo."""
 from __future__ import annotations
 
 from PySide6.QtCore import QLocale, Qt
@@ -69,6 +75,88 @@ def formatar_valor_br(valor: float, casas: int = 2) -> str:
     os formulários."""
     texto = f"{valor:,.{casas}f}"
     return texto.replace(",", "|").replace(".", ",").replace("|", ".")
+
+
+MODO_VAZIO = "vazio"
+MODO_NOVO = "novo"
+MODO_EDICAO = "edicao"
+MODO_SALVO = "salvo"
+
+MODOS_COM_FORMULARIO_ABERTO = (MODO_NOVO, MODO_EDICAO)
+
+AVISOS_FORMULARIO = {
+    MODO_VAZIO: (
+        "Formulário bloqueado. Clique em <b>Novo</b> para cadastrar, "
+        "ou selecione um registro na tabela para editar."
+    ),
+    MODO_NOVO: "<b>Novo registro</b> — preencha os campos e clique em Salvar.",
+    MODO_EDICAO: (
+        "Editando <b>{descricao}</b> — o que for salvo substitui esse registro. "
+        "Para cadastrar outro, clique em <b>Novo</b>."
+    ),
+    MODO_SALVO: (
+        "Registro salvo. Clique em <b>Novo</b> para cadastrar outro, "
+        "ou selecione um na tabela para editar."
+    ),
+}
+
+
+def realcar_botao(botao: QPushButton, realcado: bool) -> None:
+    """Liga/desliga o destaque de botão primário. Trocar a property depois de
+    o QSS já ter sido aplicado exige repolir o widget — o Qt não reavalia o
+    seletor sozinho, e o botão ficaria com a aparência antiga."""
+    botao.setProperty("role", "primario" if realcado else "")
+    botao.style().unpolish(botao)
+    botao.style().polish(botao)
+
+
+def aplicar_modo_formulario(
+    painel_campos: QWidget,
+    aviso: QLabel,
+    botoes: dict,
+    modo: str,
+    descricao: str = "",
+) -> None:
+    """Deixa o formulário coerente com o estado atual: campos habilitados só
+    quando há o que editar, botões conforme o que faz sentido apertar, e uma
+    linha de texto dizendo em que pé a coisa está.
+
+    O destaque de primário acompanha a próxima ação esperada — bloqueado, o
+    olho vai pro "Novo"; aberto, vai pro "Salvar" — que é o efeito visual que
+    faltava pra deixar claro que o cadastro começa pelo botão.
+
+    `botoes` traz "novo", "salvar" e (opcionalmente) "excluir"."""
+    aberto = modo in MODOS_COM_FORMULARIO_ABERTO
+    painel_campos.setEnabled(aberto)
+    botoes["salvar"].setEnabled(aberto)
+    if "excluir" in botoes:
+        botoes["excluir"].setEnabled(modo == MODO_EDICAO)
+    realcar_botao(botoes["novo"], not aberto)
+    realcar_botao(botoes["salvar"], aberto)
+    aviso.setText(AVISOS_FORMULARIO[modo].format(descricao=descricao))
+    aviso.setProperty("modo", modo)
+    aviso.setStyleSheet(_estilo_aviso(modo))
+
+
+def _estilo_aviso(modo: str) -> str:
+    cores = {
+        MODO_VAZIO: theme.INK_MUTED(),
+        MODO_NOVO: theme.BRASS_DARK(),
+        MODO_EDICAO: theme.BRASS_DARK(),
+        MODO_SALVO: theme.SEAL_GREEN(),
+    }
+    cor = cores[modo]
+    return (
+        f"color: {cor}; font-size: 11px; padding: 7px 10px; "
+        f"border-left: 3px solid {cor}; background: {theme.PAPER()}; border-radius: 3px;"
+    )
+
+
+def criar_aviso_formulario() -> QLabel:
+    aviso = QLabel()
+    aviso.setTextFormat(Qt.RichText)
+    aviso.setWordWrap(True)
+    return aviso
 
 
 def cnpj_valido_ou_vazio(campo: QLineEdit) -> str:
@@ -143,23 +231,32 @@ class CrudTab(QWidget):
         self.form_layout.setSpacing(10)
         self.montar_formulario(self.form_layout)
 
-        btn_novo = QPushButton("Novo")
-        btn_salvar = QPushButton("Salvar")
-        btn_salvar.setProperty("role", "primario")
-        btn_excluir = QPushButton("Excluir")
-        btn_excluir.setProperty("role", "perigo")
-        btn_novo.clicked.connect(self.novo)
-        btn_salvar.clicked.connect(self.salvar)
-        btn_excluir.clicked.connect(self.excluir)
+        # Os campos vão num container próprio pra dar pra bloquear o
+        # formulário inteiro com um setEnabled só — o QSS já escurece tudo
+        # junto, e é esse escurecimento que mostra que a tela está esperando
+        # um clique em "Novo" (ou a seleção de uma linha).
+        self.painel_campos = QWidget()
+        self.painel_campos.setLayout(self.form_layout)
+
+        self.aviso_form = criar_aviso_formulario()
+
+        self.btn_novo = QPushButton("Novo")
+        self.btn_salvar = QPushButton("Salvar")
+        self.btn_excluir = QPushButton("Excluir")
+        self.btn_excluir.setProperty("role", "perigo")
+        self.btn_novo.clicked.connect(self.novo)
+        self.btn_salvar.clicked.connect(self.salvar)
+        self.btn_excluir.clicked.connect(self.excluir)
 
         botoes = QHBoxLayout()
-        botoes.addWidget(btn_novo)
-        botoes.addWidget(btn_salvar)
-        botoes.addWidget(btn_excluir)
+        botoes.addWidget(self.btn_novo)
+        botoes.addWidget(self.btn_salvar)
+        botoes.addWidget(self.btn_excluir)
         botoes.addStretch()
 
         form_container = QVBoxLayout()
-        form_container.addLayout(self.form_layout)
+        form_container.addWidget(self.aviso_form)
+        form_container.addWidget(self.painel_campos)
         form_container.addLayout(botoes)
         form_container.addStretch()
 
@@ -174,7 +271,11 @@ class CrudTab(QWidget):
         layout.addLayout(coluna_tabela, 2)
         layout.addLayout(form_container, 1)
 
+        self._modo = MODO_VAZIO
+        self._descricao_modo = ""
         self.atualizar()
+        self._definir_modo(MODO_VAZIO)
+        theme.estado().mudou.connect(lambda: self._definir_modo(self._modo, self._descricao_modo))
 
     # -------- a sobrescrever nas subclasses --------
     def montar_formulario(self, form_layout: QFormLayout) -> None:
@@ -238,6 +339,22 @@ class CrudTab(QWidget):
                 self.tabela.setItem(row, col, item)
         self.tabela.resizeColumnsToContents()
 
+    def _definir_modo(self, modo: str, descricao: str = "") -> None:
+        self._modo = modo
+        self._descricao_modo = descricao
+        aplicar_modo_formulario(
+            self.painel_campos,
+            self.aviso_form,
+            {"novo": self.btn_novo, "salvar": self.btn_salvar, "excluir": self.btn_excluir},
+            modo,
+            descricao,
+        )
+
+    def descricao_registro(self, registro) -> str:
+        """Como o registro em edição é chamado no aviso. Sobrescrever quando
+        "nome" não for o campo que identifica a coisa pra quem olha."""
+        return str(getattr(registro, "nome", "") or "este registro")
+
     def _ao_selecionar(self) -> None:
         linhas = self.tabela.selectionModel().selectedRows()
         if not linhas:
@@ -245,12 +362,23 @@ class CrudTab(QWidget):
         registro = self._registros[linhas[0].row()]
         self._registro_atual_id = registro.id
         self.carregar_form(registro)
+        self._definir_modo(MODO_EDICAO, self.descricao_registro(registro))
         self.ao_selecionar(registro)
 
     def novo(self) -> None:
         self._registro_atual_id = None
         self.tabela.clearSelection()
         self.limpar_form()
+        self._definir_modo(MODO_NOVO)
+        self._focar_primeiro_campo()
+
+    def _focar_primeiro_campo(self) -> None:
+        """Depois de destravar o formulário, o cursor já vai pro primeiro
+        campo — sem isso o clique em "Novo" libera a digitação mas ainda
+        exige um segundo clique pra começar a digitar."""
+        campo = self.form_layout.itemAt(0, QFormLayout.FieldRole)
+        if campo is not None and campo.widget() is not None:
+            campo.widget().setFocus()
 
     def salvar(self) -> None:
         try:
@@ -260,7 +388,10 @@ class CrudTab(QWidget):
             QMessageBox.warning(self, "Erro ao salvar", str(exc))
             return
         self.atualizar()
-        self.novo()
+        self._registro_atual_id = None
+        self.tabela.clearSelection()
+        self.limpar_form()
+        self._definir_modo(MODO_SALVO)
 
     def excluir(self) -> None:
         if self._registro_atual_id is None:
@@ -277,4 +408,7 @@ class CrudTab(QWidget):
             QMessageBox.warning(self, "Erro ao excluir", str(exc))
             return
         self.atualizar()
-        self.novo()
+        self._registro_atual_id = None
+        self.tabela.clearSelection()
+        self.limpar_form()
+        self._definir_modo(MODO_VAZIO)

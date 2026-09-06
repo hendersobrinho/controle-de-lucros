@@ -5,6 +5,59 @@ substituindo a planilha de controle. Feito em Python + PySide6, com banco de
 dados SQLite local — sem servidor, sem nuvem, cada instalação guarda seus
 próprios dados.
 
+## Como funcionam as telas de cadastro
+
+Nas telas de **Empresas · Cadastro** e **Sócios**, o formulário da direita tem
+três estados, sinalizados pelo aviso acima dos campos e pelo botão em destaque:
+
+| Estado | Como aparece |
+|---|---|
+| Bloqueado | Campos e rótulos apagados; **Novo** em destaque. Nada foi selecionado ainda. |
+| Novo registro | Campos liberados com o cursor no primeiro deles; **Salvar** em destaque. |
+| Editando *fulano* | Campos preenchidos com o registro selecionado; **Salvar** e **Excluir** liberados. |
+
+O destaque de botão primário acompanha a próxima ação esperada, e o aviso do
+modo de edição diz de quem é o registro e que salvar **substitui** aquele
+registro — para cadastrar outro é preciso clicar em **Novo** antes.
+
+## Distribuição trimestral
+
+Além da aba de **Distribuição anual**, há a de **Distribuição trimestral**, para
+as empresas que deliberam por trimestre em vez de uma vez no fim do ano. Cada
+trimestre registra, por sócio, o valor distribuído, o pró-labore e o IRRF.
+
+A cada lançamento, a distribuição **anual** daquele sócio passa a ser a soma dos
+trimestres já lançados — o anual vai acumulando sozinho, sem ninguém somar à
+mão, e o informe de rendimentos (que lê o anual) acompanha. A coluna **Origem**
+na aba anual mostra de onde veio cada valor:
+
+- `trimestres` — o valor é o somatório dos trimestres lançados;
+- `editado à mão (trimestres: R$ …)` — alguém digitou outro valor na aba anual;
+  ele prevalece **até o próximo lançamento trimestral**, que volta a escrever a
+  soma por cima;
+- `—` — a empresa não usa controle trimestral, e nada mudou pra ela.
+
+Trancar o período na aba anual tranca os lançamentos trimestrais do mesmo ano.
+
+## Informe de rendimentos
+
+A aba **Sócios** emite o Comprovante de Rendimentos Pagos e de Imposto sobre a
+Renda Retido na Fonte no modelo da Instrução Normativa RFB nº 2.060/2021 —
+selecione o sócio e clique em **Informe de rendimentos**.
+
+É um comprovante por empresa (cada uma é uma fonte pagadora, com o seu próprio
+CNPJ), e dá pra emitir todos de uma vez, um PDF por empresa. O exercício é
+sempre o ano seguinte ao ano-calendário escolhido.
+
+O sistema já preenche o que ele controla — pró-labore e IRRF no Quadro 3,
+lucro distribuído no Quadro 4 e o saldo de empréstimo da empresa ao sócio no
+Quadro 7. O que ele não controla (INSS, 13º, pensão alimentícia, diárias) é
+digitado na tela, conferido contra a folha e fica guardado por sócio, empresa
+e ano — reemitir depois não exige digitar tudo de novo.
+
+O botão **Visualizar** mostra o mesmo HTML que vai pro PDF, então conferir na
+tela é conferir o documento impresso.
+
 ## Rodar a partir do código-fonte
 
 Requer Python 3.11+.

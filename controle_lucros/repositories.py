@@ -5,18 +5,23 @@ import datetime as dt
 import re
 import sqlite3
 
-from . import sessao
+from . import fiscal, sessao
 from .auth import gerar_hash_senha, senha_confere
 from .models import (
+    CAMPOS_VALOR_INFORME,
     TIPOS_MOVIMENTACAO_LABEL,
+    TRIMESTRES,
     AlteracaoContratual,
     DistribuicaoLucro,
+    DistribuicaoTrimestral,
     Empresa,
+    InformeRendimento,
     LogAtividade,
     Movimentacao,
     Socio,
     Usuario,
     VinculoSocietario,
+    periodo_trimestre,
 )
 
 
@@ -781,7 +786,11 @@ def panorama_distribuicao_anual(conn: sqlite3.Connection, empresa_id: int, ano_b
     entrou/saiu da sociedade *naquele ano* — uma atualização de cotas no meio
     do ano fecha e reabre o vínculo internamente, mas não conta como o sócio
     tendo saído e voltado (ver _inicio_do_vinculo_continuo); uma saída e
-    reentrada de verdade, anos depois, continua contando normalmente."""
+    reentrada de verdade, anos depois, continua contando normalmente.
+
+    Quando a empresa lança por trimestre, cada linha traz também o acumulado
+    trimestral e de onde veio o valor anual mostrado ("trimestres" ou
+    "manual")."""
     inicio, fim = f"{ano_base}-01-01", f"{ano_base}-12-31"
 
     socios_no_ano = conn.execute(
@@ -794,6 +803,7 @@ def panorama_distribuicao_anual(conn: sqlite3.Connection, empresa_id: int, ano_b
     distribuicoes = {d.socio_id: d for d in listar_distribuicoes(conn, empresa_id, ano_base)}
     total_distribuido = total_distribuido_empresa_ano(conn, empresa_id, ano_base)
     socios = {s.id: s for s in listar_socios(conn)}
+    acumulado = acumulado_trimestral(conn, empresa_id, ano_base)
 
     linhas = []
     for row in socios_no_ano:
@@ -827,6 +837,27 @@ def panorama_distribuicao_anual(conn: sqlite3.Connection, empresa_id: int, ano_b
         percentual_distribuido = (100 * valor_distribuido / total_distribuido) if total_distribuido else 0.0
         emprestimo = soma_movimentacoes(conn, empresa_id, socio_id, ano_base, "emprestimo_empresa_para_socio")
 
+        # De onde veio o valor anual. Em vez de guardar a origem numa coluna
+        # (que ficaria mentindo assim que alguém editasse o outro lado), ela é
+        # deduzida: se bate com a soma dos trimestres, veio dela. Se alguém
+        # editou o anual à mão depois, o número deixa de bater e a tela
+        # mostra "manual" — que é exatamente o que aconteceu.
+        somas = acumulado.get(socio_id)
+        origem_valor = "manual"
+        if somas is not None:
+            # Os três campos são propagados juntos pelos trimestres; se
+            # QUALQUER um divergir, alguém editou o anual à mão e o rótulo
+            # tem que dizer isso — comparar só o valor distribuído deixaria
+            # um pró-labore editado passando por somatório.
+            atuais = (
+                valor_distribuido,
+                distribuicao.pro_labore if distribuicao else 0.0,
+                distribuicao.irrf if distribuicao else 0.0,
+            )
+            esperados = (somas["valor_distribuido"], somas["pro_labore"], somas["irrf"])
+            if all(abs(a - e) <= 0.005 for a, e in zip(atuais, esperados)):
+                origem_valor = "trimestres"
+
         socio = socios.get(socio_id)
         linhas.append(
             {
@@ -842,6 +873,9 @@ def panorama_distribuicao_anual(conn: sqlite3.Connection, empresa_id: int, ano_b
                 "pro_labore": distribuicao.pro_labore if distribuicao else 0.0,
                 "irrf": distribuicao.irrf if distribuicao else 0.0,
                 "percentual_distribuido": percentual_distribuido,
+                "tem_trimestres": somas is not None,
+                "acumulado_trimestral": somas["valor_distribuido"] if somas else 0.0,
+                "origem_valor": origem_valor,
                 "emprestimo_recebido": emprestimo,
                 "data_entrada": vinculo_atual["data_entrada"],
                 "data_saida": None if ainda_ativo else vinculo_atual["data_saida"],
@@ -855,18 +889,238 @@ def panorama_distribuicao_anual(conn: sqlite3.Connection, empresa_id: int, ano_b
     return linhas
 
 
+# ------------------------------------------------ Distribuição trimestral --
+
+
+def listar_distribuicoes_trimestrais(
+    conn: sqlite3.Connection, empresa_id: int, ano_base: int, trimestre: int | None = None
+) -> list[DistribuicaoTrimestral]:
+    """trimestre=None traz o ano inteiro — é assim que se soma o acumulado."""
+    if trimestre is None:
+        rows = conn.execute(
+            """SELECT * FROM distribuicao_trimestral WHERE empresa_id=? AND ano_base=?
+               ORDER BY trimestre""",
+            (empresa_id, ano_base),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM distribuicao_trimestral WHERE empresa_id=? AND ano_base=? AND trimestre=?",
+            (empresa_id, ano_base, trimestre),
+        ).fetchall()
+    return [DistribuicaoTrimestral(**dict(r)) for r in rows]
+
+
+def trimestres_lancados(conn: sqlite3.Connection, empresa_id: int, ano_base: int) -> list[int]:
+    """Quais trimestres do ano já têm algum lançamento — é o que diz se esta
+    empresa usa controle trimestral e até onde o acumulado já foi."""
+    rows = conn.execute(
+        """SELECT DISTINCT trimestre FROM distribuicao_trimestral
+           WHERE empresa_id=? AND ano_base=? ORDER BY trimestre""",
+        (empresa_id, ano_base),
+    ).fetchall()
+    return [r["trimestre"] for r in rows]
+
+
+def acumulado_trimestral(
+    conn: sqlite3.Connection, empresa_id: int, ano_base: int, ate_trimestre: int | None = None
+) -> dict[int, dict]:
+    """Soma dos trimestres por sócio, {socio_id: {valor_distribuido, pro_labore,
+    irrf}}. ate_trimestre limita o acumulado (o 2º trimestre mostra 1º + 2º)."""
+    limite = ate_trimestre if ate_trimestre is not None else 4
+    rows = conn.execute(
+        """SELECT socio_id,
+                  COALESCE(SUM(valor_distribuido), 0) AS valor_distribuido,
+                  COALESCE(SUM(pro_labore), 0) AS pro_labore,
+                  COALESCE(SUM(irrf), 0) AS irrf
+           FROM distribuicao_trimestral
+           WHERE empresa_id=? AND ano_base=? AND trimestre <= ?
+           GROUP BY socio_id""",
+        (empresa_id, ano_base, limite),
+    ).fetchall()
+    return {
+        r["socio_id"]: {
+            "valor_distribuido": r["valor_distribuido"],
+            "pro_labore": r["pro_labore"],
+            "irrf": r["irrf"],
+        }
+        for r in rows
+    }
+
+
+def salvar_distribuicao_trimestral(
+    conn: sqlite3.Connection,
+    empresa_id: int,
+    ano_base: int,
+    trimestre: int,
+    socio_id: int,
+    valor_distribuido: float,
+    pro_labore: float = 0.0,
+    irrf: float = 0.0,
+) -> int:
+    """Grava o trimestre e reflete o acumulado do ano na distribuição anual.
+
+    A propagação é o ponto todo do controle trimestral: sem ela existiriam
+    dois números concorrentes pro mesmo ano, e o informe de rendimentos (que
+    lê a distribuição anual) ficaria defasado a cada trimestre lançado.
+    Editar o valor anual à mão depois continua valendo — até o próximo
+    lançamento trimestral, que volta a escrever a soma por cima."""
+    if trimestre not in TRIMESTRES:
+        raise ValueError(f"Trimestre inválido: {trimestre}. Use 1, 2, 3 ou 4.")
+    _garantir_periodo_aberto(conn, empresa_id, ano_base)
+
+    existente = conn.execute(
+        """SELECT id FROM distribuicao_trimestral
+           WHERE empresa_id=? AND ano_base=? AND trimestre=? AND socio_id=?""",
+        (empresa_id, ano_base, trimestre, socio_id),
+    ).fetchone()
+    socio = conn.execute("SELECT nome FROM socio WHERE id=?", (socio_id,)).fetchone()
+    detalhes = (
+        f"{socio['nome'] if socio else '?'} — {trimestre}º trimestre de {ano_base} — "
+        f"R$ {valor_distribuido:.2f} (pró-labore R$ {pro_labore:.2f}, IRRF R$ {irrf:.2f})"
+    )
+
+    if existente is not None:
+        conn.execute(
+            """UPDATE distribuicao_trimestral SET valor_distribuido=?, pro_labore=?, irrf=?
+               WHERE id=?""",
+            (valor_distribuido, pro_labore, irrf, existente["id"]),
+        )
+        _registrar_log(conn, "atualizar", "distribuicao_trimestral", existente["id"], detalhes)
+        registro_id = existente["id"]
+    else:
+        cur = conn.execute(
+            """INSERT INTO distribuicao_trimestral
+               (empresa_id, ano_base, trimestre, socio_id, valor_distribuido, pro_labore, irrf)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (empresa_id, ano_base, trimestre, socio_id, valor_distribuido, pro_labore, irrf),
+        )
+        _registrar_log(conn, "criar", "distribuicao_trimestral", cur.lastrowid, detalhes)
+        registro_id = cur.lastrowid
+    conn.commit()
+
+    _refletir_trimestres_no_anual(conn, empresa_id, ano_base, socio_id)
+    return registro_id
+
+
+def excluir_distribuicao_trimestral(conn: sqlite3.Connection, registro_id: int) -> None:
+    registro = conn.execute(
+        "SELECT * FROM distribuicao_trimestral WHERE id=?", (registro_id,)
+    ).fetchone()
+    if registro is None:
+        return
+    _garantir_periodo_aberto(conn, registro["empresa_id"], registro["ano_base"])
+    conn.execute("DELETE FROM distribuicao_trimestral WHERE id=?", (registro_id,))
+    _registrar_log(
+        conn,
+        "excluir",
+        "distribuicao_trimestral",
+        registro_id,
+        f"{registro['trimestre']}º trimestre de {registro['ano_base']}",
+    )
+    conn.commit()
+    _refletir_trimestres_no_anual(conn, registro["empresa_id"], registro["ano_base"], registro["socio_id"])
+
+
+def _refletir_trimestres_no_anual(
+    conn: sqlite3.Connection, empresa_id: int, ano_base: int, socio_id: int
+) -> None:
+    """Escreve a soma dos trimestres do sócio na distribuição anual. Quando o
+    último trimestre do sócio é excluído, a soma vira zero e o anual zera
+    junto — deixar o valor antigo lá seria pior: ninguém saberia de onde
+    veio."""
+    soma = acumulado_trimestral(conn, empresa_id, ano_base).get(
+        socio_id, {"valor_distribuido": 0.0, "pro_labore": 0.0, "irrf": 0.0}
+    )
+    salvar_distribuicao(
+        conn,
+        empresa_id,
+        ano_base,
+        socio_id,
+        soma["valor_distribuido"],
+        soma["pro_labore"],
+        soma["irrf"],
+    )
+
+
+def panorama_distribuicao_trimestral(
+    conn: sqlite3.Connection, empresa_id: int, ano_base: int, trimestre: int
+) -> list[dict]:
+    """Uma linha por sócio que esteve na sociedade em algum momento DAQUELE
+    trimestre — quem saiu no 1º não aparece no 4º. Cada linha traz o que foi
+    lançado no trimestre e o acumulado do ano até ele, que é o número que a
+    distribuição anual está mostrando."""
+    inicio, fim = periodo_trimestre(ano_base, trimestre)
+
+    vinculos = conn.execute(
+        """SELECT socio_id, percentual_capital, quantidade_cotas, data_entrada, data_saida
+           FROM vinculo_societario
+           WHERE empresa_id=? AND date(data_entrada) <= date(?)
+             AND (data_saida IS NULL OR date(data_saida) >= date(?))
+           ORDER BY date(data_entrada)""",
+        (empresa_id, fim, inicio),
+    ).fetchall()
+
+    lancamentos = {
+        d.socio_id: d for d in listar_distribuicoes_trimestrais(conn, empresa_id, ano_base, trimestre)
+    }
+    acumulado = acumulado_trimestral(conn, empresa_id, ano_base, ate_trimestre=trimestre)
+    socios = {s.id: s for s in listar_socios(conn)}
+
+    linhas: dict[int, dict] = {}
+    for v in vinculos:
+        socio = socios.get(v["socio_id"])
+        lancamento = lancamentos.get(v["socio_id"])
+        somas = acumulado.get(v["socio_id"], {})
+        # Um sócio pode ter mais de um segmento de vínculo dentro do mesmo
+        # trimestre (atualização de cotas no meio); vale o mais recente, que é
+        # o que a ordenação por data_entrada deixa por último.
+        linhas[v["socio_id"]] = {
+            "socio_id": v["socio_id"],
+            "socio_nome": socio.nome if socio else "?",
+            "socio_cpf": socio.cpf if socio else "",
+            "percentual_capital": v["percentual_capital"],
+            "quantidade_cotas": v["quantidade_cotas"] or 0,
+            "registro_id": lancamento.id if lancamento else None,
+            "valor_distribuido": lancamento.valor_distribuido if lancamento else 0.0,
+            "pro_labore": lancamento.pro_labore if lancamento else 0.0,
+            "irrf": lancamento.irrf if lancamento else 0.0,
+            "acumulado_valor": somas.get("valor_distribuido", 0.0),
+            "acumulado_pro_labore": somas.get("pro_labore", 0.0),
+            "acumulado_irrf": somas.get("irrf", 0.0),
+            "data_saida": v["data_saida"],
+            "saiu_no_trimestre": bool(v["data_saida"] and inicio <= v["data_saida"] <= fim),
+            "entrou_no_trimestre": inicio <= v["data_entrada"] <= fim,
+        }
+    return sorted(linhas.values(), key=lambda l: l["socio_nome"])
+
+
+def total_distribuido_trimestre(
+    conn: sqlite3.Connection, empresa_id: int, ano_base: int, trimestre: int
+) -> float:
+    row = conn.execute(
+        """SELECT COALESCE(SUM(valor_distribuido), 0) AS total FROM distribuicao_trimestral
+           WHERE empresa_id=? AND ano_base=? AND trimestre=?""",
+        (empresa_id, ano_base, trimestre),
+    ).fetchone()
+    return row["total"]
+
+
 # ---------------------------------------------------- Importação em massa (cadastro) --
 
 
 def preparar_importacao_cadastro(conn: sqlite3.Connection, linhas: list[dict]) -> dict:
     """Casa cada linha da planilha de cadastro em massa (empresa + sócio +
     vínculo) contra os cadastros já existentes. Empresa é casada por nº de
-    chamada, CNPJ ou nome exato — baixo risco de duplicata, resolve sozinha
+    da empresa, CNPJ ou nome exato — baixo risco de duplicata, resolve sozinha
     (ou fica marcada pra criar). Sócio é casado por CPF, com nome único como
     retaguarda — mesma regra de nunca duplicar usada na importação de
     distribuição, porque o mesmo sócio costuma aparecer em várias empresas:
     o que não bate com segurança vira pendência pra revisão humana. Não
-    escreve nada no banco."""
+    escreve nada no banco.
+
+    Devolve três listas: "prontas" (aplicáveis direto), "pendencias" (falta
+    decidir qual é o sócio) e "conflitos" (a linha se contradiz e não dá pra
+    aplicar sem corrigir a planilha)."""
     empresas = listar_empresas(conn)
     por_numero_chamada = {e.numero_chamada.strip(): e for e in empresas if e.numero_chamada and e.numero_chamada.strip()}
     por_cnpj = {normalizar_documento(e.cnpj): e for e in empresas if e.cnpj and e.cnpj.strip()}
@@ -882,13 +1136,30 @@ def preparar_importacao_cadastro(conn: sqlite3.Connection, linhas: list[dict]) -
 
     prontas: list[dict] = []
     pendencias: list[dict] = []
+    conflitos: list[dict] = []
 
     for linha in linhas:
-        empresa = None
-        if linha["numero_chamada"]:
-            empresa = por_numero_chamada.get(linha["numero_chamada"].strip())
-        if empresa is None and linha["cnpj"]:
-            empresa = por_cnpj.get(normalizar_documento(linha["cnpj"]))
+        por_chamada = por_numero_chamada.get(linha["numero_chamada"].strip()) if linha["numero_chamada"] else None
+        pelo_cnpj = por_cnpj.get(normalizar_documento(linha["cnpj"])) if linha["cnpj"] else None
+
+        # Nº da empresa e CNPJ apontando pra empresas DIFERENTES é erro de
+        # digitação na planilha, não uma escolha a fazer: aplicar em cima de
+        # uma das duas lançaria distribuição na empresa errada, calado. A
+        # linha fica de fora e o motivo é mostrado no fim da importação.
+        if por_chamada is not None and pelo_cnpj is not None and por_chamada.id != pelo_cnpj.id:
+            conflitos.append(
+                {
+                    **linha,
+                    "aviso": (
+                        f'O nº da empresa "{linha["numero_chamada"]}" é da empresa '
+                        f'"{por_chamada.nome}", mas o CNPJ informado é da empresa '
+                        f'"{pelo_cnpj.nome}". Corrija a planilha e importe de novo.'
+                    ),
+                }
+            )
+            continue
+
+        empresa = por_chamada or pelo_cnpj
         if empresa is None:
             candidatos_empresa = por_nome_empresa.get(linha["empresa_nome"].strip().lower(), [])
             if len(candidatos_empresa) == 1:
@@ -916,7 +1187,7 @@ def preparar_importacao_cadastro(conn: sqlite3.Connection, linhas: list[dict]) -
 
         prontas.append({**linha, "empresa_existente": empresa, "socio_id": socio.id})
 
-    return {"prontas": prontas, "pendencias": pendencias}
+    return {"prontas": prontas, "pendencias": pendencias, "conflitos": conflitos}
 
 
 def aplicar_importacao_cadastro(conn: sqlite3.Connection, linhas_resolvidas: list[dict]) -> dict:
@@ -1208,3 +1479,196 @@ def listar_log_atividade(
 
     rows = conn.execute(sql, parametros).fetchall()
     return [_log_de_linha(r) for r in rows]
+
+
+# ------------------------------------------------- Informe de rendimentos --
+
+
+def empresas_do_socio_no_ano(conn: sqlite3.Connection, socio_id: int, ano_base: int) -> list[Empresa]:
+    """Empresas que foram fonte pagadora desse sócio no ano — uma empresa por
+    informe, porque cada uma emite o seu próprio comprovante com o seu CNPJ.
+
+    Entra na lista quem teve vínculo em qualquer momento do ano (entrou em
+    março ou saiu em agosto continua tendo informe daquele ano) e também quem
+    já saiu mas ainda tem o que declarar naquele ano:
+
+    * lucro deliberado depois da saída ainda é rendimento pago pela empresa;
+    * empréstimo tomado antes da saída continua sendo saldo em 31/12 até ser
+      quitado, e é o comprovante que dá ao sócio o número da ficha de Dívidas
+      e Ônus Reais.
+
+    Sem isso o informe sumiria justamente no ano em que o sócio precisa dele."""
+    inicio, fim = f"{ano_base}-01-01", f"{ano_base}-12-31"
+    rows = conn.execute(
+        """SELECT DISTINCT e.* FROM empresa e
+           WHERE e.id IN (
+               SELECT empresa_id FROM vinculo_societario
+               WHERE socio_id = ? AND data_entrada <= ? AND (data_saida IS NULL OR data_saida >= ?)
+               UNION
+               SELECT empresa_id FROM distribuicao_lucro WHERE socio_id = ? AND ano_base = ?
+               UNION
+               SELECT empresa_id FROM movimentacao
+               WHERE socio_id = ? AND strftime('%Y', data) = ?
+               UNION
+               SELECT empresa_id FROM movimentacao
+               WHERE socio_id = ? AND tipo = 'emprestimo_empresa_para_socio' AND data <= ?
+               UNION
+               SELECT empresa_id FROM informe_rendimento WHERE socio_id = ? AND ano_base = ?
+           )
+           ORDER BY e.nome""",
+        (
+            socio_id, fim, inicio,
+            socio_id, ano_base,
+            socio_id, str(ano_base),
+            socio_id, fim,
+            socio_id, ano_base,
+        ),
+    ).fetchall()
+    return [Empresa(**dict(r)) for r in rows]
+
+
+def saldo_emprestimo_em(conn: sqlite3.Connection, empresa_id: int, socio_id: int, ano_base: int) -> float:
+    """Saldo acumulado dos empréstimos da empresa ao sócio até 31/12 do ano —
+    é o número que vai pro Quadro 7, pro sócio declarar em Dívidas e Ônus
+    Reais.
+
+    Soma só o sentido empresa→sócio. O sentido oposto (sócio→empresa) é uma
+    dívida da empresa, não um pagamento desta aqui: abater um do outro
+    misturaria dois saldos que a declaração pede em fichas separadas. O
+    sistema também não registra amortização, então isto é uma sugestão — a
+    tela deixa corrigir antes de emitir."""
+    row = conn.execute(
+        """SELECT COALESCE(SUM(valor), 0) AS total FROM movimentacao
+           WHERE empresa_id=? AND socio_id=? AND tipo='emprestimo_empresa_para_socio' AND data <= ?""",
+        (empresa_id, socio_id, f"{ano_base}-12-31"),
+    ).fetchone()
+    return row["total"]
+
+
+def buscar_informe(
+    conn: sqlite3.Connection, empresa_id: int, ano_base: int, socio_id: int
+) -> InformeRendimento | None:
+    row = conn.execute(
+        "SELECT * FROM informe_rendimento WHERE empresa_id=? AND ano_base=? AND socio_id=?",
+        (empresa_id, ano_base, socio_id),
+    ).fetchone()
+    return InformeRendimento(**dict(row)) if row else None
+
+
+def informe_sugerido(
+    conn: sqlite3.Connection, empresa_id: int, ano_base: int, socio_id: int
+) -> InformeRendimento:
+    """Monta o informe a partir do que o sistema já sabe, sem gravar nada:
+    pró-labore e IRRF da distribuição do ano viram as linhas 1 e 5 do Quadro
+    3, o valor distribuído vira a linha 5 do Quadro 4, e o saldo de
+    empréstimo vira o Quadro 7.
+
+    O que o sistema não controla (INSS, 13º, pensão alimentícia, diárias) sai
+    zerado e é preenchido na tela. É aqui — e só aqui — que os REAL do banco
+    viram centavos."""
+    distribuicao = conn.execute(
+        "SELECT * FROM distribuicao_lucro WHERE empresa_id=? AND ano_base=? AND socio_id=?",
+        (empresa_id, ano_base, socio_id),
+    ).fetchone()
+    return InformeRendimento(
+        id=None,
+        empresa_id=empresa_id,
+        socio_id=socio_id,
+        ano_base=ano_base,
+        q3_total_rendimentos=fiscal.reais_para_centavos(distribuicao["pro_labore"] if distribuicao else 0),
+        q3_irrf=fiscal.reais_para_centavos(distribuicao["irrf"] if distribuicao else 0),
+        q4_lucros_dividendos=fiscal.reais_para_centavos(
+            distribuicao["valor_distribuido"] if distribuicao else 0
+        ),
+        emprestimo_saldo=fiscal.reais_para_centavos(
+            saldo_emprestimo_em(conn, empresa_id, socio_id, ano_base)
+        ),
+    )
+
+
+def carregar_informe(
+    conn: sqlite3.Connection, empresa_id: int, ano_base: int, socio_id: int
+) -> tuple[InformeRendimento, bool]:
+    """O informe já conferido e salvo, se existir; senão o sugerido a partir
+    dos lançamentos. Devolve junto se veio do banco, pra tela poder avisar
+    que está mostrando sugestão e não algo que alguém já conferiu."""
+    salvo = buscar_informe(conn, empresa_id, ano_base, socio_id)
+    if salvo is not None:
+        return salvo, True
+    return informe_sugerido(conn, empresa_id, ano_base, socio_id), False
+
+
+def salvar_informe(conn: sqlite3.Connection, informe: InformeRendimento) -> int:
+    """Grava os valores conferidos — um registro por (empresa, ano, sócio),
+    substituindo o anterior, porque é o informe vigente daquele ano.
+
+    Não passa por _garantir_periodo_aberto: emitir informe é obrigação de
+    abril, quando o período do ano anterior normalmente já está fechado."""
+    negativos = [
+        campo for campo in CAMPOS_VALOR_INFORME + ("emprestimo_saldo",)
+        if int(getattr(informe, campo) or 0) < 0
+    ]
+    if negativos:
+        raise ValueError("Os valores do informe não podem ser negativos.")
+    if not (1996 <= informe.ano_base <= dt.date.today().year + 1):
+        raise ValueError(
+            f"Ano-calendário inválido: {informe.ano_base}. O informe existe pra anos a partir de 1996."
+        )
+
+    campos = CAMPOS_VALOR_INFORME + (
+        "codigo_beneficiario",
+        "natureza_rendimento",
+        "emprestimo_saldo",
+        "informacoes_complementares",
+        "responsavel_nome",
+    )
+    valores = [getattr(informe, campo) for campo in campos]
+    agora = dt.datetime.now().isoformat(timespec="seconds")
+    socio = conn.execute("SELECT nome FROM socio WHERE id=?", (informe.socio_id,)).fetchone()
+    empresa = conn.execute("SELECT nome FROM empresa WHERE id=?", (informe.empresa_id,)).fetchone()
+    detalhes = (
+        f"{socio['nome'] if socio else '?'} — {empresa['nome'] if empresa else '?'} — {informe.ano_base}"
+    )
+
+    existente = conn.execute(
+        "SELECT id FROM informe_rendimento WHERE empresa_id=? AND ano_base=? AND socio_id=?",
+        (informe.empresa_id, informe.ano_base, informe.socio_id),
+    ).fetchone()
+    if existente is not None:
+        atribuicoes = ", ".join(f"{campo}=?" for campo in campos)
+        conn.execute(
+            f"UPDATE informe_rendimento SET {atribuicoes}, atualizado_em=? WHERE id=?",
+            (*valores, agora, existente["id"]),
+        )
+        _registrar_log(conn, "atualizar", "informe_rendimento", existente["id"], detalhes)
+        conn.commit()
+        return existente["id"]
+
+    colunas = ", ".join(("empresa_id", "socio_id", "ano_base", *campos, "atualizado_em"))
+    marcadores = ", ".join("?" * (len(campos) + 4))
+    cur = conn.execute(
+        f"INSERT INTO informe_rendimento ({colunas}) VALUES ({marcadores})",
+        (informe.empresa_id, informe.socio_id, informe.ano_base, *valores, agora),
+    )
+    _registrar_log(conn, "criar", "informe_rendimento", cur.lastrowid, detalhes)
+    conn.commit()
+    return cur.lastrowid
+
+
+def registrar_emissao_informe(
+    conn: sqlite3.Connection, empresa_id: int, ano_base: int, socio_id: int, destino: str
+) -> None:
+    """Auditoria da emissão em si — o informe salvo diz o que foi declarado,
+    o log diz quando saiu o papel e pra onde, que é o que se pergunta quando
+    o sócio liga dizendo que não recebeu."""
+    socio = conn.execute("SELECT nome FROM socio WHERE id=?", (socio_id,)).fetchone()
+    empresa = conn.execute("SELECT nome FROM empresa WHERE id=?", (empresa_id,)).fetchone()
+    _registrar_log(
+        conn,
+        "emitir",
+        "informe_rendimento",
+        None,
+        f"{socio['nome'] if socio else '?'} — {empresa['nome'] if empresa else '?'} — "
+        f"ano-calendário {ano_base} — {destino}",
+    )
+    conn.commit()

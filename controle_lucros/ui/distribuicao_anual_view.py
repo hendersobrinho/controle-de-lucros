@@ -43,6 +43,7 @@ COLUNAS = [
     "% capital",
     "Cotas",
     "Valor distribuído",
+    "Origem",
     "Pró-labore",
     "IRRF",
     "% distribuído",
@@ -50,6 +51,18 @@ COLUNAS = [
     "Data de saída",
     "Situação",
 ]
+
+# Os widgets da edição em linha são posicionados por índice de coluna;
+# derivar do nome evita que inserir uma coluna no meio desloque tudo em
+# silêncio (o widget iria parar na célula errada, sem erro nenhum).
+COL_PERCENTUAL = COLUNAS.index("% capital")
+COL_COTAS = COLUNAS.index("Cotas")
+COL_VALOR = COLUNAS.index("Valor distribuído")
+COL_ORIGEM = COLUNAS.index("Origem")
+COL_PRO_LABORE = COLUNAS.index("Pró-labore")
+COL_IRRF = COLUNAS.index("IRRF")
+COL_DATA_SAIDA = COLUNAS.index("Data de saída")
+COLUNAS_EDITAVEIS = (COL_PERCENTUAL, COL_COTAS, COL_VALOR, COL_PRO_LABORE, COL_IRRF, COL_DATA_SAIDA)
 
 
 class _DialogoDataVigencia(QDialog):
@@ -432,6 +445,29 @@ class DistribuicaoAnualView(QWidget):
         tema_estado().mudou.connect(self._aplicar_cores)
         self.atualizar()
 
+    @staticmethod
+    def _texto_origem(linha: dict) -> str:
+        """De onde veio o valor distribuído da linha. Empresa que não lança
+        por trimestre não tem essa distinção — fica com um traço, em vez de
+        "manual", que sugeriria que existe uma alternativa automática."""
+        if not linha["tem_trimestres"]:
+            return "—"
+        if linha["origem_valor"] == "trimestres":
+            return "trimestres"
+        return f"editado à mão (trimestres: R$ {formatar_valor_br(linha['acumulado_trimestral'])})"
+
+    @staticmethod
+    def _dica_origem(linha: dict) -> str:
+        if not linha["tem_trimestres"]:
+            return "Esta empresa não usa lançamento trimestral."
+        if linha["origem_valor"] == "trimestres":
+            return "Valor, pró-labore e IRRF são a soma dos trimestres lançados."
+        return (
+            "Algum dos três valores (distribuído, pró-labore ou IRRF) foi editado aqui e "
+            "não bate mais com a soma dos trimestres. O próximo lançamento trimestral "
+            "volta a sobrescrever."
+        )
+
     def _legenda(self, texto: str) -> QLabel:
         rotulo = QLabel(f"●  {texto}")
         return rotulo
@@ -466,7 +502,7 @@ class DistribuicaoAnualView(QWidget):
         self._editando = False
         self._widgets_edicao = []
         for row in range(self.tabela.rowCount()):
-            for col in (2, 3, 4, 5, 6, 9):
+            for col in COLUNAS_EDITAVEIS:
                 self.tabela.removeCellWidget(row, col)
         empresa_id = self.empresa.currentData()
         if empresa_id is None:
@@ -494,7 +530,19 @@ class DistribuicaoAnualView(QWidget):
 
         self._linhas = repo.panorama_distribuicao_anual(self.conn, empresa_id, ano_base)
         total = repo.total_distribuido_empresa_ano(self.conn, empresa_id, ano_base)
-        self.resumo.setText(f"Lucro total distribuído em {ano_base}: R$ {formatar_valor_br(total)}")
+        resumo = f"Lucro total distribuído em {ano_base}: R$ {formatar_valor_br(total)}"
+
+        # Empresa que lança por trimestre tem o valor anual alimentado por lá;
+        # dizer isso aqui evita a pergunta "de onde saiu esse número?" e avisa
+        # que editar à mão vale só até o próximo lançamento trimestral.
+        lancados = repo.trimestres_lancados(self.conn, empresa_id, ano_base)
+        if lancados:
+            trimestres = ", ".join(f"{t}º" for t in lancados)
+            resumo += (
+                f"  ·  acumulado dos trimestres lançados ({trimestres}) — "
+                "editar aqui vale até o próximo lançamento na aba trimestral"
+            )
+        self.resumo.setText(resumo)
 
         estado = repo.estado_empresa_no_periodo(self.conn, empresa_id, ano_base)
         texto_capital = f"Capital atual: R$ {formatar_valor_br(estado['capital_fim'])}"
@@ -550,6 +598,7 @@ class DistribuicaoAnualView(QWidget):
                 formatar_valor_br(linha["percentual_capital"], 4),
                 formatar_valor_br(linha["quantidade_cotas"], 0),
                 f"R$ {formatar_valor_br(linha['valor_distribuido'])}",
+                self._texto_origem(linha),
                 f"R$ {formatar_valor_br(linha['pro_labore'])}" if linha["pro_labore"] else "—",
                 f"R$ {formatar_valor_br(linha['irrf'])}" if linha["irrf"] else "—",
                 formatar_valor_br(linha["percentual_distribuido"], 3),
@@ -567,6 +616,8 @@ class DistribuicaoAnualView(QWidget):
             for col, valor in enumerate(valores):
                 item = QTableWidgetItem(valor)
                 item.setData(Qt.UserRole, linha["socio_id"])
+                if col == COL_ORIGEM:
+                    item.setToolTip(self._dica_origem(linha))
                 if cor_fundo:
                     item.setBackground(QColor(cor_fundo))
                     item.setForeground(QColor(cor_texto))
@@ -689,18 +740,26 @@ class DistribuicaoAnualView(QWidget):
             else:
                 saida.setDate(saida.minimumDate())
 
-            self.tabela.setCellWidget(row, 2, pct)
-            self.tabela.setCellWidget(row, 3, cotas)
-            self.tabela.setCellWidget(row, 4, valor)
-            self.tabela.setCellWidget(row, 5, pro_labore)
-            self.tabela.setCellWidget(row, 6, irrf)
-            self.tabela.setCellWidget(row, 9, saida)
+            self.tabela.setCellWidget(row, COL_PERCENTUAL, pct)
+            self.tabela.setCellWidget(row, COL_COTAS, cotas)
+            self.tabela.setCellWidget(row, COL_VALOR, valor)
+            self.tabela.setCellWidget(row, COL_PRO_LABORE, pro_labore)
+            self.tabela.setCellWidget(row, COL_IRRF, irrf)
+            self.tabela.setCellWidget(row, COL_DATA_SAIDA, saida)
 
             self._widgets_edicao.append(
                 {"percentual": pct, "cotas": cotas, "valor": valor, "pro_labore": pro_labore, "irrf": irrf, "data_saida": saida}
             )
 
-        for col, largura in ((2, 110), (3, 100), (4, 150), (5, 140), (6, 140), (9, 130)):
+        larguras = (
+            (COL_PERCENTUAL, 110),
+            (COL_COTAS, 100),
+            (COL_VALOR, 150),
+            (COL_PRO_LABORE, 140),
+            (COL_IRRF, 140),
+            (COL_DATA_SAIDA, 130),
+        )
+        for col, largura in larguras:
             if self.tabela.columnWidth(col) < largura:
                 self.tabela.setColumnWidth(col, largura)
 

@@ -2,7 +2,7 @@ import sys
 
 from PySide6.QtWidgets import QApplication, QDialog
 
-from controle_lucros import backup, db, repositories as repo, sessao
+from controle_lucros import backup, db, repositories as repo, sessao, traducao
 from controle_lucros.ui.icones import icone_app
 from controle_lucros.ui.login import DialogoLogin, DialogoPrimeiroUsuario
 from controle_lucros.ui.main_window import MainWindow
@@ -14,6 +14,7 @@ def main() -> None:
     db.init_schema(conn)
 
     app = QApplication(sys.argv)
+    traducao.instalar(app)
     app.setWindowIcon(icone_app())
     app.setStyleSheet(build_stylesheet())
 

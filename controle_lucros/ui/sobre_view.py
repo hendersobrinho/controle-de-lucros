@@ -51,9 +51,14 @@ class SobreView(QWidget):
         descricao = QLabel(
             "Este Controle de Distribuição de Lucros foi desenvolvido sob medida pra este "
             "escritório: histórico completo de sócios e alterações contratuais, distribuição "
-            "anual, dashboards e backup — tudo num só lugar."
+            "anual e trimestral, informe de rendimentos, dashboards e backup — tudo num "
+            "só lugar."
         )
         descricao.setWordWrap(True)
+
+        ajuda = QLabel("Aperte <b>F1</b> em qualquer tela para abrir o manual do sistema.")
+        ajuda.setWordWrap(True)
+        ajuda.setProperty("role", "subtitulo")
 
         link = QLabel(f'<a href="{SITE_URL}" style="color:{BRASS()};">{SITE_URL.rstrip("/")}</a>')
         link.setOpenExternalLinks(True)
@@ -72,6 +77,7 @@ class SobreView(QWidget):
         conteudo_card.setSpacing(16)
         conteudo_card.addLayout(cabecalho)
         conteudo_card.addWidget(descricao)
+        conteudo_card.addWidget(ajuda)
         conteudo_card.addLayout(linha_link)
 
         layout = QVBoxLayout(self)

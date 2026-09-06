@@ -77,6 +77,26 @@ CREATE TABLE IF NOT EXISTS distribuicao_lucro (
     UNIQUE(empresa_id, ano_base, socio_id)
 );
 
+-- Lançamento trimestral da distribuição. Existe separado de distribuicao_lucro
+-- (e não como quatro colunas dela) porque nem toda empresa distribui por
+-- trimestre: quem não usa continua com um lançamento anual só, sem quatro
+-- campos vazios no meio do caminho. Ao salvar um trimestre, a soma dos
+-- trimestres do ano é gravada de volta na distribuição anual.
+CREATE TABLE IF NOT EXISTS distribuicao_trimestral (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    empresa_id INTEGER NOT NULL REFERENCES empresa(id),
+    ano_base INTEGER NOT NULL,
+    trimestre INTEGER NOT NULL CHECK (trimestre BETWEEN 1 AND 4),
+    socio_id INTEGER NOT NULL REFERENCES socio(id),
+    valor_distribuido REAL NOT NULL DEFAULT 0,
+    pro_labore REAL NOT NULL DEFAULT 0,
+    irrf REAL NOT NULL DEFAULT 0,
+    UNIQUE(empresa_id, ano_base, trimestre, socio_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_distribuicao_trimestral_periodo
+    ON distribuicao_trimestral (empresa_id, ano_base);
+
 CREATE TABLE IF NOT EXISTS periodo_distribuicao (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     empresa_id INTEGER NOT NULL REFERENCES empresa(id),
@@ -99,6 +119,42 @@ CREATE TABLE IF NOT EXISTS movimentacao (
     valor REAL NOT NULL,
     data TEXT NOT NULL
 );
+
+-- Diferente do resto do banco (que guarda dinheiro como REAL), os valores do
+-- informe são INTEIRO de centavos: é documento fiscal entregue à Receita, e um
+-- centavo de erro de arredondamento já é documento errado.
+CREATE TABLE IF NOT EXISTS informe_rendimento (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    empresa_id INTEGER NOT NULL REFERENCES empresa(id),
+    socio_id INTEGER NOT NULL REFERENCES socio(id),
+    ano_base INTEGER NOT NULL,
+    codigo_beneficiario TEXT NOT NULL DEFAULT '',
+    natureza_rendimento TEXT NOT NULL DEFAULT 'RENDIMENTO DO TRABALHO ASSALARIADO NO PAÍS',
+    q3_total_rendimentos INTEGER NOT NULL DEFAULT 0,
+    q3_previdencia_oficial INTEGER NOT NULL DEFAULT 0,
+    q3_previdencia_complementar INTEGER NOT NULL DEFAULT 0,
+    q3_pensao_alimenticia INTEGER NOT NULL DEFAULT 0,
+    q3_irrf INTEGER NOT NULL DEFAULT 0,
+    q4_parcela_isenta_65 INTEGER NOT NULL DEFAULT 0,
+    q4_parcela_isenta_13_65 INTEGER NOT NULL DEFAULT 0,
+    q4_diarias_ajudas_custo INTEGER NOT NULL DEFAULT 0,
+    q4_pensao_molestia_grave INTEGER NOT NULL DEFAULT 0,
+    q4_lucros_dividendos INTEGER NOT NULL DEFAULT 0,
+    q4_valores_socio_microempresa INTEGER NOT NULL DEFAULT 0,
+    q4_indenizacoes_rescisao INTEGER NOT NULL DEFAULT 0,
+    q4_juros_mora INTEGER NOT NULL DEFAULT 0,
+    q4_outros INTEGER NOT NULL DEFAULT 0,
+    q5_decimo_terceiro INTEGER NOT NULL DEFAULT 0,
+    q5_irrf_decimo_terceiro INTEGER NOT NULL DEFAULT 0,
+    q5_outros INTEGER NOT NULL DEFAULT 0,
+    emprestimo_saldo INTEGER NOT NULL DEFAULT 0,
+    informacoes_complementares TEXT NOT NULL DEFAULT '',
+    responsavel_nome TEXT NOT NULL DEFAULT '',
+    atualizado_em TEXT NOT NULL,
+    UNIQUE(empresa_id, ano_base, socio_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_informe_socio_ano ON informe_rendimento (socio_id, ano_base);
 
 CREATE TABLE IF NOT EXISTS usuario (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

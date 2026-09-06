@@ -13,11 +13,24 @@ Pra limpar um build anterior antes de gerar de novo:
     pyinstaller --clean controle_lucros.spec
 """
 
+from PySide6.QtCore import QLibraryInfo
+
+
+def _traducoes_qt() -> str:
+    return QLibraryInfo.path(QLibraryInfo.TranslationsPath)
+
+
 a = Analysis(
     ["main.py"],
     pathex=[],
     binaries=[],
-    datas=[("controle_lucros/ui/assets", "controle_lucros/ui/assets")],
+    datas=[
+        ("controle_lucros/ui/assets", "controle_lucros/ui/assets"),
+        # Traduções do Qt (botões "Fechar"/"Cancelar", "Sim"/"Não" das
+        # confirmações). Sem isto no pacote, o .exe fica com esses textos em
+        # inglês mesmo rodando bem a partir do código-fonte.
+        (_traducoes_qt(), "PySide6/Qt/translations"),
+    ],
     hiddenimports=["PySide6.QtSvgWidgets"],
     hookspath=[],
     hooksconfig={},

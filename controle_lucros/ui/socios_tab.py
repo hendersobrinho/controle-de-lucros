@@ -31,7 +31,21 @@ from PySide6.QtWidgets import (
 
 from .. import repositories as repo
 from ..models import Socio, VinculoSocietario
-from .common import configurar_campo_cnpj, configurar_campo_cpf, documento_valido_ou_vazio, formatar_numero, formatar_valor_br
+from .common import (
+    MODO_EDICAO,
+    MODO_NOVO,
+    MODO_SALVO,
+    MODO_VAZIO,
+    aplicar_modo_formulario,
+    configurar_campo_cnpj,
+    configurar_campo_cpf,
+    criar_aviso_formulario,
+    documento_valido_ou_vazio,
+    formatar_numero,
+    formatar_valor_br,
+)
+from .informe_rendimentos_view import InformeRendimentosDialog
+from .theme import estado as tema_estado
 
 TIPOS_PESSOA_LABEL = {"fisica": "Pessoa física", "juridica": "Pessoa jurídica"}
 
@@ -276,7 +290,11 @@ class SociosTab(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(splitter)
 
+        self._modo = MODO_VAZIO
+        self._descricao_modo = ""
         self.atualizar()
+        self._definir_modo(MODO_VAZIO)
+        tema_estado().mudou.connect(lambda: self._definir_modo(self._modo, self._descricao_modo))
 
     # ------------------------------------------------------------- painéis --
     def _montar_painel_socios(self) -> QWidget:
@@ -315,23 +333,30 @@ class SociosTab(QWidget):
         form.addRow("Tipo", self.tipo_pessoa)
         self._rotulo_documento = QLabel("CPF")
         form.addRow(self._rotulo_documento, self.cpf)
-        col.addLayout(form)
+
+        # Mesmo mecanismo do CrudTab: campos num painel próprio pra bloquear
+        # tudo de uma vez enquanto não há sócio selecionado nem cadastro
+        # começado — é o que mostra que a tela espera um clique em "Novo".
+        self.painel_campos = QWidget()
+        self.painel_campos.setLayout(form)
+        self.aviso_form = criar_aviso_formulario()
+        col.addWidget(self.aviso_form)
+        col.addWidget(self.painel_campos)
 
         self._ajustar_mascara_documento()
 
-        btn_novo = QPushButton("Novo")
-        btn_salvar = QPushButton("Salvar")
-        btn_salvar.setProperty("role", "primario")
-        btn_excluir = QPushButton("Excluir")
-        btn_excluir.setProperty("role", "perigo")
-        btn_novo.clicked.connect(self._novo_socio)
-        btn_salvar.clicked.connect(self._salvar_socio)
-        btn_excluir.clicked.connect(self._excluir_socio)
+        self.btn_novo = QPushButton("Novo")
+        self.btn_salvar = QPushButton("Salvar")
+        self.btn_excluir = QPushButton("Excluir")
+        self.btn_excluir.setProperty("role", "perigo")
+        self.btn_novo.clicked.connect(self._novo_socio)
+        self.btn_salvar.clicked.connect(self._salvar_socio)
+        self.btn_excluir.clicked.connect(self._excluir_socio)
 
         botoes = QHBoxLayout()
-        botoes.addWidget(btn_novo)
-        botoes.addWidget(btn_salvar)
-        botoes.addWidget(btn_excluir)
+        botoes.addWidget(self.btn_novo)
+        botoes.addWidget(self.btn_salvar)
+        botoes.addWidget(self.btn_excluir)
         col.addLayout(botoes)
 
         return painel
@@ -380,14 +405,32 @@ class SociosTab(QWidget):
         self.btn_excluir_vinculo.setProperty("role", "perigo")
         self.btn_excluir_vinculo.clicked.connect(self._excluir_vinculo)
 
-        botoes = QHBoxLayout()
-        botoes.addWidget(self.btn_associar)
-        botoes.addWidget(self.btn_editar)
-        botoes.addWidget(self.btn_atualizar_cotas)
-        botoes.addWidget(self.btn_encerrar)
-        botoes.addWidget(self.btn_excluir_vinculo)
-        botoes.addStretch()
-        col.addLayout(botoes)
+        self.btn_informe = QPushButton("Informe de rendimentos")
+        self.btn_informe.setToolTip(
+            "Comprovante de Rendimentos Pagos e de Imposto sobre a Renda Retido na Fonte "
+            "(IN RFB nº 2.060/2021) — um por empresa em que o sócio recebeu."
+        )
+        self.btn_informe.clicked.connect(self._emitir_informe)
+
+        # Duas linhas em vez de uma: os seis botões não cabem lado a lado na
+        # largura padrão da janela (1180px), e numa linha só o Qt encolhe todos
+        # até os rótulos ficarem cortados ("Atualizar co…"). A primeira linha
+        # é o que mexe no vínculo; a segunda, o que é destrutivo, com a emissão
+        # do informe separada à direita.
+        linha_vinculo = QHBoxLayout()
+        linha_vinculo.addWidget(self.btn_associar)
+        linha_vinculo.addWidget(self.btn_editar)
+        linha_vinculo.addWidget(self.btn_atualizar_cotas)
+        linha_vinculo.addStretch()
+
+        linha_secundaria = QHBoxLayout()
+        linha_secundaria.addWidget(self.btn_encerrar)
+        linha_secundaria.addWidget(self.btn_excluir_vinculo)
+        linha_secundaria.addStretch()
+        linha_secundaria.addWidget(self.btn_informe)
+
+        col.addLayout(linha_vinculo)
+        col.addLayout(linha_secundaria)
 
         self._atualizar_disponibilidade_botoes()
         return card
@@ -417,6 +460,17 @@ class SociosTab(QWidget):
             configurar_campo_cpf(self.cpf)
             self._rotulo_documento.setText("CPF")
 
+    def _definir_modo(self, modo: str, descricao: str = "") -> None:
+        self._modo = modo
+        self._descricao_modo = descricao
+        aplicar_modo_formulario(
+            self.painel_campos,
+            self.aviso_form,
+            {"novo": self.btn_novo, "salvar": self.btn_salvar, "excluir": self.btn_excluir},
+            modo,
+            descricao,
+        )
+
     def _ao_selecionar_socio(self) -> None:
         linhas = self.tabela.selectionModel().selectedRows()
         if not linhas:
@@ -428,6 +482,7 @@ class SociosTab(QWidget):
         self.tipo_pessoa.setCurrentIndex(idx if idx >= 0 else 0)
         self._ajustar_mascara_documento()
         self.cpf.setText(socio.cpf or "")
+        self._definir_modo(MODO_EDICAO, socio.nome)
         self._atualizar_painel_vinculos()
 
     def _novo_socio(self) -> None:
@@ -436,6 +491,8 @@ class SociosTab(QWidget):
         self.nome.clear()
         self.tipo_pessoa.setCurrentIndex(0)
         self._ajustar_mascara_documento()
+        self._definir_modo(MODO_NOVO)
+        self.nome.setFocus()
         self._atualizar_painel_vinculos()
 
     def _salvar_socio(self) -> None:
@@ -458,7 +515,12 @@ class SociosTab(QWidget):
             return
         self._socio_atual_id = socio_id
         self.atualizar()
+        # Seguir selecionado é de propósito: o painel de vínculos à direita é
+        # do sócio atual, e limpar tudo depois de salvar tiraria da tela quem
+        # a pessoa acabou de cadastrar justamente pra associar a uma empresa.
         self._selecionar_socio_na_tabela(socio_id)
+        if self._modo != MODO_EDICAO:
+            self._definir_modo(MODO_SALVO)
 
     def _excluir_socio(self) -> None:
         if self._socio_atual_id is None:
@@ -472,7 +534,12 @@ class SociosTab(QWidget):
         except ValueError as exc:
             QMessageBox.warning(self, "Erro ao excluir", str(exc))
             return
-        self._novo_socio()
+        self._socio_atual_id = None
+        self.tabela.clearSelection()
+        self.nome.clear()
+        self.tipo_pessoa.setCurrentIndex(0)
+        self._ajustar_mascara_documento()
+        self._definir_modo(MODO_VAZIO)
         self.atualizar()
 
     def _selecionar_socio_na_tabela(self, socio_id: int) -> None:
@@ -536,6 +603,7 @@ class SociosTab(QWidget):
     def _atualizar_disponibilidade_botoes(self) -> None:
         tem_socio = self._socio_atual_id is not None
         self.btn_associar.setEnabled(tem_socio)
+        self.btn_informe.setEnabled(tem_socio)
         vinculo_ativo_selecionado = self._vinculo_ativo_selecionado() is not None
         self.btn_editar.setEnabled(self._vinculo_selecionado() is not None)
         self.btn_atualizar_cotas.setEnabled(vinculo_ativo_selecionado)
@@ -623,6 +691,18 @@ class SociosTab(QWidget):
             QMessageBox.warning(self, "Erro ao encerrar vínculo", str(exc))
             return
         self._atualizar_painel_vinculos()
+
+    def _emitir_informe(self) -> None:
+        """Abre a conferência e emissão do informe de rendimentos do sócio
+        selecionado. A janela é por sócio (não por vínculo) porque um sócio de
+        três empresas recebe três comprovantes e é bom conferir os três de uma
+        vez, na mesma sessão."""
+        if self._socio_atual_id is None:
+            return
+        socio = next((s for s in self._socios if s.id == self._socio_atual_id), None)
+        if socio is None:
+            return
+        InformeRendimentosDialog(self.conn, socio, self).exec()
 
     def _excluir_vinculo(self) -> None:
         """Apaga o vínculo de vez — diferente de "Encerrar", que só marca a

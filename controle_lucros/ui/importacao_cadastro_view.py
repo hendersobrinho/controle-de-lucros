@@ -1,7 +1,7 @@
 """Tela de importação em massa de cadastro: sobe uma planilha com empresa +
 sócio + vínculo numa linha só e aplica tudo de uma vez — pensada pra dar
 conta de uma base grande (~160+ empresas) sem digitar registro por registro
-nas abas de Cadastro. Empresa é reconhecida por nº de chamada/CNPJ/nome e
+nas abas de Cadastro. Empresa é reconhecida por nº da empresa/CNPJ/nome e
 resolve sozinha (baixo risco de duplicata); sócio é reconhecido por CPF/nome
 e nunca criado sem confirmação — o mesmo sócio costuma aparecer em várias
 empresas, e duplicar cadastro dele bagunçaria o histórico em todas elas."""
@@ -193,7 +193,7 @@ class ImportacaoCadastroView(QWidget):
 
         explicacao = QLabel(
             "Cadastre empresas, sócios, vínculos e distribuição de uma vez a partir de uma planilha — uma "
-            "linha por (empresa, sócio). A empresa é reconhecida pelo nº de chamada, CNPJ ou nome e é "
+            "linha por (empresa, sócio). A empresa é reconhecida pelo nº da empresa, CNPJ ou nome e é "
             "criada automaticamente se ainda não existir; o sócio é reconhecido pelo CPF ou nome e nunca é "
             "criado sem confirmação, pra nunca duplicar cadastro. Capital, cotas, percentual e data de "
             "entrada são obrigatórios; data de saída, ano base, valor distribuído, pró-labore e IRRF são "
@@ -312,6 +312,22 @@ class ImportacaoCadastroView(QWidget):
         resultado = repo.preparar_importacao_cadastro(self.conn, linhas_importadas)
         prontas = list(resultado["prontas"])
         pendencias = resultado["pendencias"]
+        conflitos = resultado["conflitos"]
+
+        # Conflito é planilha se contradizendo (nº da empresa e CNPJ de
+        # empresas diferentes) — não é escolha a fazer, é erro a corrigir,
+        # então é avisado antes de aplicar o resto.
+        if conflitos:
+            detalhe = "\n\n".join(
+                f'Linha de "{c["empresa_nome"]}" / "{c["socio_nome"]}":\n{c["aviso"]}' for c in conflitos[:5]
+            )
+            if len(conflitos) > 5:
+                detalhe += f"\n\n(e mais {len(conflitos) - 5} linha(s) com o mesmo tipo de problema)"
+            QMessageBox.warning(
+                self,
+                "Linhas com dados contraditórios",
+                f"{len(conflitos)} linha(s) não serão importadas:\n\n{detalhe}",
+            )
 
         if pendencias:
             dialogo = _DialogoRevisaoCadastro(self.conn, pendencias, self)
@@ -319,7 +335,12 @@ class ImportacaoCadastroView(QWidget):
                 prontas.extend(dialogo.resolvidos())
 
         if not prontas:
-            QMessageBox.information(self, "Importar planilha", "Nenhuma linha foi aplicada.")
+            QMessageBox.information(
+                self,
+                "Importar planilha",
+                "Nenhuma linha foi aplicada."
+                + (" Corrija os dados contraditórios apontados acima." if conflitos else ""),
+            )
             return
 
         try:
@@ -337,6 +358,9 @@ class ImportacaoCadastroView(QWidget):
             f"{aplicado['distribuicoes_lancadas']} distribuição(ões) lançada(s)."
         )
         if nao_aplicadas > 0:
-            resumo += f"\n{nao_aplicadas} linha(s) não foram aplicadas."
+            resumo += f"\n{nao_aplicadas} linha(s) não foram aplicadas"
+            resumo += (
+                f" ({len(conflitos)} por dados contraditórios)." if conflitos else "."
+            )
         self.resultado.setText(resumo)
         QMessageBox.information(self, "Importação concluída", resumo)

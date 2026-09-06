@@ -39,6 +39,7 @@ class Sidebar(QFrame):
         layout.addWidget(self._espacador())
         layout.addWidget(self._secao("DISTRIBUIÇÃO"))
         layout.addWidget(self._item("Distribuição anual", "distribuicao", sub=True))
+        layout.addWidget(self._item("Distribuição trimestral", "distribuicao.trimestral", sub=True))
 
         layout.addWidget(self._espacador())
         layout.addWidget(self._secao("DASHBOARD"))

@@ -171,11 +171,34 @@ def test_exportar_modelo_cadastro_vazio_so_cabecalho(tmp_path):
     assert importar_cadastro(caminho) == []
 
 
+def test_importar_cadastro_aceita_cabecalho_antigo_de_no_de_chamada(tmp_path):
+    """A coluna passou a se chamar "Nº Empresa", mas planilhas já preenchidas
+    com o cabeçalho antigo continuam válidas — recusá-las obrigaria a refazer
+    arquivo pronto só por causa da troca de nome."""
+    def _linha_com(cabecalho_empresa: str) -> dict:
+        caminho = tmp_path / f"cadastro_{cabecalho_empresa}.csv"
+        with open(caminho, "w", newline="", encoding="utf-8") as f:
+            escritor = csv.writer(f, delimiter=";")
+            escritor.writerow(
+                [cabecalho_empresa, "Empresa", "CNPJ", "Capital Social", "Qtd. Cotas da Empresa",
+                 "Sócio", "CPF/CNPJ do Sócio", "% Capital do Sócio", "Cotas do Sócio", "Data de Entrada"]
+            )
+            escritor.writerow(
+                ["007", "Gama LTDA", "", "1000", "100", "Fulano", "111.111.111-11", "100", "100", "01/01/2020"]
+            )
+        (importada,) = importar_cadastro(caminho)
+        return importada
+
+    assert _linha_com("Nº Chamada")["numero_chamada"] == "007"
+    assert _linha_com("Nº Empresa")["numero_chamada"] == "007"
+
+
 def test_importar_cadastro_detecta_tipo_pessoa_juridica(tmp_path):
     caminho = tmp_path / "cadastro.csv"
     with open(caminho, "w", newline="", encoding="utf-8") as f:
         escritor = csv.writer(f, delimiter=";")
         escritor.writerow(
+            # Cabeçalho antigo de propósito: ver o teste de compatibilidade acima.
             ["Nº Chamada", "Empresa", "CNPJ", "Capital Social", "Qtd. Cotas da Empresa",
              "Sócio", "CPF/CNPJ do Sócio", "Tipo (física/jurídica)",
              "% Capital do Sócio", "Cotas do Sócio", "Data de Entrada"]
