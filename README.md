@@ -20,6 +20,29 @@ O destaque de botão primário acompanha a próxima ação esperada, e o aviso d
 modo de edição diz de quem é o registro e que salvar **substitui** aquele
 registro — para cadastrar outro é preciso clicar em **Novo** antes.
 
+## Modelos de planilha
+
+A importação em massa (**Empresas · Importação em massa**) tem três modelos, e
+o combo **Modelo** vale tanto para exportar a planilha em branco quanto para
+exportar o cadastro atual:
+
+| Modelo | Colunas | Para quê |
+|---|---|---|
+| Completo | 16 | Empresas, sócios, saída e distribuição de uma vez |
+| Empresas e sócios | 11 | Só o quadro societário |
+| Só empresas | 5 | Uma linha por empresa, sem sócios |
+
+Todos são lidos pelo mesmo importador — as colunas são identificadas pelo nome
+no cabeçalho, então um modelo menor é só uma planilha com menos colunas.
+Importar por um modelo enxuto **não apaga** o que ele não contém.
+
+Toda planilha exportada (inclusive a de distribuição) sai com uma segunda aba
+**Exemplo**, preenchida com dados fictícios, mostrando como repetir a empresa
+para cada sócio, que o mesmo sócio se repete em empresas diferentes sem
+duplicar cadastro, e que sócio pode ser pessoa jurídica. O exemplo fica em aba
+separada de propósito: junto dos dados, quem esquecesse de apagar importaria
+empresas fictícias.
+
 ## Distribuição trimestral
 
 Além da aba de **Distribuição anual**, há a de **Distribuição trimestral**, para

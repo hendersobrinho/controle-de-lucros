@@ -1165,6 +1165,12 @@ def preparar_importacao_cadastro(conn: sqlite3.Connection, linhas: list[dict]) -
             if len(candidatos_empresa) == 1:
                 empresa = candidatos_empresa[0]
 
+        # Linha sem sócio nenhum vem do modelo "Só empresas": cadastra a
+        # empresa e não abre vínculo. Não é pendência — não há o que decidir.
+        if not linha["socio_nome"] and not linha["socio_cpf"]:
+            prontas.append({**linha, "empresa_existente": empresa, "socio_id": None})
+            continue
+
         socio = None
         motivo_socio = None
         if linha["socio_cpf"]:
@@ -1192,7 +1198,8 @@ def preparar_importacao_cadastro(conn: sqlite3.Connection, linhas: list[dict]) -
 
 def aplicar_importacao_cadastro(conn: sqlite3.Connection, linhas_resolvidas: list[dict]) -> dict:
     """Aplica linhas já resolvidas (empresa existente em "empresa_existente",
-    ou dados pra criar uma nova; "socio_id" já definido): cria a empresa se
+    ou dados pra criar uma nova; "socio_id" já definido, ou None quando a
+    linha só cadastra a empresa): cria a empresa se
     for nova (reaproveitando entre linhas da mesma planilha), cria o vínculo
     só se o sócio ainda não tiver vínculo ativo com essa empresa — nunca
     duplica nem a empresa nem o vínculo. Se a linha trouxer "data_saida",
@@ -1227,6 +1234,9 @@ def aplicar_importacao_cadastro(conn: sqlite3.Connection, linhas_resolvidas: lis
                 )
                 cache_empresa_nova[chave] = empresa_id
                 empresas_criadas += 1
+
+        if linha.get("socio_id") is None:
+            continue  # modelo "Só empresas": a empresa acima é tudo que a linha traz
 
         vinculo_ativo = next(
             (

@@ -133,14 +133,46 @@ empresa aparece repetida em várias linhas, uma para cada sócio dela.</p>
 
 <h3>O caminho recomendado</h3>
 <ol>
-<li><b>Exportar modelo</b> — planilha em branco com as colunas certas.</li>
-<li>Preencher. Obrigatórios: capital, cotas, percentual e data de entrada.
-Opcionais: data de saída, ano base, valor distribuído, pró-labore e IRRF.</li>
+<li>Escolher o <b>modelo</b> (veja abaixo).</li>
+<li><b>Exportar modelo</b> — planilha em branco com as colunas daquele modelo.</li>
+<li>Abrir a aba <b>Exemplo</b> da planilha, ver como se organiza, e preencher a
+aba <b>Cadastro</b>.</li>
 <li><b>Importar planilha</b> e revisar o que o sistema não conseguiu resolver
 sozinho.</li>
 </ol>
-<p>O botão <b>Exportar cadastro atual</b> traz o que já está no sistema no mesmo
-formato — útil para conferir ou para corrigir em massa.</p>
+<p>O botão <b>Exportar cadastro atual</b> traz o que já está no sistema, no
+modelo escolhido — útil para conferir ou para corrigir em massa.</p>
+
+<h3>Os três modelos</h3>
+<p>Todos são lidos do mesmo jeito: as colunas são reconhecidas pelo nome no
+cabeçalho, então um modelo menor é só uma planilha com menos colunas — não um
+formato diferente. Escolha pelo que você vai cadastrar:</p>
+<ul>
+<li><b>Completo</b> (16 colunas) — empresas, sócios, participações, saída de
+sócio e a distribuição de um ano, tudo de uma vez.</li>
+<li><b>Empresas e sócios</b> (11 colunas) — o quadro societário, sem saída nem
+distribuição. É o recorte do dia a dia.</li>
+<li><b>Só empresas</b> (5 colunas) — uma linha por empresa, sem sócios. Os
+sócios entram depois.</li>
+</ul>
+<p>Importar por um modelo menor <b>não apaga</b> o que ele não tem: mandar a
+planilha de "Só empresas" não encerra vínculo nem zera distribuição de quem já
+está cadastrado.</p>
+
+<h3>A aba "Exemplo"</h3>
+<p>Toda planilha exportada tem uma segunda aba com dados fictícios preenchidos,
+mostrando o que costuma gerar dúvida:</p>
+<ul>
+<li><b>Uma linha por (empresa, sócio).</b> Empresa com três sócios ocupa três
+linhas, repetindo os dados da empresa iguais em todas.</li>
+<li><b>O mesmo sócio em empresas diferentes</b> é o mesmo cadastro — ele é
+reconhecido pelo CPF e não vira sócio duplicado.</li>
+<li><b>Sócio pode ser pessoa jurídica</b>: CNPJ no lugar do CPF e tipo
+"Jurídica".</li>
+</ul>
+<p>O exemplo fica numa aba separada de propósito: se estivesse junto dos dados,
+quem esquecesse de apagar importaria empresas fictícias para dentro do
+sistema.</p>
 
 <h3>Como o sistema reconhece o que já existe</h3>
 <p><b>Empresa</b>, na ordem: nº da empresa, depois CNPJ, depois nome exato (e
@@ -251,6 +283,10 @@ CPF não bater.</p>
 <p>Quando o sócio existe mas <b>não tem vínculo ativo com aquela empresa</b> no
 ano, a linha vai para revisão em vez de ser aplicada — é a trava que pega
 planilha importada na empresa errada.</p>
+<p>O modelo exportado já vem com os sócios da empresa preenchidos: só falta
+digitar os valores. A aba <b>Exemplo</b> da planilha mostra o preenchimento com
+dados fictícios. Importar substitui os valores dos sócios que estiverem na
+planilha; quem não estiver nela não é alterado.</p>
 
 <h3>Movimentações</h3>
 <p><b>Gerenciar movimentações</b> registra empréstimos (nos dois sentidos),

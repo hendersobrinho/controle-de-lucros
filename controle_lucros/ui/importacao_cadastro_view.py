@@ -26,8 +26,7 @@ from PySide6.QtWidgets import (
 
 from .. import repositories as repo
 from ..models import Socio
-from ..planilha import exportar_modelo_cadastro, importar_cadastro
-from .common import formatar_valor_br
+from ..planilha import MODELOS_CADASTRO, exportar_modelo_cadastro, importar_cadastro, modelo_cadastro
 from .theme import SAIU_FG
 
 
@@ -192,16 +191,32 @@ class ImportacaoCadastroView(QWidget):
         titulo.setProperty("role", "secao")
 
         explicacao = QLabel(
-            "Cadastre empresas, sócios, vínculos e distribuição de uma vez a partir de uma planilha — uma "
-            "linha por (empresa, sócio). A empresa é reconhecida pelo nº da empresa, CNPJ ou nome e é "
-            "criada automaticamente se ainda não existir; o sócio é reconhecido pelo CPF ou nome e nunca é "
-            "criado sem confirmação, pra nunca duplicar cadastro. Capital, cotas, percentual e data de "
-            "entrada são obrigatórios; data de saída, ano base, valor distribuído, pró-labore e IRRF são "
-            "opcionais — preencha só quem tiver saído da sociedade ou tiver uma distribuição daquele ano "
-            "pra lançar junto. Comece exportando o modelo, preencha e importe de volta."
+            "Cadastre empresas, sócios, vínculos e distribuição de uma vez a partir de uma planilha. "
+            "A empresa é reconhecida pelo nº da empresa, CNPJ ou nome e é criada automaticamente se ainda "
+            "não existir; o sócio é reconhecido pelo CPF ou nome e nunca é criado sem confirmação, pra "
+            "nunca duplicar cadastro. Toda planilha exportada traz uma aba <b>Exemplo</b> preenchida, "
+            "mostrando como organizar várias empresas e vários sócios. Comece exportando um modelo, "
+            "preencha e importe de volta."
         )
         explicacao.setWordWrap(True)
         explicacao.setProperty("role", "subtitulo")
+
+        # A escolha do modelo fica antes dos botões porque vale para os dois
+        # tipos de exportação: quem só vai cadastrar empresas não precisa ver
+        # dezesseis colunas nem no modelo em branco nem no cadastro atual.
+        self.modelo = QComboBox()
+        for modelo in MODELOS_CADASTRO:
+            self.modelo.addItem(modelo.nome, modelo.id)
+        self.modelo.currentIndexChanged.connect(self._atualizar_descricao_modelo)
+
+        self.descricao_modelo = QLabel()
+        self.descricao_modelo.setWordWrap(True)
+        self.descricao_modelo.setProperty("role", "subtitulo")
+
+        linha_modelo = QHBoxLayout()
+        linha_modelo.addWidget(QLabel("Modelo:"))
+        linha_modelo.addWidget(self.modelo, 1)
+        linha_modelo.addStretch()
 
         self.btn_exportar_modelo = QPushButton("Exportar modelo (planilha em branco)")
         self.btn_exportar_modelo.clicked.connect(self._exportar_modelo)
@@ -219,6 +234,8 @@ class ImportacaoCadastroView(QWidget):
         botoes.addWidget(self.btn_importar)
         botoes.addStretch()
 
+        self._atualizar_descricao_modelo()
+
         self.resultado = QLabel("")
         self.resultado.setWordWrap(True)
         self.resultado.setProperty("role", "subtitulo")
@@ -228,6 +245,8 @@ class ImportacaoCadastroView(QWidget):
         layout.setSpacing(14)
         layout.addWidget(titulo)
         layout.addWidget(explicacao)
+        layout.addLayout(linha_modelo)
+        layout.addWidget(self.descricao_modelo)
         layout.addLayout(botoes)
         layout.addWidget(self.resultado)
         layout.addStretch()
@@ -235,20 +254,34 @@ class ImportacaoCadastroView(QWidget):
     def atualizar(self) -> None:
         pass
 
+    def _atualizar_descricao_modelo(self, *_args) -> None:
+        modelo = modelo_cadastro(self.modelo.currentData())
+        self.descricao_modelo.setText(f"{modelo.descricao}  ({len(modelo.colunas)} colunas)")
+
+    def _modelo_escolhido(self):
+        return modelo_cadastro(self.modelo.currentData())
+
     def _exportar_modelo(self) -> None:
+        modelo = self._modelo_escolhido()
         caminho, _ = QFileDialog.getSaveFileName(
-            self, "Exportar modelo de cadastro", "modelo_cadastro.xlsx", "Planilha Excel (*.xlsx)"
+            self, "Exportar modelo de cadastro", f"modelo_{modelo.id}.xlsx", "Planilha Excel (*.xlsx)"
         )
         if not caminho:
             return
         if not caminho.lower().endswith(".xlsx"):
             caminho += ".xlsx"
-        exportar_modelo_cadastro(Path(caminho))
-        QMessageBox.information(self, "Modelo exportado", f"Modelo salvo em:\n{caminho}")
+        exportar_modelo_cadastro(Path(caminho), modelo=modelo)
+        QMessageBox.information(
+            self,
+            "Modelo exportado",
+            f"Modelo \"{modelo.nome}\" salvo em:\n{caminho}\n\n"
+            "A aba \"Exemplo\" da planilha mostra o preenchimento com dados fictícios.",
+        )
 
     def _exportar_atual(self) -> None:
+        modelo = self._modelo_escolhido()
         caminho, _ = QFileDialog.getSaveFileName(
-            self, "Exportar cadastro atual", "cadastro_atual.xlsx", "Planilha Excel (*.xlsx)"
+            self, "Exportar cadastro atual", f"cadastro_atual_{modelo.id}.xlsx", "Planilha Excel (*.xlsx)"
         )
         if not caminho:
             return
@@ -287,7 +320,17 @@ class ImportacaoCadastroView(QWidget):
                         "data_entrada": v.data_entrada,
                     }
                 )
-        exportar_modelo_cadastro(Path(caminho), linhas)
+        if modelo.uma_linha_por_empresa:
+            # Sem coluna de sócio, uma linha por vínculo viraria a mesma empresa
+            # repetida — no modelo "Só empresas" cada empresa aparece uma vez.
+            vistas, unicas = set(), []
+            for linha in linhas:
+                if linha["numero_chamada"] not in vistas or not linha["numero_chamada"]:
+                    vistas.add(linha["numero_chamada"])
+                    unicas.append(linha)
+            linhas = unicas
+
+        exportar_modelo_cadastro(Path(caminho), linhas, modelo=modelo)
         QMessageBox.information(self, "Cadastro exportado", f"{len(linhas)} linha(s) salvas em:\n{caminho}")
 
     def _importar_planilha(self) -> None:

@@ -4,6 +4,7 @@ massa a distribuição de lucro por sócio. Puro Python — sem dependência de 
 from __future__ import annotations
 
 import csv
+from dataclasses import dataclass
 from pathlib import Path
 
 import openpyxl
@@ -19,15 +20,202 @@ COLUNAS_CADASTRO = [
     "Ano Base", "Valor Distribuído", "Pró-labore", "IRRF",
 ]
 
+# Campo interno de cada coluna, na mesma ordem. Antes essa ligação era
+# implícita (uma lista de 16 linha.get(...) que precisava bater na posição
+# com os 16 cabeçalhos); explícita, dá pra montar modelos menores escolhendo
+# colunas sem risco de desalinhar valor com cabeçalho.
+CAMPOS_CADASTRO = [
+    "numero_chamada", "empresa_nome", "cnpj", "capital_social", "quantidade_cotas",
+    "socio_nome", "socio_cpf", "tipo_pessoa",
+    "percentual_capital", "cotas_socio", "data_entrada", "data_saida",
+    "ano_base", "valor_distribuido", "pro_labore", "irrf",
+]
+
+LARGURAS_CADASTRO = {
+    "numero_chamada": 11, "empresa_nome": 30, "cnpj": 21, "capital_social": 16,
+    "quantidade_cotas": 20, "socio_nome": 30, "socio_cpf": 21, "tipo_pessoa": 19,
+    "percentual_capital": 17, "cotas_socio": 15, "data_entrada": 15, "data_saida": 14,
+    "ano_base": 10, "valor_distribuido": 17, "pro_labore": 14, "irrf": 12,
+}
+
+
+@dataclass(frozen=True)
+class ModeloCadastro:
+    """Um recorte de colunas do cadastro em massa. Todos são lidos pelo mesmo
+    importador — as colunas são identificadas pelo cabeçalho, então um modelo
+    menor é simplesmente um arquivo com menos colunas, não um formato novo."""
+
+    id: str
+    nome: str
+    descricao: str
+    campos: tuple[str, ...]
+    uma_linha_por_empresa: bool = False
+
+    @property
+    def colunas(self) -> list[str]:
+        return [COLUNAS_CADASTRO[CAMPOS_CADASTRO.index(campo)] for campo in self.campos]
+
+
+_CAMPOS_EMPRESA = ("numero_chamada", "empresa_nome", "cnpj", "capital_social", "quantidade_cotas")
+_CAMPOS_VINCULO = ("socio_nome", "socio_cpf", "tipo_pessoa", "percentual_capital", "cotas_socio", "data_entrada")
+
+MODELOS_CADASTRO = (
+    ModeloCadastro(
+        "geral",
+        "Completo (empresas, sócios e distribuição)",
+        "Todas as colunas. Use quando for cadastrar tudo de uma vez, inclusive saída de "
+        "sócio e a distribuição de um ano.",
+        tuple(CAMPOS_CADASTRO),
+    ),
+    ModeloCadastro(
+        "empresas_socios",
+        "Empresas e sócios",
+        "Empresas com seus sócios e participações, sem data de saída nem distribuição. "
+        "É o recorte do dia a dia: montar ou completar o quadro societário.",
+        _CAMPOS_EMPRESA + _CAMPOS_VINCULO,
+    ),
+    ModeloCadastro(
+        "empresas",
+        "Só empresas",
+        "Só o cadastro das empresas, sem sócios. Uma linha por empresa — os sócios "
+        "entram depois, por aqui mesmo ou pela aba Sócios.",
+        _CAMPOS_EMPRESA,
+        uma_linha_por_empresa=True,
+    ),
+)
+
+MODELO_CADASTRO_PADRAO = MODELOS_CADASTRO[0]
+
+
+def modelo_cadastro(id_modelo: str) -> ModeloCadastro:
+    for modelo in MODELOS_CADASTRO:
+        if modelo.id == id_modelo:
+            return modelo
+    raise ValueError(f"Modelo de cadastro desconhecido: {id_modelo!r}.")
+
+
+# Dados fictícios que aparecem na aba "Exemplo" de todo modelo exportado.
+# Foram escolhidos pra mostrar, sem precisar de legenda, as três dúvidas que
+# aparecem sempre: como repetir a empresa pra cada sócio, que o mesmo sócio
+# se repete em empresas diferentes (e é o mesmo cadastro), e que sócio pode
+# ser pessoa jurídica.
+LINHAS_EXEMPLO_CADASTRO = [
+    {
+        "numero_chamada": "001", "empresa_nome": "PADARIA MODELO LTDA",
+        "cnpj": "11.111.111/0001-11", "capital_social": 100000, "quantidade_cotas": 100000,
+        "socio_nome": "MARIA EXEMPLO DA SILVA", "socio_cpf": "111.111.111-11",
+        "tipo_pessoa": "Física", "percentual_capital": 60, "cotas_socio": 60000,
+        "data_entrada": "01/01/2020", "data_saida": "",
+        "ano_base": 2025, "valor_distribuido": 60000, "pro_labore": 24000, "irrf": 1500,
+    },
+    {
+        "numero_chamada": "001", "empresa_nome": "PADARIA MODELO LTDA",
+        "cnpj": "11.111.111/0001-11", "capital_social": 100000, "quantidade_cotas": 100000,
+        "socio_nome": "JOAO EXEMPLO SOUZA", "socio_cpf": "222.222.222-22",
+        "tipo_pessoa": "Física", "percentual_capital": 40, "cotas_socio": 40000,
+        "data_entrada": "01/01/2020", "data_saida": "",
+        "ano_base": 2025, "valor_distribuido": 40000, "pro_labore": 18000, "irrf": 900,
+    },
+    {
+        "numero_chamada": "002", "empresa_nome": "TRANSPORTES EXEMPLO ME",
+        "cnpj": "22.222.222/0001-22", "capital_social": 50000, "quantidade_cotas": 50000,
+        "socio_nome": "MARIA EXEMPLO DA SILVA", "socio_cpf": "111.111.111-11",
+        "tipo_pessoa": "Física", "percentual_capital": 100, "cotas_socio": 50000,
+        "data_entrada": "15/03/2021", "data_saida": "",
+        "ano_base": 2025, "valor_distribuido": 30000, "pro_labore": 0, "irrf": 0,
+    },
+    {
+        "numero_chamada": "003", "empresa_nome": "CLINICA EXEMPLO LTDA",
+        "cnpj": "33.333.333/0001-33", "capital_social": 200000, "quantidade_cotas": 200000,
+        "socio_nome": "HOLDING EXEMPLO PARTICIPACOES LTDA", "socio_cpf": "44.444.444/0001-44",
+        "tipo_pessoa": "Jurídica", "percentual_capital": 70, "cotas_socio": 140000,
+        "data_entrada": "01/01/2019", "data_saida": "",
+        "ano_base": "", "valor_distribuido": "", "pro_labore": "", "irrf": "",
+    },
+    {
+        "numero_chamada": "003", "empresa_nome": "CLINICA EXEMPLO LTDA",
+        "cnpj": "33.333.333/0001-33", "capital_social": 200000, "quantidade_cotas": 200000,
+        "socio_nome": "JOAO EXEMPLO SOUZA", "socio_cpf": "222.222.222-22",
+        "tipo_pessoa": "Física", "percentual_capital": 30, "cotas_socio": 60000,
+        "data_entrada": "01/01/2019", "data_saida": "30/06/2025",
+        "ano_base": "", "valor_distribuido": "", "pro_labore": "", "irrf": "",
+    },
+]
+
+NOTAS_EXEMPLO_CADASTRO = [
+    "Uma linha por (empresa, sócio). Empresa com três sócios ocupa três linhas, "
+    "repetindo os dados da empresa igual em todas.",
+    "O mesmo sócio pode aparecer em empresas diferentes (veja MARIA nas empresas 001 e 002) "
+    "— é o mesmo cadastro, reconhecido pelo CPF, e não vira sócio duplicado.",
+    "Sócio pode ser pessoa jurídica: preencha o CNPJ no lugar do CPF e marque o tipo como "
+    "Jurídica (veja a HOLDING na empresa 003).",
+    "Empresa é reconhecida pelo nº da empresa, pelo CNPJ ou pelo nome; se não existir, "
+    "é criada. Sócio nunca é criado sem você confirmar na tela.",
+    "Data de Saída só para quem já saiu da sociedade. Ano Base, Valor Distribuído, "
+    "Pró-labore e IRRF só se for lançar a distribuição daquele ano junto.",
+]
+
+
+LINHAS_EXEMPLO_DISTRIBUICAO = [
+    {"cpf": "111.111.111-11", "nome": "MARIA EXEMPLO DA SILVA", "valor_distribuido": 60000,
+     "pro_labore": 24000, "irrf": 1500},
+    {"cpf": "222.222.222-22", "nome": "JOAO EXEMPLO SOUZA", "valor_distribuido": 40000,
+     "pro_labore": 18000, "irrf": 900},
+    {"cpf": "333.333.333-33", "nome": "ANA EXEMPLO PEREIRA", "valor_distribuido": 0,
+     "pro_labore": 0, "irrf": 0},
+]
+
+NOTAS_EXEMPLO_DISTRIBUICAO = [
+    "Esta planilha é de UMA empresa e UM ano — os da tela de onde você exportou. "
+    "Para outra empresa, exporte o modelo dela.",
+    "Uma linha por sócio. O sócio é reconhecido pelo CPF; o nome só é usado se o CPF "
+    "não bater, e precisa ser exatamente igual ao cadastrado.",
+    "Sócio que não recebeu nada pode ficar com 0 (veja ANA) ou ser apagado da planilha.",
+    "Pró-labore e IRRF são opcionais: apague as duas colunas se só for lançar a "
+    "distribuição de lucro.",
+    "Importar substitui os valores do ano para os sócios que estiverem na planilha; "
+    "quem não estiver nela não é alterado.",
+]
+
+
+def _montar_aba_exemplo_distribuicao(workbook) -> None:
+    aba = workbook.create_sheet("Exemplo")
+    aba["A1"] = "Exemplo de preenchimento — distribuição do ano"
+    aba["A1"].font = Font(size=13, bold=True, color="1B2A41")
+    aba["A2"] = "Dados fictícios, só para consulta. Preencha os seus na aba anterior."
+    aba["A2"].font = Font(italic=True, color="5B6472")
+
+    linha = 4
+    for nota in NOTAS_EXEMPLO_DISTRIBUICAO:
+        aba.cell(row=linha, column=1, value=f"• {nota}")
+        linha += 1
+
+    linha += 1
+    for indice, nome in enumerate(COLUNAS_DISTRIBUICAO, start=1):
+        celula = aba.cell(row=linha, column=indice, value=nome)
+        celula.font = Font(bold=True, color="FFFFFF")
+        celula.fill = PatternFill("solid", fgColor="1B2A41")
+    for coluna, largura in zip("ABCDE", (20, 32, 18, 14, 14)):
+        aba.column_dimensions[coluna].width = largura
+
+    for exemplo in LINHAS_EXEMPLO_DISTRIBUICAO:
+        linha += 1
+        for indice, campo in enumerate(("cpf", "nome", "valor_distribuido", "pro_labore", "irrf"), start=1):
+            aba.cell(row=linha, column=indice, value=exemplo[campo])
+
 
 def exportar_modelo_distribuicao(caminho: Path, linhas: list[dict]) -> None:
     """Gera um .xlsx pronto pra preencher: uma linha por sócio informado, já
     com CPF e nome preenchidos — só falta digitar o valor distribuído (e,
-    se houver, pró-labore/IRRF)."""
+    se houver, pró-labore/IRRF). Sai com uma aba "Exemplo" preenchida."""
     workbook = openpyxl.Workbook()
     aba = workbook.active
     aba.title = "Distribuição"
-    aba.append(COLUNAS_DISTRIBUICAO)
+    for indice, nome in enumerate(COLUNAS_DISTRIBUICAO, start=1):
+        celula = aba.cell(row=1, column=indice, value=nome)
+        celula.font = Font(bold=True, color="FFFFFF")
+        celula.fill = PatternFill("solid", fgColor="1B2A41")
+    aba.freeze_panes = "A2"
     for linha in linhas:
         aba.append(
             [
@@ -40,6 +228,9 @@ def exportar_modelo_distribuicao(caminho: Path, linhas: list[dict]) -> None:
         )
     for coluna, largura in zip("ABCDE", (20, 32, 18, 14, 14)):
         aba.column_dimensions[coluna].width = largura
+
+    _montar_aba_exemplo_distribuicao(workbook)
+    workbook.active = 0
     workbook.save(caminho)
 
 
@@ -134,42 +325,94 @@ def _ler_xlsx(caminho: Path) -> list[list]:
     return [list(linha) for linha in aba.iter_rows(values_only=True)]
 
 
-def exportar_modelo_cadastro(caminho: Path, linhas: list[dict] | None = None) -> None:
-    """Gera um .xlsx pronto pra preencher com o cadastro em massa de empresas,
-    sócios e vínculos: uma linha por (empresa, sócio). Sem linhas, sai só com
-    o cabeçalho — útil pra cadastrar do zero. Com linhas (cadastro atual),
-    serve de referência/edição. Data de Saída, Ano Base, Valor Distribuído,
-    Pró-labore e IRRF são opcionais — só preenche quem tiver saído da
-    sociedade ou tiver uma distribuição daquele ano pra lançar junto."""
+_NUMERICOS_CADASTRO = frozenset(
+    {"capital_social", "quantidade_cotas", "percentual_capital", "cotas_socio",
+     "valor_distribuido", "pro_labore", "irrf"}
+)
+
+
+def _valor_cadastro(linha: dict, campo: str):
+    valor = linha.get(campo)
+    if campo in _NUMERICOS_CADASTRO:
+        return valor or 0
+    if campo == "tipo_pessoa":
+        return valor or "fisica"
+    return valor if valor is not None else ""
+
+
+def _formatar_cabecalho(aba, colunas: list[str], campos: tuple[str, ...], linha: int = 1) -> None:
+    for indice, nome in enumerate(colunas, start=1):
+        celula = aba.cell(row=linha, column=indice, value=nome)
+        celula.font = Font(bold=True, color="FFFFFF")
+        celula.fill = PatternFill("solid", fgColor="1B2A41")
+    for indice, campo in enumerate(campos, start=1):
+        aba.column_dimensions[get_column_letter(indice)].width = LARGURAS_CADASTRO[campo]
+
+
+def _montar_aba_exemplo(workbook, modelo: ModeloCadastro) -> None:
+    """Aba separada, nunca a de dados: exemplo dentro da planilha que vai ser
+    importada viraria empresa fictícia no banco de quem esquecesse de apagar.
+    Aqui dá pra consultar e copiar sem esse risco."""
+    aba = workbook.create_sheet("Exemplo")
+
+    aba["A1"] = f"Exemplo de preenchimento — modelo \"{modelo.nome}\""
+    aba["A1"].font = Font(size=13, bold=True, color="1B2A41")
+    aba["A2"] = "Dados fictícios, só para consulta. Preencha os seus na aba anterior."
+    aba["A2"].font = Font(italic=True, color="5B6472")
+
+    linha = 4
+    for nota in NOTAS_EXEMPLO_CADASTRO:
+        aba.cell(row=linha, column=1, value=f"• {nota}").font = Font(color="1B2A41")
+        linha += 1
+
+    linha += 1
+    _formatar_cabecalho(aba, modelo.colunas, modelo.campos, linha=linha)
+
+    exemplos = LINHAS_EXEMPLO_CADASTRO
+    if modelo.uma_linha_por_empresa:
+        # Sem coluna de sócio, repetir a empresa não ensina nada — só confunde
+        # quem for contar quantas empresas o exemplo tem.
+        vistas, unicas = set(), []
+        for exemplo in exemplos:
+            if exemplo["empresa_nome"] not in vistas:
+                vistas.add(exemplo["empresa_nome"])
+                unicas.append(exemplo)
+        exemplos = unicas
+
+    for exemplo in exemplos:
+        linha += 1
+        for indice, campo in enumerate(modelo.campos, start=1):
+            aba.cell(row=linha, column=indice, value=_valor_cadastro(exemplo, campo))
+
+
+def exportar_modelo_cadastro(
+    caminho: Path, linhas: list[dict] | None = None, modelo: str | ModeloCadastro = "geral"
+) -> None:
+    """Gera um .xlsx pronto pra preencher com o cadastro em massa. Sem linhas,
+    sai só com o cabeçalho — útil pra cadastrar do zero. Com linhas (cadastro
+    atual), serve de referência/edição.
+
+    `modelo` escolhe o recorte de colunas (ver MODELOS_CADASTRO): o completo
+    faz tudo, e os menores existem porque a maior parte das importações não
+    mexe em saída de sócio nem em distribuição, e dezesseis colunas para
+    preencher cinco assusta mais do que ajuda.
+
+    Toda planilha sai com uma aba "Exemplo" preenchida com dados fictícios."""
+    modelo = modelo if isinstance(modelo, ModeloCadastro) else modelo_cadastro(modelo)
+
     workbook = openpyxl.Workbook()
     aba = workbook.active
     aba.title = "Cadastro"
-    aba.append(COLUNAS_CADASTRO)
+    _formatar_cabecalho(aba, modelo.colunas, modelo.campos)
+    aba.freeze_panes = "A2"
+
     for linha in linhas or []:
-        aba.append(
-            [
-                linha.get("numero_chamada", ""),
-                linha.get("empresa_nome", ""),
-                linha.get("cnpj", ""),
-                linha.get("capital_social") or 0,
-                linha.get("quantidade_cotas") or 0,
-                linha.get("socio_nome", ""),
-                linha.get("socio_cpf", ""),
-                linha.get("tipo_pessoa", "fisica"),
-                linha.get("percentual_capital") or 0,
-                linha.get("cotas_socio") or 0,
-                linha.get("data_entrada", ""),
-                linha.get("data_saida", ""),
-                linha.get("ano_base", ""),
-                linha.get("valor_distribuido") or 0,
-                linha.get("pro_labore") or 0,
-                linha.get("irrf") or 0,
-            ]
-        )
-    for coluna, largura in zip(
-        "ABCDEFGHIJKLMNOP", (10, 28, 20, 16, 16, 28, 20, 14, 14, 14, 14, 14, 10, 16, 14, 14)
-    ):
-        aba.column_dimensions[coluna].width = largura
+        aba.append([_valor_cadastro(linha, campo) for campo in modelo.campos])
+
+    _montar_aba_exemplo(workbook, modelo)
+    # A aba de dados tem que continuar sendo a ativa: é ela que o importador
+    # lê (workbook.active), e é nela que a pessoa deve digitar ao abrir.
+    workbook.active = 0
     workbook.save(caminho)
 
 
@@ -217,8 +460,11 @@ def importar_cadastro(caminho: Path) -> list[dict]:
             'Não encontrei a coluna "Empresa" na planilha. '
             "Use o modelo exportado pelo sistema (botão \"Exportar modelo\") pra garantir o formato certo."
         )
-    if idx["socio_nome"] is None:
-        raise ValueError('Não encontrei a coluna "Sócio" na planilha.')
+    # Planilha sem coluna de sócio é o modelo "Só empresas": cada linha cadastra
+    # uma empresa e pronto. Diferente de ter a coluna e deixá-la em branco, que
+    # continua sendo linha incompleta e é ignorada mais abaixo — a coluna
+    # ausente é uma decisão do modelo, a coluna vazia é quase sempre descuido.
+    so_empresas = idx["socio_nome"] is None and idx["socio_cpf"] is None
 
     def texto(linha: list, chave: str) -> str:
         i = idx[chave]
@@ -239,7 +485,7 @@ def importar_cadastro(caminho: Path) -> list[dict]:
     for numero_linha, linha in enumerate(linhas_brutas[1:], start=2):
         empresa_nome = texto(linha, "empresa_nome")
         socio_nome = texto(linha, "socio_nome")
-        if not empresa_nome or not socio_nome:
+        if not empresa_nome or (not socio_nome and not so_empresas):
             continue
 
         try:
@@ -255,10 +501,13 @@ def importar_cadastro(caminho: Path) -> list[dict]:
 
         i_data = idx["data_entrada"]
         data_bruta = linha[i_data] if i_data is not None and i_data < len(linha) else None
-        try:
-            data_entrada = _para_data(data_bruta)
-        except ValueError:
-            raise ValueError(f'Linha {numero_linha}: data de entrada inválida "{data_bruta}".') from None
+        if so_empresas:
+            data_entrada = ""
+        else:
+            try:
+                data_entrada = _para_data(data_bruta)
+            except ValueError:
+                raise ValueError(f'Linha {numero_linha}: data de entrada inválida "{data_bruta}".') from None
 
         i_saida = idx["data_saida"]
         saida_bruta = linha[i_saida] if i_saida is not None and i_saida < len(linha) else None
