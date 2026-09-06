@@ -223,3 +223,161 @@ def test_edicao_em_linha_da_aba_anual_continua_nas_colunas_certas(conn, cenario)
     assert anual.tabela.cellWidget(row, COL_COTAS).value() == 600.0
     # A coluna de origem não é editável: não pode ganhar widget.
     assert anual.tabela.cellWidget(row, ANUAL_ORIGEM) is None
+
+
+# ------------------------------------------------------- planilha do trimestre --
+
+
+@pytest.fixture()
+def sem_dialogos(monkeypatch, tmp_path):
+    """Confirmações e seletor de arquivo são modais; sem interceptar, o teste
+    trava esperando um clique."""
+    monkeypatch.setattr(mod.QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+    monkeypatch.setattr(mod.QMessageBox, "warning", lambda *a, **k: None)
+    return tmp_path
+
+
+def _exportar(view, caminho, monkeypatch):
+    monkeypatch.setattr(mod.QFileDialog, "getSaveFileName", lambda *a, **k: (str(caminho), ""))
+    view._exportar_modelo()
+
+
+def _importar(view, caminho, monkeypatch):
+    monkeypatch.setattr(mod.QFileDialog, "getOpenFileName", lambda *a, **k: (str(caminho), ""))
+    view._importar_planilha()
+
+
+def test_exporta_modelo_com_os_socios_do_trimestre(conn, cenario, sem_dialogos, monkeypatch):
+    from controle_lucros.planilha import importar_distribuicao
+
+    view = _view(conn, trimestre=1)
+    _lancar(view, cenario["fulano"], 10000.0, pro_labore=6000.0, irrf=138.0)
+
+    caminho = sem_dialogos / "t1.xlsx"
+    _exportar(view, caminho, monkeypatch)
+
+    linhas = importar_distribuicao(caminho)
+    assert {l["nome"] for l in linhas} == {"Fulano de Tal", "Beltrano da Silva"}
+    fulano = next(l for l in linhas if l["nome"] == "Fulano de Tal")
+    # Vem preenchido com o que já foi lançado: serve de conferência também.
+    assert (fulano["valor_distribuido"], fulano["pro_labore"], fulano["irrf"]) == (10000.0, 6000.0, 138.0)
+
+
+def test_importar_lanca_no_trimestre_da_tela_e_reflete_no_anual(conn, cenario, sem_dialogos, monkeypatch):
+    view = _view(conn, trimestre=2)
+    caminho = sem_dialogos / "t2.xlsx"
+    _exportar(view, caminho, monkeypatch)
+
+    import openpyxl
+
+    wb = openpyxl.load_workbook(caminho)
+    aba = wb["Distribuição"]
+    for linha in aba.iter_rows(min_row=2):
+        if linha[1].value == "Fulano de Tal":
+            linha[2].value, linha[3].value, linha[4].value = 20000, 9000, 200
+    wb.save(caminho)
+
+    _importar(view, caminho, monkeypatch)
+
+    (lancamento,) = [
+        d for d in repo.listar_distribuicoes_trimestrais(conn, cenario["empresa"], 2025, trimestre=2)
+        if d.socio_id == cenario["fulano"]
+    ]
+    assert (lancamento.valor_distribuido, lancamento.pro_labore, lancamento.irrf) == (20000.0, 9000.0, 200.0)
+
+    anual = next(
+        d for d in repo.listar_distribuicoes(conn, cenario["empresa"], 2025)
+        if d.socio_id == cenario["fulano"]
+    )
+    assert anual.valor_distribuido == 20000.0
+
+
+def test_importar_nao_toca_nos_outros_trimestres(conn, cenario, sem_dialogos, monkeypatch):
+    _lancar(_view(conn, trimestre=1), cenario["fulano"], 10000.0)
+
+    view = _view(conn, trimestre=3)
+    caminho = sem_dialogos / "t3.xlsx"
+    _exportar(view, caminho, monkeypatch)
+    import openpyxl
+
+    wb = openpyxl.load_workbook(caminho)
+    for linha in wb["Distribuição"].iter_rows(min_row=2):
+        if linha[1].value == "Fulano de Tal":
+            linha[2].value = 5000
+    wb.save(caminho)
+    _importar(view, caminho, monkeypatch)
+
+    assert repo.trimestres_lancados(conn, cenario["empresa"], 2025) == [1, 3]
+    anual = next(
+        d for d in repo.listar_distribuicoes(conn, cenario["empresa"], 2025)
+        if d.socio_id == cenario["fulano"]
+    )
+    assert anual.valor_distribuido == 15000.0  # 10.000 do 1º + 5.000 do 3º
+
+
+def test_recusar_a_confirmacao_de_trimestre_nao_lanca_nada(conn, cenario, tmp_path, monkeypatch):
+    view = _view(conn, trimestre=1)
+    caminho = tmp_path / "t.xlsx"
+    monkeypatch.setattr(mod.QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+    _exportar(view, caminho, monkeypatch)
+
+    import openpyxl
+
+    wb = openpyxl.load_workbook(caminho)
+    for linha in wb["Distribuição"].iter_rows(min_row=2):
+        linha[2].value = 999
+    wb.save(caminho)
+
+    # A planilha não diz a que trimestre pertence, então a tela confirma antes.
+    monkeypatch.setattr(mod.QMessageBox, "question", lambda *a, **k: QMessageBox.No)
+    _importar(view, caminho, monkeypatch)
+    assert repo.listar_distribuicoes_trimestrais(conn, cenario["empresa"], 2025) == []
+
+
+def test_importar_com_periodo_trancado_avisa_e_nao_lanca(conn, cenario, tmp_path, monkeypatch):
+    view = _view(conn, trimestre=1)
+    caminho = tmp_path / "t.xlsx"
+    monkeypatch.setattr(mod.QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+    _exportar(view, caminho, monkeypatch)
+
+    repo.fechar_periodo(conn, cenario["empresa"], 2025)
+    avisos = []
+    monkeypatch.setattr(mod.QMessageBox, "warning", lambda *a, **k: avisos.append(a[2]))
+    _importar(view, caminho, monkeypatch)
+
+    assert avisos and "trancado" in avisos[0]
+    assert repo.listar_distribuicoes_trimestrais(conn, cenario["empresa"], 2025) == []
+
+
+def test_socio_desconhecido_na_planilha_vai_pra_revisao(conn, cenario, sem_dialogos, monkeypatch):
+    """Nunca cadastra sócio sozinho — mesma regra da aba anual."""
+    from controle_lucros.ui.importacao_distribuicao import associar_linhas
+
+    linhas = [{"cpf": "999.999.999-99", "nome": "Ninguém Conhecido", "valor_distribuido": 1.0,
+               "pro_labore": 0.0, "irrf": 0.0}]
+    resolvidos, pendencias = associar_linhas(conn, linhas, {cenario["fulano"]}, "no 1º trimestre de 2025")
+    assert resolvidos == []
+    assert len(pendencias) == 1
+    assert "Nenhum sócio cadastrado" in pendencias[0]["aviso"]
+
+
+def test_socio_fora_do_trimestre_vira_pendencia_com_o_periodo_no_aviso(conn, cenario):
+    from controle_lucros.ui.importacao_distribuicao import associar_linhas
+
+    linhas = [{"cpf": "222.222.222-22", "nome": "Beltrano da Silva", "valor_distribuido": 1.0,
+               "pro_labore": 0.0, "irrf": 0.0}]
+    _, pendencias = associar_linhas(conn, linhas, {cenario["fulano"]}, "no 4º trimestre de 2025")
+    assert len(pendencias) == 1
+    assert "no 4º trimestre de 2025" in pendencias[0]["aviso"]
+
+
+def test_botoes_de_planilha_seguem_o_estado_da_tela(conn, cenario):
+    view = _view(conn)
+    assert view.btn_exportar_modelo.isEnabled()
+    assert view.btn_importar.isEnabled()
+
+    repo.fechar_periodo(conn, cenario["empresa"], 2025)
+    view = _view(conn)
+    # Trancado: dá pra exportar pra conferir, mas não pra importar.
+    assert view.btn_exportar_modelo.isEnabled()
+    assert not view.btn_importar.isEnabled()

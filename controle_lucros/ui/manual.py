@@ -332,6 +332,18 @@ valor não fica pendurado sem origem.</p>
 <p>Só os sócios que estavam na sociedade <b>naquele trimestre</b>. Quem saiu no
 1º não aparece no 4º. O acumulado do ano mostrado no rodapé, porém, continua
 contando o que essa pessoa recebeu.</p>
+
+<h3>Importar planilha</h3>
+<p>Mesma planilha da distribuição anual (CPF, Sócio, Valor Distribuído,
+Pró-labore, IRRF): o formato é o mesmo, muda só onde os valores entram.
+<b>Exportar modelo</b> traz os sócios do trimestre já preenchidos com o que foi
+lançado, o que serve também de conferência.</p>
+<p><b>A planilha não guarda a que trimestre pertence</b> — quem exportasse o 1º
+e importasse com o 4º na tela lançaria tudo no lugar errado. Por isso a tela
+pergunta, antes de aplicar, em que trimestre e empresa os valores vão entrar.
+Confira essa pergunta.</p>
+<p>Importar aqui alimenta a distribuição anual do mesmo jeito que digitar:
+o anual passa a mostrar a soma dos trimestres lançados.</p>
 """
 
 _INFORME = """

@@ -11,13 +11,16 @@ o anual, acompanha).
 from __future__ import annotations
 
 import datetime as dt
+from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
+    QDialog,
     QDoubleSpinBox,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -31,6 +34,8 @@ from PySide6.QtWidgets import (
 
 from .. import repositories as repo
 from ..models import TRIMESTRES, TRIMESTRES_LABEL
+from ..planilha import exportar_modelo_distribuicao, importar_distribuicao
+from .importacao_distribuicao import DialogoRevisaoImportacao, associar_linhas
 from .common import formatar_numero, formatar_valor_br, preencher_combo
 from .theme import ENTROU_BG, ENTROU_FG, SAIU_BG, SAIU_FG
 from .theme import estado as tema_estado
@@ -118,11 +123,20 @@ class DistribuicaoTrimestralView(QWidget):
         self.btn_limpar.setProperty("role", "perigo")
         self.btn_limpar.clicked.connect(self._limpar_trimestre)
 
+        self.btn_exportar_modelo = QPushButton("Exportar modelo")
+        self.btn_exportar_modelo.clicked.connect(self._exportar_modelo)
+
+        self.btn_importar = QPushButton("Importar planilha")
+        self.btn_importar.clicked.connect(self._importar_planilha)
+
         botoes = QHBoxLayout()
         botoes.addWidget(self.btn_editar)
         botoes.addWidget(self.btn_salvar)
         botoes.addWidget(self.btn_cancelar)
         botoes.addWidget(self.btn_limpar)
+        botoes.addSpacing(8)
+        botoes.addWidget(self.btn_exportar_modelo)
+        botoes.addWidget(self.btn_importar)
         botoes.addStretch()
         self._legenda_entrou = QLabel("●  Entrou neste trimestre")
         self._legenda_saiu = QLabel("●  Saiu neste trimestre")
@@ -279,6 +293,8 @@ class DistribuicaoTrimestralView(QWidget):
         self.btn_editar.setEnabled(editavel)
         self.btn_limpar.setVisible(not self._editando)
         self.btn_limpar.setEnabled(editavel and algum_lancamento)
+        self.btn_exportar_modelo.setEnabled(tem_empresa and bool(self._linhas) and not self._editando)
+        self.btn_importar.setEnabled(editavel and not self._editando)
 
         self.empresa.setEnabled(not self._editando)
         self.ano.setEnabled(not self._editando)
@@ -391,3 +407,136 @@ class DistribuicaoTrimestralView(QWidget):
         except ValueError as exc:
             QMessageBox.warning(self, "Erro ao limpar", str(exc))
         self._carregar()
+
+    # ------------------------------------------------------------ planilha --
+    def _rotulo_periodo(self) -> str:
+        return f"no {self.trimestre.currentData()}º trimestre de {self.ano.value()}"
+
+    def _exportar_modelo(self) -> None:
+        """Mesmo formato da distribuição anual (CPF, Sócio, Valor, Pró-labore,
+        IRRF) — a planilha é a mesma; o que muda é onde os valores são
+        gravados. Sai preenchida com os sócios do trimestre e o que já foi
+        lançado, pra servir também de conferência."""
+        empresa_id = self.empresa.currentData()
+        if empresa_id is None:
+            return
+        ano_base = self.ano.value()
+        trimestre = self.trimestre.currentData()
+
+        linhas = [
+            {
+                "cpf": linha["socio_cpf"],
+                "nome": linha["socio_nome"],
+                "valor_distribuido": linha["valor_distribuido"],
+                "pro_labore": linha["pro_labore"],
+                "irrf": linha["irrf"],
+            }
+            for linha in self._linhas
+            if linha["data_saida"] is None or linha["saiu_no_trimestre"]
+        ]
+        if not linhas:
+            QMessageBox.information(
+                self, "Exportar modelo", "Não há sócios nesta empresa neste trimestre pra exportar."
+            )
+            return
+
+        sugestao = f"distribuicao_{self.empresa.currentText()}_{ano_base}_T{trimestre}.xlsx".replace(" ", "_")
+        caminho, _ = QFileDialog.getSaveFileName(
+            self, "Exportar modelo do trimestre", sugestao, "Planilha Excel (*.xlsx)"
+        )
+        if not caminho:
+            return
+        if not caminho.lower().endswith(".xlsx"):
+            caminho += ".xlsx"
+        try:
+            exportar_modelo_distribuicao(Path(caminho), linhas)
+        except OSError as exc:
+            QMessageBox.warning(self, "Erro ao exportar", str(exc))
+            return
+        QMessageBox.information(
+            self,
+            "Modelo exportado",
+            f"{len(linhas)} sócio(s) do {trimestre}º trimestre de {ano_base} em:\n{caminho}\n\n"
+            'A aba "Exemplo" da planilha mostra o preenchimento com dados fictícios.',
+        )
+
+    def _importar_planilha(self) -> None:
+        empresa_id = self.empresa.currentData()
+        if empresa_id is None:
+            return
+        ano_base = self.ano.value()
+        trimestre = self.trimestre.currentData()
+
+        if repo.periodo_esta_fechado(self.conn, empresa_id, ano_base):
+            QMessageBox.warning(
+                self, "Importar planilha",
+                f"O período de {ano_base} desta empresa está trancado. Destranque-o na aba de "
+                "Distribuição anual antes de importar.",
+            )
+            return
+
+        caminho, _ = QFileDialog.getOpenFileName(
+            self, "Importar planilha do trimestre", "", "Planilhas (*.xlsx *.csv)"
+        )
+        if not caminho:
+            return
+        try:
+            linhas_importadas = importar_distribuicao(Path(caminho))
+        except ValueError as exc:
+            QMessageBox.warning(self, "Erro ao importar", str(exc))
+            return
+        except OSError as exc:
+            QMessageBox.warning(self, "Erro ao abrir arquivo", str(exc))
+            return
+
+        if not linhas_importadas:
+            QMessageBox.information(self, "Importar planilha", "A planilha não tem nenhuma linha com dados.")
+            return
+
+        # Confirmação explícita porque a planilha não diz a que trimestre
+        # pertence: quem exportou o 1º e importou com o 4º na tela lançaria
+        # tudo no trimestre errado sem nada avisar.
+        resposta = QMessageBox.question(
+            self,
+            "Confirmar trimestre",
+            f"{len(linhas_importadas)} linha(s) serão lançadas no <b>{trimestre}º trimestre de "
+            f"{ano_base}</b>, na empresa <b>{self.empresa.currentText()}</b>.<br><br>"
+            "A planilha não guarda a que trimestre pertence — confira antes de aplicar.",
+        )
+        if resposta != QMessageBox.Yes:
+            return
+
+        socios_do_trimestre = {l["socio_id"] for l in self._linhas}
+        resolvidos, pendencias = associar_linhas(
+            self.conn, linhas_importadas, socios_do_trimestre, self._rotulo_periodo()
+        )
+
+        if pendencias:
+            dialogo = DialogoRevisaoImportacao(self.conn, pendencias, self)
+            if dialogo.exec() == QDialog.Accepted:
+                resolvidos.extend(dialogo.resolvidos())
+
+        if not resolvidos:
+            QMessageBox.information(self, "Importar planilha", "Nenhuma linha foi aplicada.")
+            return
+
+        try:
+            for linha, socio_id in resolvidos:
+                repo.salvar_distribuicao_trimestral(
+                    self.conn, empresa_id, ano_base, trimestre, socio_id,
+                    linha["valor_distribuido"],
+                    pro_labore=linha.get("pro_labore") or 0.0,
+                    irrf=linha.get("irrf") or 0.0,
+                )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Erro ao importar", str(exc))
+            self._carregar()
+            return
+
+        self._carregar()
+        nao_aplicadas = len(linhas_importadas) - len(resolvidos)
+        resumo = f"{len(resolvidos)} sócio(s) lançados no {trimestre}º trimestre de {ano_base}."
+        if nao_aplicadas > 0:
+            resumo += f"\n{nao_aplicadas} linha(s) não foram aplicadas."
+        resumo += "\n\nA distribuição anual desses sócios passou a mostrar a soma dos trimestres lançados."
+        QMessageBox.information(self, "Importação concluída", resumo)

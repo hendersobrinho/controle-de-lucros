@@ -62,6 +62,11 @@ na aba anual mostra de onde veio cada valor:
 
 Trancar o período na aba anual tranca os lançamentos trimestrais do mesmo ano.
 
+A aba trimestral também exporta e importa planilha, no mesmo formato da anual
+(CPF, Sócio, Valor Distribuído, Pró-labore, IRRF). Como a planilha não guarda a
+que trimestre pertence, a tela confirma o trimestre e a empresa antes de
+aplicar.
+
 ## Informe de rendimentos
 
 A aba **Sócios** emite o Comprovante de Rendimentos Pagos e de Imposto sobre a
