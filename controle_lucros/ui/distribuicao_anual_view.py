@@ -797,8 +797,13 @@ class DistribuicaoAnualView(QWidget):
                 f"O período de {self.ano.value()} desta empresa está trancado. Destranque-o antes de importar.",
             )
             return
+        # Mesmo motivo da aba trimestral: o período vai no título da janela
+        # de arquivo, que é onde a pessoa está olhando na hora de importar.
         caminho, _ = QFileDialog.getOpenFileName(
-            self, "Importar planilha de distribuição", "", "Planilhas (*.xlsx *.csv)"
+            self,
+            f"Importar planilha — {self.ano.value()} — {self.empresa.currentText()}",
+            "",
+            "Planilhas (*.xlsx *.csv)",
         )
         if not caminho:
             return

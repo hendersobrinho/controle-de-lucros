@@ -338,10 +338,12 @@ contando o que essa pessoa recebeu.</p>
 Pró-labore, IRRF): o formato é o mesmo, muda só onde os valores entram.
 <b>Exportar modelo</b> traz os sócios do trimestre já preenchidos com o que foi
 lançado, o que serve também de conferência.</p>
-<p><b>A planilha não guarda a que trimestre pertence</b> — quem exportasse o 1º
-e importasse com o 4º na tela lançaria tudo no lugar errado. Por isso a tela
-pergunta, antes de aplicar, em que trimestre e empresa os valores vão entrar.
-Confira essa pergunta.</p>
+<p>Os valores entram no <b>trimestre selecionado no topo da tela</b> — a
+planilha em si não guarda a que trimestre pertence. Por isso o período e a
+empresa aparecem no título da janela ao escolher o arquivo: confira ali antes
+de abrir.</p>
+<p>Se algum sócio da planilha já tiver valor lançado naquele trimestre, a tela
+avisa antes de substituir. Trimestre em branco importa direto.</p>
 <p>Importar aqui alimenta a distribuição anual do mesmo jeito que digitar:
 o anual passa a mostrar a soma dos trimestres lançados.</p>
 """

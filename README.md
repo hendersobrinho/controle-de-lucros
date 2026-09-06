@@ -63,9 +63,10 @@ na aba anual mostra de onde veio cada valor:
 Trancar o período na aba anual tranca os lançamentos trimestrais do mesmo ano.
 
 A aba trimestral também exporta e importa planilha, no mesmo formato da anual
-(CPF, Sócio, Valor Distribuído, Pró-labore, IRRF). Como a planilha não guarda a
-que trimestre pertence, a tela confirma o trimestre e a empresa antes de
-aplicar.
+(CPF, Sócio, Valor Distribuído, Pró-labore, IRRF). Os valores entram no
+trimestre selecionado no topo da tela — que aparece no título da janela de
+escolha do arquivo. Substituir lançamento já existente pede confirmação;
+trimestre em branco importa direto.
 
 ## Informe de rendimentos
 

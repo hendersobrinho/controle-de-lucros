@@ -315,10 +315,18 @@ def test_importar_nao_toca_nos_outros_trimestres(conn, cenario, sem_dialogos, mo
     assert anual.valor_distribuido == 15000.0  # 10.000 do 1º + 5.000 do 3º
 
 
-def test_recusar_a_confirmacao_de_trimestre_nao_lanca_nada(conn, cenario, tmp_path, monkeypatch):
+def test_trimestre_em_branco_importa_sem_perguntar_nada(conn, cenario, tmp_path, monkeypatch):
+    """O trimestre já está selecionado no topo da tela — repetir isso numa
+    caixa de confirmação só cobraria um clique a mais. Sem lançamento pra
+    substituir, não há o que perguntar."""
+    perguntas = []
+    monkeypatch.setattr(
+        mod.QMessageBox, "question", lambda *a, **k: (perguntas.append(a[2]), QMessageBox.Yes)[1]
+    )
+    monkeypatch.setattr(mod.QMessageBox, "information", lambda *a, **k: None)
+
     view = _view(conn, trimestre=1)
     caminho = tmp_path / "t.xlsx"
-    monkeypatch.setattr(mod.QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
     _exportar(view, caminho, monkeypatch)
 
     import openpyxl
@@ -328,10 +336,40 @@ def test_recusar_a_confirmacao_de_trimestre_nao_lanca_nada(conn, cenario, tmp_pa
         linha[2].value = 999
     wb.save(caminho)
 
-    # A planilha não diz a que trimestre pertence, então a tela confirma antes.
-    monkeypatch.setattr(mod.QMessageBox, "question", lambda *a, **k: QMessageBox.No)
     _importar(view, caminho, monkeypatch)
-    assert repo.listar_distribuicoes_trimestrais(conn, cenario["empresa"], 2025) == []
+
+    assert perguntas == []
+    assert len(repo.listar_distribuicoes_trimestrais(conn, cenario["empresa"], 2025, trimestre=1)) == 2
+
+
+def test_substituir_lancamento_existente_pede_confirmacao(conn, cenario, tmp_path, monkeypatch):
+    """Aqui há o que perder: o valor antigo não volta."""
+    monkeypatch.setattr(mod.QMessageBox, "information", lambda *a, **k: None)
+    view = _view(conn, trimestre=1)
+    _lancar(view, cenario["fulano"], 10000.0)
+
+    caminho = tmp_path / "t.xlsx"
+    _exportar(view, caminho, monkeypatch)
+    import openpyxl
+
+    wb = openpyxl.load_workbook(caminho)
+    for linha in wb["Distribuição"].iter_rows(min_row=2):
+        if linha[1].value == "Fulano de Tal":
+            linha[2].value = 777
+    wb.save(caminho)
+
+    perguntas = []
+    monkeypatch.setattr(
+        mod.QMessageBox, "question", lambda *a, **k: (perguntas.append(a[2]), QMessageBox.No)[1]
+    )
+    _importar(view, caminho, monkeypatch)
+
+    assert perguntas and "já têm valor lançado" in perguntas[0]
+    (lancamento,) = [
+        d for d in repo.listar_distribuicoes_trimestrais(conn, cenario["empresa"], 2025, trimestre=1)
+        if d.socio_id == cenario["fulano"]
+    ]
+    assert lancamento.valor_distribuido == 10000.0  # recusou: nada foi substituído
 
 
 def test_importar_com_periodo_trancado_avisa_e_nao_lanca(conn, cenario, tmp_path, monkeypatch):

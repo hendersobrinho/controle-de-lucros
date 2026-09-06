@@ -475,8 +475,15 @@ class DistribuicaoTrimestralView(QWidget):
             )
             return
 
+        # O período vai no título da janela de arquivo: é onde a pessoa está
+        # olhando no momento de importar, e diz em que trimestre os valores
+        # vão entrar sem cobrar um clique a mais só pra confirmar o que já
+        # está selecionado no topo da tela.
         caminho, _ = QFileDialog.getOpenFileName(
-            self, "Importar planilha do trimestre", "", "Planilhas (*.xlsx *.csv)"
+            self,
+            f"Importar planilha — {trimestre}º trimestre de {ano_base} — {self.empresa.currentText()}",
+            "",
+            "Planilhas (*.xlsx *.csv)",
         )
         if not caminho:
             return
@@ -493,19 +500,6 @@ class DistribuicaoTrimestralView(QWidget):
             QMessageBox.information(self, "Importar planilha", "A planilha não tem nenhuma linha com dados.")
             return
 
-        # Confirmação explícita porque a planilha não diz a que trimestre
-        # pertence: quem exportou o 1º e importou com o 4º na tela lançaria
-        # tudo no trimestre errado sem nada avisar.
-        resposta = QMessageBox.question(
-            self,
-            "Confirmar trimestre",
-            f"{len(linhas_importadas)} linha(s) serão lançadas no <b>{trimestre}º trimestre de "
-            f"{ano_base}</b>, na empresa <b>{self.empresa.currentText()}</b>.<br><br>"
-            "A planilha não guarda a que trimestre pertence — confira antes de aplicar.",
-        )
-        if resposta != QMessageBox.Yes:
-            return
-
         socios_do_trimestre = {l["socio_id"] for l in self._linhas}
         resolvidos, pendencias = associar_linhas(
             self.conn, linhas_importadas, socios_do_trimestre, self._rotulo_periodo()
@@ -519,6 +513,22 @@ class DistribuicaoTrimestralView(QWidget):
         if not resolvidos:
             QMessageBox.information(self, "Importar planilha", "Nenhuma linha foi aplicada.")
             return
+
+        # Pergunta só quando há o que perder. Trimestre em branco importa
+        # direto; substituir valor já lançado é a única situação em que vale
+        # interromper, porque o valor antigo não volta.
+        ja_lancados = {
+            l["socio_id"] for l in self._linhas if l["registro_id"] is not None
+        } & {socio_id for _, socio_id in resolvidos}
+        if ja_lancados:
+            resposta = QMessageBox.question(
+                self,
+                "Substituir lançamentos",
+                f"{len(ja_lancados)} sócio(s) já têm valor lançado no {trimestre}º trimestre de "
+                f"{ano_base}. Importar substitui esses valores pelos da planilha. Continuar?",
+            )
+            if resposta != QMessageBox.Yes:
+                return
 
         try:
             for linha, socio_id in resolvidos:
