@@ -8,7 +8,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from controle_lucros.informe_rendimentos import BRASAO_ARQUIVO, caminho_brasao, montar_html
+from controle_lucros.informe_rendimentos import (
+    BRASAO_ALTURA,
+    BRASAO_ARQUIVO,
+    BRASAO_LARGURA,
+    caminho_brasao,
+    montar_html,
+)
 from controle_lucros.models import InformeRendimento
 from controle_lucros.ui.icones import pasta_assets
 from controle_lucros.ui.informe_pdf import gerar_pdf, gerar_pdfs
@@ -53,6 +59,44 @@ def test_o_brasao_esta_empacotado_junto_com_o_resto_dos_assets():
     documento sai sem ele e ninguém percebe até imprimir."""
     assert (pasta_assets() / BRASAO_ARQUIVO).exists()
     assert caminho_brasao() is not None
+
+
+def test_brasao_tem_fundo_transparente():
+    """Sem canal alfa o fundo transparente vira um quadrado preto em volta do
+    brasão no informe impresso — foi assim que quebrou uma vez."""
+    from PySide6.QtGui import QImage
+
+    imagem = QImage(str(pasta_assets() / BRASAO_ARQUIVO))
+    assert imagem.hasAlphaChannel()
+    assert imagem.pixelColor(0, 0).alpha() == 0
+
+
+def test_dimensoes_do_brasao_no_html_batem_com_o_arquivo():
+    """Se a proporção declarada não for a do PNG, o Qt estica a imagem pra
+    caber e o brasão sai deformado — sem erro nenhum."""
+    from PySide6.QtGui import QImage
+
+    imagem = QImage(str(pasta_assets() / BRASAO_ARQUIVO))
+    proporcao_arquivo = imagem.width() / imagem.height()
+    proporcao_html = BRASAO_LARGURA / BRASAO_ALTURA
+    assert abs(proporcao_arquivo - proporcao_html) < 0.02, (
+        f"O brasão é {imagem.width()}x{imagem.height()} mas o informe declara "
+        f"{BRASAO_LARGURA}x{BRASAO_ALTURA}. Ajuste BRASAO_LARGURA/BRASAO_ALTURA."
+    )
+
+
+def test_brasao_nao_tem_margem_transparente_sobrando():
+    """Margem vazia em volta encolhe o desenho dentro do espaço reservado no
+    cabeçalho — a imagem tem que estar recortada no conteúdo."""
+    from PySide6.QtGui import QImage
+
+    imagem = QImage(str(pasta_assets() / BRASAO_ARQUIVO))
+    # Alguma coisa opaca tem que encostar em cada uma das quatro bordas.
+    topo = any(imagem.pixelColor(x, 0).alpha() > 0 for x in range(imagem.width()))
+    base = any(imagem.pixelColor(x, imagem.height() - 1).alpha() > 0 for x in range(imagem.width()))
+    esquerda = any(imagem.pixelColor(0, y).alpha() > 0 for y in range(imagem.height()))
+    direita = any(imagem.pixelColor(imagem.width() - 1, y).alpha() > 0 for y in range(imagem.height()))
+    assert (topo, base, esquerda, direita) == (True, True, True, True)
 
 
 def test_gerar_pdf_produz_uma_unica_pagina_a4(tmp_path):

@@ -37,6 +37,11 @@ AVISO_CABECALHO = (
     "&lt;https://www.gov.br/receitafederal/pt-br&gt;"
 )
 BRASAO_ARQUIVO = "brasao_republica.png"
+# Tamanho do brasão no cabeçalho. A proporção tem que ser a do arquivo, senão
+# o Qt estica a imagem pra caber — tests/test_informe_pdf.py confere isso
+# contra o PNG de verdade, pra trocar o arquivo não deformar o brasão calado.
+BRASAO_LARGURA = 45
+BRASAO_ALTURA = 45
 
 TITULO_QUADRO_3 = "3. Rendimentos Tributáveis, Deduções e Imposto sobre a Renda Retido na Fonte"
 TITULO_QUADRO_4 = "4. Rendimentos Isentos e Não Tributáveis"
@@ -209,13 +214,17 @@ def montar_html(
 
 
 def _cabecalho(informe: InformeRendimento, brasao: Path | None) -> str:
-    imagem = f'<img src="{brasao.as_posix()}" width="42" height="45">' if brasao else "&nbsp;"
+    imagem = (
+        f'<img src="{brasao.as_posix()}" width="{BRASAO_LARGURA}" height="{BRASAO_ALTURA}">'
+        if brasao
+        else "&nbsp;"
+    )
     return f"""<table width="100%" border="1" cellspacing="0" cellpadding="3">
 <tr>
   <td width="55%" rowspan="2">
     <table border="0" cellspacing="0" cellpadding="0" width="100%">
       <tr>
-        <td width="50" valign="middle">{imagem}</td>
+        <td width="52" valign="middle">{imagem}</td>
         <td valign="middle"><b>MINISTÉRIO DA ECONOMIA</b><br>
         <b>SECRETARIA DA RECEITA FEDERAL DO BRASIL</b><br>
         <b>IMPOSTO SOBRE A RENDA DA PESSOA FÍSICA</b><br>
