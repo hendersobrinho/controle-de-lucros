@@ -104,6 +104,19 @@ python main.py
 
 No primeiro uso, o sistema pede pra criar o primeiro usuário (administrador).
 
+## Ícone do programa
+
+`controle_lucros/ui/assets/logo.svg` é a fonte; `logo.png` e `logo.ico` são
+gerados a partir dele. Depois de mexer no SVG:
+
+```bash
+python tools/gerar_icones.py
+```
+
+O `.ico` sai com dez resoluções (16 a 256), cada uma desenhada direto do vetor
+em vez de reduzida de um PNG grande — reduzir borra os traços nos tamanhos
+pequenos, que são justamente os da barra de tarefas e da lista de arquivos.
+
 ## Empacotar para Windows (gerar o .exe)
 
 Isso empacota o programa inteiro (Python + PySide6 + tudo) numa pasta que
