@@ -419,3 +419,76 @@ def test_botoes_de_planilha_seguem_o_estado_da_tela(conn, cenario):
     # Trancado: dá pra exportar pra conferir, mas não pra importar.
     assert view.btn_exportar_modelo.isEnabled()
     assert not view.btn_importar.isEnabled()
+
+
+# ------------------------------------------------ navegação entre trimestres --
+
+
+def test_setas_andam_um_trimestre_por_vez(conn, cenario):
+    view = _view(conn, trimestre=2)
+    view.btn_proximo.click()
+    assert (view.ano.value(), view.trimestre.currentData()) == (2025, 3)
+    view.btn_anterior.click()
+    view.btn_anterior.click()
+    assert (view.ano.value(), view.trimestre.currentData()) == (2025, 1)
+
+
+def test_seta_atravessa_a_virada_de_ano(conn, cenario):
+    """Parar na borda do ano obrigaria a mexer em dois campos pra dar um
+    passo só."""
+    view = _view(conn, trimestre=1)
+    view.btn_anterior.click()
+    assert (view.ano.value(), view.trimestre.currentData()) == (2024, 4)
+
+    view.btn_proximo.click()
+    assert (view.ano.value(), view.trimestre.currentData()) == (2025, 1)
+
+    view.trimestre.setCurrentIndex(3)  # 4º de 2025
+    view.btn_proximo.click()
+    assert (view.ano.value(), view.trimestre.currentData()) == (2026, 1)
+
+
+def test_navegar_recarrega_a_tela_uma_vez_so(conn, cenario, monkeypatch):
+    """Mudar ano e trimestre sem bloquear os sinais dispararia _carregar duas
+    vezes, e a tela piscaria o período errado no meio do caminho."""
+    view = _view(conn, trimestre=1)
+    chamadas = []
+    original = view._carregar
+    monkeypatch.setattr(view, "_carregar", lambda: (chamadas.append(1), original())[1])
+
+    view.btn_anterior.click()
+    assert len(chamadas) == 1
+    assert (view.ano.value(), view.trimestre.currentData()) == (2024, 4)
+
+
+def test_navegar_traz_os_valores_do_trimestre_de_destino(conn, cenario):
+    _lancar(_view(conn, trimestre=1), cenario["fulano"], 10000.0)
+
+    view = _view(conn, trimestre=2)
+    assert view._linhas[_linha_de(view, cenario["fulano"])]["valor_distribuido"] == 0.0
+    view.btn_anterior.click()
+    assert view._linhas[_linha_de(view, cenario["fulano"])]["valor_distribuido"] == 10000.0
+
+
+def test_setas_param_nos_limites_do_ano_configuravel(conn, cenario):
+    view = _view(conn)
+    view.ano.setValue(view.ano.minimum())
+    view.trimestre.setCurrentIndex(0)
+    assert not view.btn_anterior.isEnabled()
+    assert view.btn_proximo.isEnabled()
+
+    view.ano.setValue(view.ano.maximum())
+    view.trimestre.setCurrentIndex(3)
+    assert not view.btn_proximo.isEnabled()
+    assert view.btn_anterior.isEnabled()
+
+
+def test_setas_travam_durante_a_edicao(conn, cenario):
+    """Trocar de período no meio de um lançamento descartaria o que foi
+    digitado — as setas seguem a mesma trava dos outros seletores."""
+    view = _view(conn)
+    view._iniciar_edicao()
+    assert not view.btn_anterior.isEnabled()
+    assert not view.btn_proximo.isEnabled()
+    view._cancelar_edicao()
+    assert view.btn_anterior.isEnabled()

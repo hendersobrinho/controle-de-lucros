@@ -308,6 +308,10 @@ só o valor anual.</p>
 <h3>Como lançar</h3>
 <p>Escolha empresa, ano e trimestre, clique em <b>Lançar trimestre</b>, preencha
 valor distribuído, pró-labore e IRRF de cada sócio, e salve.</p>
+<p>As setas <b>‹</b> e <b>›</b> ao lado do trimestre andam um período por vez e
+atravessam a virada de ano: o anterior ao 1º de 2025 é o 4º de 2024. Elas ficam
+travadas durante um lançamento em aberto — trocar de período no meio
+descartaria o que foi digitado; salve ou cancele antes.</p>
 
 <h3>O que acontece com a distribuição anual</h3>
 <p>A cada lançamento, a distribuição <b>anual</b> daquele sócio passa a ser

@@ -81,13 +81,35 @@ class DistribuicaoTrimestralView(QWidget):
         self.trimestre.setCurrentIndex(self._trimestre_corrente() - 1)
         self.trimestre.currentIndexChanged.connect(lambda _: self._carregar())
 
+        # Setas pra andar na linha do tempo, no mesmo estilo do histórico de
+        # alterações contratuais. Atravessam a virada de ano de propósito:
+        # o trimestre anterior ao 1º de 2025 é o 4º de 2024, e parar na borda
+        # do ano obrigaria a mexer em dois campos pra dar um passo só.
+        self.btn_anterior = QPushButton("‹")
+        self.btn_anterior.setProperty("role", "chevron")
+        self.btn_anterior.setToolTip("Trimestre anterior")
+        self.btn_anterior.clicked.connect(lambda: self._navegar_trimestre(-1))
+
+        self.btn_proximo = QPushButton("›")
+        self.btn_proximo.setProperty("role", "chevron")
+        self.btn_proximo.setToolTip("Próximo trimestre")
+        self.btn_proximo.clicked.connect(lambda: self._navegar_trimestre(1))
+
+        # A empresa encolhe antes de tudo: é o único campo cujo conteúdo cabe
+        # cortado sem atrapalhar (o nome inteiro fica na dica), enquanto ano,
+        # trimestre e setas têm largura fixa e some tudo junto se apertar.
+        self.empresa.setMinimumWidth(160)
+
         topo = QHBoxLayout()
         topo.addWidget(QLabel("Empresa:"))
         topo.addWidget(self.empresa, 1)
+        topo.addSpacing(8)
         topo.addWidget(QLabel("Ano:"))
         topo.addWidget(self.ano)
-        topo.addWidget(QLabel("Trimestre:"))
+        topo.addSpacing(8)
+        topo.addWidget(self.btn_anterior)
         topo.addWidget(self.trimestre)
+        topo.addWidget(self.btn_proximo)
 
         self.resumo = QLabel()
         self.resumo.setProperty("role", "secao")
@@ -160,6 +182,32 @@ class DistribuicaoTrimestralView(QWidget):
     @staticmethod
     def _trimestre_corrente() -> int:
         return (dt.date.today().month - 1) // 3 + 1
+
+    def _posicao_na_linha_do_tempo(self) -> int:
+        """Ano e trimestre viram um número só, pra andar de um em um sem
+        tratar a virada de ano como caso especial."""
+        return self.ano.value() * 4 + (self.trimestre.currentData() - 1)
+
+    def _limites_da_linha_do_tempo(self) -> tuple[int, int]:
+        return self.ano.minimum() * 4, self.ano.maximum() * 4 + 3
+
+    def _navegar_trimestre(self, passo: int) -> None:
+        primeiro, ultimo = self._limites_da_linha_do_tempo()
+        destino = self._posicao_na_linha_do_tempo() + passo
+        if not (primeiro <= destino <= ultimo):
+            return
+
+        ano, trimestre = divmod(destino, 4)
+        # Um recarregamento só: sem bloquear os sinais, mudar ano e trimestre
+        # dispararia _carregar duas vezes, e a tela piscaria o período errado
+        # no meio do caminho.
+        self.ano.blockSignals(True)
+        self.trimestre.blockSignals(True)
+        self.ano.setValue(ano)
+        self.trimestre.setCurrentIndex(trimestre)
+        self.ano.blockSignals(False)
+        self.trimestre.blockSignals(False)
+        self._carregar()
 
     def _aplicar_cores(self) -> None:
         self.aviso_trancado.setStyleSheet(
@@ -299,6 +347,11 @@ class DistribuicaoTrimestralView(QWidget):
         self.empresa.setEnabled(not self._editando)
         self.ano.setEnabled(not self._editando)
         self.trimestre.setEnabled(not self._editando)
+
+        primeiro, ultimo = self._limites_da_linha_do_tempo()
+        posicao = self._posicao_na_linha_do_tempo()
+        self.btn_anterior.setEnabled(not self._editando and posicao > primeiro)
+        self.btn_proximo.setEnabled(not self._editando and posicao < ultimo)
 
     # ------------------------------------------------------ edição em linha --
     def _campo_dinheiro(self, valor: float) -> QDoubleSpinBox:
