@@ -1,6 +1,8 @@
 ; Script do Inno Setup pro instalador do Controle de Distribuição de Lucros.
 ;
-; Pré-requisito: já ter gerado o pacote com o PyInstaller (dist\ControleDeLucros\),
+; Pré-requisito: já ter gerado o pacote com
+;   python -m PyInstaller --clean controle_lucros.spec
+; que produz dist\ControleDeLucros\ e build\versao_installer.iss —
 ; conforme o README — este script só empacota o que já está em dist\.
 ;
 ; Rodar (com o Inno Setup 6 instalado, no Windows):
@@ -29,7 +31,7 @@
 ; Sem o pacote pronto não há o que instalar — melhor dizer isso do que falhar
 ; adiante com uma mensagem sobre arquivo não encontrado.
 #if !FileExists(MyAppExePath)
-  #error Rode antes: pyinstaller controle_lucros.spec (nao achei dist\ControleDeLucros\ControleDeLucros.exe)
+  #error Rode antes: python -m PyInstaller --clean controle_lucros.spec (nao achei dist\ControleDeLucros\ControleDeLucros.exe)
 #endif
 
 ; MyAppVersion vem daqui, escrito pelo controle_lucros.spec a partir de

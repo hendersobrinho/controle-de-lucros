@@ -134,7 +134,7 @@ roda em qualquer Windows sem precisar instalar Python nela.
 2. Gere o pacote:
 
    ```bat
-   pyinstaller controle_lucros.spec
+   python -m PyInstaller --clean controle_lucros.spec
    ```
 
 3. O resultado fica em `dist\ControleDeLucros\` — uma pasta com
@@ -147,8 +147,14 @@ roda em qualquer Windows sem precisar instalar Python nela.
 Pra gerar de novo do zero (depois de mudar código), limpe o build anterior:
 
 ```bat
-pyinstaller --clean controle_lucros.spec
+python -m PyInstaller --clean controle_lucros.spec
 ```
+
+> **Por que `python -m PyInstaller` e não só `pyinstaller`?** O `pip` instala
+> os executáveis numa pasta `Scripts` que muitas vezes não está no PATH do
+> Windows — aí `pyinstaller` dá "não é reconhecido como um comando interno ou
+> externo" mesmo estando instalado. Chamando como módulo, quem resolve é o
+> próprio Python. Vale o mesmo pro `pytest`: `python -m pytest`.
 
 ### Onde ficam os dados depois de empacotado
 
@@ -163,7 +169,7 @@ dados: eles moram em outro lugar, específico do usuário do Windows logado.
 Opcional — empacota a pasta `dist\ControleDeLucros\` num instalador único
 (`.exe`) com atalho no menu Iniciar, atalho na Área de Trabalho (opcional) e
 desinstalador. Requer o [Inno Setup 6](https://jrsoftware.org/isinfo.php)
-instalado no Windows, e que o passo anterior (`pyinstaller controle_lucros.spec`)
+instalado no Windows, e que o passo anterior (`python -m PyInstaller --clean controle_lucros.spec`)
 já tenha rodado — se não tiver, a compilação para com uma mensagem dizendo
 isso, em vez de gerar um instalador vazio.
 
@@ -183,7 +189,7 @@ Dali ela vai pras propriedades do `.exe` (aba Detalhes, no Windows), pro nome
 do instalador, pra tela **Sobre**, e pro registro de programas instalados.
 
 1. Edite `__version__` em `controle_lucros/__init__.py`.
-2. `pyinstaller --clean controle_lucros.spec`
+2. `python -m PyInstaller --clean controle_lucros.spec`
 3. `"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" controle_lucros.iss`
 
 Nessa ordem: o instalador se recusa a compilar sem o pacote pronto, e a
@@ -199,12 +205,12 @@ Em builds mais antigas de PyInstaller isso pode não detectar esses módulos
 do Qt sozinho. Se acontecer, gere de novo assim:
 
 ```bat
-pyinstaller --clean --hidden-import PySide6.QtCharts --hidden-import PySide6.QtPrintSupport --hidden-import PySide6.QtSvgWidgets controle_lucros.spec
+python -m PyInstaller --clean --hidden-import PySide6.QtCharts --hidden-import PySide6.QtPrintSupport --hidden-import PySide6.QtSvgWidgets controle_lucros.spec
 ```
 
 ## Rodar os testes
 
 ```bash
 pip install -r requirements-dev.txt
-pytest
+python -m pytest
 ```

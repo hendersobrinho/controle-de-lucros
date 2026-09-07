@@ -7,10 +7,11 @@ todo dia. Depois de empacotado, o resultado fica em dist/ControleDeLucros/ —
 é essa pasta inteira que deve ser copiada/distribuída, não só o .exe.
 
 Rodar (com o ambiente virtual do projeto ativado):
-    pyinstaller controle_lucros.spec
+    python -m PyInstaller --clean controle_lucros.spec
 
-Pra limpar um build anterior antes de gerar de novo:
-    pyinstaller --clean controle_lucros.spec
+Como módulo, e não pelo comando "pyinstaller": no Windows o pip costuma
+instalar os executáveis numa pasta Scripts fora do PATH, e aí o nome solto
+não é reconhecido mesmo com o pacote instalado.
 
 Depois, no Windows, o controle_lucros.iss transforma dist/ControleDeLucros/
 num instalador — e lê a versão do próprio .exe gerado aqui.
