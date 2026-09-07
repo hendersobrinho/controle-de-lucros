@@ -78,11 +78,14 @@ def gravar_ico(caminho: Path, tamanhos: tuple[int, ...]) -> None:
 
 
 def main() -> None:
-    app = QGuiApplication(sys.argv)  # noqa: F841 - QSvgRenderer exige aplicação viva
+    # QSvgRenderer e QImage precisam de uma aplicação Qt viva; a referência
+    # tem que ficar de pé até o fim do trabalho.
+    aplicacao = QGuiApplication(sys.argv)
     renderizar(TAMANHO_PNG).save(str(ASSETS / "logo.png"), "PNG")
     gravar_ico(ASSETS / "logo.ico", TAMANHOS_ICO)
     print(f"logo.png {TAMANHO_PNG}x{TAMANHO_PNG}")
     print("logo.ico " + ", ".join(f"{t}x{t}" for t in TAMANHOS_ICO))
+    aplicacao.quit()
 
 
 if __name__ == "__main__":
