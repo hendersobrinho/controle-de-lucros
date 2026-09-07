@@ -8,6 +8,7 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtSvgWidgets import QSvgWidget
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
+from .. import __version__
 from .icones import pasta_assets
 from .theme import BRASS
 
@@ -35,7 +36,7 @@ class SobreView(QWidget):
         nome = QLabel("Henderson Pereira")
         nome.setProperty("role", "titulo")
 
-        assinatura = QLabel("Desenvolvido por HenderLab")
+        assinatura = QLabel(f"Desenvolvido por HenderLab  ·  versão {__version__}")
         assinatura.setProperty("role", "subtitulo")
 
         cabecalho = QHBoxLayout()

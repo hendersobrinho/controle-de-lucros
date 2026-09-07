@@ -10,3 +10,6 @@ data/
 # saída do PyInstaller — gerada localmente a cada build, não é código-fonte
 build/
 dist/
+
+# saída do Inno Setup — instalador gerado localmente
+installer/

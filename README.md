@@ -162,9 +162,10 @@ dados: eles moram em outro lugar, específico do usuário do Windows logado.
 
 Opcional — empacota a pasta `dist\ControleDeLucros\` num instalador único
 (`.exe`) com atalho no menu Iniciar, atalho na Área de Trabalho (opcional) e
-desinstalador. Requer o [Inno Setup](https://jrsoftware.org/isinfo.php)
+desinstalador. Requer o [Inno Setup 6](https://jrsoftware.org/isinfo.php)
 instalado no Windows, e que o passo anterior (`pyinstaller controle_lucros.spec`)
-já tenha rodado.
+já tenha rodado — se não tiver, a compilação para com uma mensagem dizendo
+isso, em vez de gerar um instalador vazio.
 
 ```bat
 "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" controle_lucros.iss
@@ -175,8 +176,22 @@ Os dados do usuário (banco, backups, preferências) ficam em
 `%LOCALAPPDATA%\ControleDeLucros\`, fora da pasta de instalação — então
 desinstalar ou reinstalar/atualizar o programa nunca apaga os dados.
 
-Pra lançar uma nova versão, atualize `MyAppVersion` no topo do
-`controle_lucros.iss` antes de gerar o instalador de novo.
+### Lançar uma nova versão
+
+A versão fica num lugar só: `__version__` em `controle_lucros/__init__.py`.
+Dali ela vai pras propriedades do `.exe` (aba Detalhes, no Windows), pro nome
+do instalador, pra tela **Sobre**, e pro registro de programas instalados.
+
+1. Edite `__version__` em `controle_lucros/__init__.py`.
+2. `pyinstaller --clean controle_lucros.spec`
+3. `"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" controle_lucros.iss`
+
+Nessa ordem: o instalador se recusa a compilar sem o pacote pronto, e a
+versão que ele usa é escrita pelo passo 2.
+
+Como o `AppId` não muda entre versões, instalar por cima é reconhecido pelo
+Windows como **atualização** — a entrada em "Aplicativos instalados" continua
+sendo uma só, e os dados do usuário não são tocados.
 
 ### Se o build falhar reclamando de gráficos (QtCharts) ou exportação em PDF
 

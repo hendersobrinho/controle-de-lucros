@@ -3,9 +3,13 @@
 ; Pré-requisito: já ter gerado o pacote com o PyInstaller (dist\ControleDeLucros\),
 ; conforme o README — este script só empacota o que já está em dist\.
 ;
-; Rodar (com o Inno Setup instalado, no Windows):
+; Rodar (com o Inno Setup 6 instalado, no Windows):
 ;   "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" controle_lucros.iss
 ; ou abrir este arquivo direto na IDE do Inno Setup e compilar (Ctrl+F9).
+;
+; A versão do instalador é lida do .exe já compilado — não há número pra
+; manter aqui. Pra subir de versão, mexa em controle_lucros/__init__.py e
+; gere o pacote de novo antes de compilar este script.
 ;
 ; O instalador some, mas os dados do usuário (banco, backups, preferências)
 ; ficam em %LOCALAPPDATA%\ControleDeLucros\ — fora da pasta de instalação —
@@ -13,10 +17,22 @@
 ; também não mexe neles.
 
 #define MyAppName "Controle de Distribuição de Lucros"
-#define MyAppVersion "1.0.0"
 #define MyAppPublisher "HenderLab"
 #define MyAppURL "https://www.henderlab.com.br/"
 #define MyAppExeName "ControleDeLucros.exe"
+#define MyAppExePath "dist\ControleDeLucros\ControleDeLucros.exe"
+
+; Sem o pacote pronto não há o que instalar — melhor dizer isso do que falhar
+; adiante com uma mensagem sobre arquivo não encontrado.
+#if !FileExists(MyAppExePath)
+  #error Gere o pacote antes: pyinstaller controle_lucros.spec
+#endif
+
+; MyAppVersion vem daqui, escrito pelo controle_lucros.spec a partir de
+; controle_lucros/__init__.py. A versão mora num lugar só: subir de versão é
+; mexer naquele arquivo e gerar o pacote de novo, sem risco de o instalador e
+; o programa discordarem.
+#include "build\versao_installer.iss"
 
 [Setup]
 ; Gerado uma única vez pro app — não muda entre versões, é o que permite ao
@@ -35,10 +51,32 @@ OutputDir=installer
 OutputBaseFilename=ControleDeLucros_Setup_{#MyAppVersion}
 SetupIconFile=controle_lucros\ui\assets\logo.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
-Compression=lzma2
+AppCopyright={#MyAppPublisher}
+UninstallDisplayName={#MyAppName}
+Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+
+; Instala em Arquivos de Programas, então precisa de elevação — explícito pra
+; o pedido de permissão aparecer no começo e não no meio da cópia.
+PrivilegesRequired=admin
+
+; O Qt 6 desta versão não roda em Windows anterior ao 10; barrar aqui dá uma
+; mensagem clara em vez de um erro de DLL depois de instalado.
+MinVersion=10.0
+
+; Atualizar por cima com o programa aberto travaria os arquivos; o Windows é
+; avisado pra fechá-lo antes.
+CloseApplications=yes
+RestartApplications=no
+
+; Propriedades do próprio instalador (aba Detalhes do arquivo).
+VersionInfoVersion={#MyAppVersion}
+VersionInfoCompany={#MyAppPublisher}
+VersionInfoDescription=Instalador do {#MyAppName}
+VersionInfoProductName={#MyAppName}
 
 [Languages]
 Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
