@@ -3,12 +3,14 @@ excluídas de verdade, só desativadas, pra não perder o histórico de quem fez
 o quê no log de atividade."""
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -23,6 +25,12 @@ from PySide6.QtWidgets import (
 from .. import repositories as repo
 from .. import sessao
 from . import theme
+
+
+def _hairline() -> QFrame:
+    linha = QFrame()
+    linha.setProperty("role", "hairline")
+    return linha
 
 
 class _DialogoNovaSenha(QDialog):
@@ -165,9 +173,22 @@ class UsuariosTab(QWidget):
         botoes.addWidget(self.btn_alternar_ativo)
         botoes.addStretch()
 
+        # Trocar a PRÓPRIA senha é outra coisa que redefinir a de um usuário
+        # selecionado: aqui a senha atual é exigida, e não depende de haver
+        # linha selecionada na tabela. Separado por isso.
+        self.btn_minha_senha = QPushButton("Trocar minha senha")
+        self.btn_minha_senha.clicked.connect(self._trocar_minha_senha)
+
+        minha_conta = QLabel("Minha conta")
+        minha_conta.setProperty("role", "secao")
+
         form_container = QVBoxLayout()
         form_container.addLayout(form)
         form_container.addLayout(botoes)
+        form_container.addSpacing(18)
+        form_container.addWidget(_hairline())
+        form_container.addWidget(minha_conta)
+        form_container.addWidget(self.btn_minha_senha, alignment=Qt.AlignLeft)
         form_container.addStretch()
 
         layout = QHBoxLayout(self)
@@ -251,6 +272,15 @@ class UsuariosTab(QWidget):
             return
         repo.definir_ativo(self.conn, usuario.id, not usuario.ativo)
         self.atualizar()
+
+    def _trocar_minha_senha(self) -> None:
+        from .login import DialogoTrocarMinhaSenha
+
+        usuario = sessao.usuario_atual()
+        if usuario is None:
+            return
+        if DialogoTrocarMinhaSenha(self.conn, usuario, self).exec() == QDialog.Accepted:
+            QMessageBox.information(self, "Senha alterada", "Sua senha foi atualizada.")
 
     def _atualizar_disponibilidade(self) -> None:
         tem_selecao = self._usuario_atual_id is not None

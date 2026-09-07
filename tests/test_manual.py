@@ -84,7 +84,7 @@ def test_topico_da_pagina_cai_no_inicio_quando_nao_conhece():
         ("distribuicao.trimestral", ["soma dos trimestres", "Origem", "editado à mão"]),
         ("distribuicao", ["Trancar o período", "Importar planilha", "Movimentações"]),
         ("dashboard", ["proporcional", "tolerância"]),
-        ("empresas.importar", ["CPF", "CNPJ", "nº da empresa"]),
+        ("sistema.importar", ["CPF", "CNPJ", "nº da empresa"]),
         ("socios", ["Encerrar vínculo", "Excluir vínculo"]),
         ("sistema", ["backup", "log"]),
     ],

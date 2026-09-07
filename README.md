@@ -26,7 +26,7 @@ estava salvo.
 
 ## Modelos de planilha
 
-A importação em massa (**Empresas · Importação em massa**) tem três modelos, e
+A importação em massa (**Sistema · Importação em massa**) tem três modelos, e
 o combo **Modelo** vale tanto para exportar a planilha em branco quanto para
 exportar o cadastro atual:
 

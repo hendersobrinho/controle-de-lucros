@@ -129,7 +129,7 @@ na tela de Sócios, e vice-versa — não são dois cadastros separados.</p>
 """
 
 _IMPORTACAO = """
-<h2>Empresas · Importação em massa</h2>
+<h2>Importação em massa</h2>
 <p>Cadastra empresas, sócios, vínculos e (opcionalmente) distribuição de uma
 vez, a partir de uma planilha. <b>Uma linha por (empresa, sócio)</b> — a mesma
 empresa aparece repetida em várias linhas, uma para cada sócio dela.</p>
@@ -443,6 +443,12 @@ máquina é compartilhada e o sistema precisa saber quem fez o quê. Só
 administradores veem as telas de Usuários e Backup.</p>
 <p>Contas <b>nunca são excluídas</b>, só desativadas. Uma conta excluída
 deixaria o log de atividades sem dono.</p>
+<p>Nesta tela há duas coisas diferentes com nome parecido: <b>Redefinir
+senha</b> troca a senha do usuário selecionado na tabela (ação de
+administrador, não pede a senha antiga), e <b>Trocar minha senha</b>, no bloco
+"Minha conta", troca a sua própria — essa pede a senha atual.</p>
+<p>Quem não é administrador não vê esta tela; para essas contas, o atalho
+<b>Trocar senha</b> fica no rodapé da barra lateral.</p>
 
 <h3>Log de atividades</h3>
 <p>Registra quem fez o quê e quando: cadastros, alterações, exclusões,
@@ -464,7 +470,7 @@ TOPICOS: tuple[Topico, ...] = (
     Topico("inicio", "Começando por aqui", _INICIO),
     Topico("empresas.cadastro", "Empresas · Cadastro", _EMPRESAS),
     Topico("empresas.alteracoes", "Empresas · Alterações contratuais", _ALTERACOES),
-    Topico("empresas.importar", "Empresas · Importação em massa", _IMPORTACAO),
+    Topico("sistema.importar", "Importação em massa", _IMPORTACAO),
     Topico("socios", "Sócios e vínculos", _SOCIOS),
     Topico("distribuicao", "Distribuição anual", _DISTRIBUICAO),
     Topico("distribuicao.trimestral", "Distribuição trimestral", _TRIMESTRAL),
@@ -478,12 +484,12 @@ TOPICOS: tuple[Topico, ...] = (
 TOPICO_POR_PAGINA = {
     "empresas.cadastro": "empresas.cadastro",
     "empresas.alteracoes": "empresas.alteracoes",
-    "empresas.importar": "empresas.importar",
     "socios": "socios",
     "distribuicao": "distribuicao",
     "distribuicao.trimestral": "distribuicao.trimestral",
     "dashboard.geral": "dashboard",
     "dashboard.empresa": "dashboard",
+    "sistema.importar": "sistema.importar",
     "sistema.log": "sistema",
     "sistema.usuarios": "sistema",
     "sistema.backup": "sistema",

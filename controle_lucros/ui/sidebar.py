@@ -4,7 +4,7 @@ O rodapé mostra quem está logado e dá acesso a trocar senha / sair."""
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QButtonGroup, QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QButtonGroup, QFrame, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from . import theme
 
@@ -30,7 +30,6 @@ class Sidebar(QFrame):
         layout.addWidget(self._secao("EMPRESAS"))
         layout.addWidget(self._item("Cadastro", "empresas.cadastro", sub=True, marcado=True))
         layout.addWidget(self._item("Alterações contratuais", "empresas.alteracoes", sub=True))
-        layout.addWidget(self._item("Importação em massa", "empresas.importar", sub=True))
 
         layout.addWidget(self._espacador())
         layout.addWidget(self._secao("SÓCIOS"))
@@ -48,12 +47,12 @@ class Sidebar(QFrame):
 
         layout.addWidget(self._espacador())
         layout.addWidget(self._secao("SISTEMA"))
+        layout.addWidget(self._item("Importação em massa", "sistema.importar", sub=True))
         layout.addWidget(self._item("Log de atividades", "sistema.log", sub=True))
         self._botao_usuarios = self._item("Usuários", "sistema.usuarios", sub=True)
         layout.addWidget(self._botao_usuarios)
         self._botao_backup = self._item("Backup", "sistema.backup", sub=True)
         layout.addWidget(self._botao_backup)
-        layout.addWidget(self._item("Sobre", "sistema.sobre", sub=True))
 
         layout.addStretch()
 
@@ -69,6 +68,9 @@ class Sidebar(QFrame):
         self._atualizar_texto_tema()
         theme.estado().mudou.connect(self._atualizar_texto_tema)
 
+        # Trocar a própria senha vive dentro de Usuários — mas essa tela é só
+        # de administrador. Pra quem não é, o atalho fica aqui embaixo: sem
+        # ele, um usuário comum não teria como trocar a própria senha.
         self.btn_trocar_senha = QPushButton("Trocar senha")
         self.btn_trocar_senha.setProperty("role", "navSub")
         self.btn_trocar_senha.setCursor(Qt.PointingHandCursor)
@@ -79,7 +81,13 @@ class Sidebar(QFrame):
         self.btn_sair.setCursor(Qt.PointingHandCursor)
         self.btn_sair.clicked.connect(self.sair.emit)
 
+        # "Sobre" fica no rodapé, junto do resto que é sobre o programa e não
+        # sobre os dados — continua sendo um item de navegação de verdade
+        # (marcável), só posicionado aqui.
+        self._botao_sobre = self._item("Sobre", "sistema.sobre", sub=True)
+
         layout.addWidget(self._rotulo_usuario)
+        layout.addWidget(self._botao_sobre)
         layout.addWidget(self.btn_tema)
         layout.addWidget(self.btn_trocar_senha)
         layout.addWidget(self.btn_sair)
@@ -89,6 +97,7 @@ class Sidebar(QFrame):
         self._rotulo_usuario.setText(rotulo)
         self._botao_usuarios.setVisible(admin)
         self._botao_backup.setVisible(admin)
+        self.btn_trocar_senha.setVisible(not admin)
 
     def _secao(self, texto: str) -> QLabel:
         rotulo = QLabel(texto)
