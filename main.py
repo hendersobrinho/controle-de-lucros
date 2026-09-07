@@ -2,11 +2,25 @@ import sys
 
 from PySide6.QtWidgets import QApplication, QDialog
 
-from controle_lucros import backup, db, repositories as repo, sessao, traducao
+from controle_lucros import backup, db, preferencias, repositories as repo, sessao, traducao
 from controle_lucros.ui.icones import icone_app
 from controle_lucros.ui.login import DialogoLogin, DialogoPrimeiroUsuario
 from controle_lucros.ui.main_window import MainWindow
 from controle_lucros.ui.theme import build_stylesheet
+
+
+def _entrar_com_sessao_salva(conn):
+    """Entra direto quando existe um "continuar conectado" válido nesta
+    máquina. O token guardado localmente é conferido contra o hash no banco;
+    qualquer coisa fora do lugar (vencido, conta desativada, senha trocada,
+    banco trocado) devolve None e cai na tela de login normal."""
+    salva = preferencias.sessao_salva()
+    if salva is None:
+        return None
+    usuario = repo.usuario_de_sessao_salva(conn, *salva)
+    if usuario is None:
+        preferencias.esquecer_sessao()
+    return usuario
 
 
 def main() -> None:
@@ -19,15 +33,17 @@ def main() -> None:
     app.setStyleSheet(build_stylesheet())
 
     while True:
-        if not repo.existe_algum_usuario(conn):
-            dialogo = DialogoPrimeiroUsuario(conn)
-        else:
-            dialogo = DialogoLogin(conn)
+        usuario = _entrar_com_sessao_salva(conn)
+        if usuario is None:
+            if not repo.existe_algum_usuario(conn):
+                dialogo = DialogoPrimeiroUsuario(conn)
+            else:
+                dialogo = DialogoLogin(conn)
 
-        if dialogo.exec() != QDialog.Accepted:
-            sys.exit(0)
+            if dialogo.exec() != QDialog.Accepted:
+                sys.exit(0)
+            usuario = dialogo.usuario_autenticado
 
-        usuario = dialogo.usuario_autenticado
         sessao.definir_usuario_atual(usuario)
 
         try:

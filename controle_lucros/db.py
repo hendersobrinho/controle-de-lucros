@@ -167,6 +167,18 @@ CREATE TABLE IF NOT EXISTS usuario (
     criado_em TEXT NOT NULL
 );
 
+-- "Continuar conectado": guarda o HASH de um token aleatório, nunca a senha
+-- nem o token em si. O token fica no preferencias.json da máquina; quem
+-- copiar o banco não consegue entrar com ele, e trocar a senha ou desativar
+-- a conta derruba a sessão salva.
+CREATE TABLE IF NOT EXISTS sessao_salva (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER NOT NULL UNIQUE REFERENCES usuario(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL,
+    criado_em TEXT NOT NULL,
+    expira_em TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS log_atividade (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     usuario_id INTEGER REFERENCES usuario(id) ON DELETE SET NULL,

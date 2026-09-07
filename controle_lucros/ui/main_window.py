@@ -3,6 +3,7 @@ from __future__ import annotations
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QStackedWidget, QVBoxLayout, QWidget
 
+from .. import preferencias, repositories as repo
 from ..models import Usuario
 from .alteracoes_view import AlteracoesView
 from .backup_view import BackupView
@@ -144,5 +145,10 @@ class MainWindow(QMainWindow):
         resposta = QMessageBox.question(self, "Sair", "Deseja realmente sair e voltar pra tela de login?")
         if resposta != QMessageBox.Yes:
             return
+        # Sair encerra também o "continuar conectado": é o jeito de passar o
+        # computador pra outra pessoa, e sem isso a tela de login nem
+        # apareceria de novo — entraria direto na mesma conta.
+        repo.esquecer_sessao(self.conn, self.usuario.id)
+        preferencias.esquecer_sessao()
         self.logout_solicitado = True
         self.close()

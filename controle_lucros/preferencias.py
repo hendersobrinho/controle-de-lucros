@@ -36,3 +36,37 @@ def salvar_chave(chave: str, valor) -> None:
         arquivo.write_text(json.dumps(dados, ensure_ascii=False, indent=2), encoding="utf-8")
     except OSError:
         pass
+
+
+CHAVE_ULTIMO_LOGIN = "ultimo_login"
+CHAVE_SESSAO = "sessao_salva"
+
+
+def ultimo_login() -> str:
+    """Último login que entrou com sucesso, pra já vir preenchido na tela.
+    Só o nome de usuário — senha não é guardada em lugar nenhum."""
+    return str(obter(CHAVE_ULTIMO_LOGIN) or "")
+
+
+def guardar_ultimo_login(login: str) -> None:
+    salvar_chave(CHAVE_ULTIMO_LOGIN, login)
+
+
+def sessao_salva() -> tuple[int, str] | None:
+    """(usuario_id, token) do "continuar conectado", ou None. O token vale
+    só nesta máquina: o que o banco guarda é o hash dele."""
+    dados = obter(CHAVE_SESSAO)
+    if not isinstance(dados, dict):
+        return None
+    usuario_id, token = dados.get("usuario_id"), dados.get("token")
+    if not isinstance(usuario_id, int) or not isinstance(token, str) or not token:
+        return None
+    return usuario_id, token
+
+
+def guardar_sessao(usuario_id: int, token: str) -> None:
+    salvar_chave(CHAVE_SESSAO, {"usuario_id": usuario_id, "token": token})
+
+
+def esquecer_sessao() -> None:
+    salvar_chave(CHAVE_SESSAO, None)

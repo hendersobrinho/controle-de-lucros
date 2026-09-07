@@ -444,6 +444,20 @@ _SISTEMA = """
 <p>Cada pessoa usa a sua própria conta, separada do usuário do Windows — a
 máquina é compartilhada e o sistema precisa saber quem fez o quê. Só
 administradores veem as telas de Usuários e Backup.</p>
+
+<h3>Continuar conectado</h3>
+<p>Na tela de entrada há a opção <b>Continuar conectado neste computador</b>.
+Marcada, o programa abre direto na sua conta nas próximas vezes, por 30 dias.
+O login sempre fica guardado para não redigitar; a <b>senha nunca é
+guardada</b> — o que fica no computador é uma chave aleatória, que o banco
+conhece só pelo resumo e que não serve em outra máquina.</p>
+<p><b>Só marque em computador de uso pessoal.</b> Numa máquina compartilhada,
+quem abrir o programa entra na conta de quem ficou conectado, e o log de
+atividades passa a registrar o trabalho de um no nome do outro.</p>
+<p>A conexão salva é encerrada por: <b>Sair</b> (é assim que se passa o
+computador para outra pessoa), trocar a senha, desativar a conta, ou os 30
+dias vencerem. Entrar de novo em outro computador também invalida a
+anterior.</p>
 <p>Contas <b>nunca são excluídas</b>, só desativadas. Uma conta excluída
 deixaria o log de atividades sem dono.</p>
 <p>Nesta tela há duas coisas diferentes com nome parecido: <b>Redefinir
