@@ -81,6 +81,7 @@ MODO_VAZIO = "vazio"
 MODO_NOVO = "novo"
 MODO_EDICAO = "edicao"
 MODO_SALVO = "salvo"
+MODO_CANCELADO = "cancelado"
 
 MODOS_COM_FORMULARIO_ABERTO = (MODO_NOVO, MODO_EDICAO)
 
@@ -97,6 +98,10 @@ AVISOS_FORMULARIO = {
     MODO_SALVO: (
         "Registro salvo. Clique em <b>Novo</b> para cadastrar outro, "
         "ou selecione um na tabela para editar."
+    ),
+    MODO_CANCELADO: (
+        "Cancelado — nada foi alterado. Clique em <b>Novo</b> para cadastrar, "
+        "ou selecione um registro na tabela para editar."
     ),
 }
 
@@ -125,12 +130,16 @@ def aplicar_modo_formulario(
     olho vai pro "Novo"; aberto, vai pro "Salvar" — que é o efeito visual que
     faltava pra deixar claro que o cadastro começa pelo botão.
 
-    `botoes` traz "novo", "salvar" e (opcionalmente) "excluir"."""
+    `botoes` traz "novo", "salvar" e (opcionalmente) "cancelar" e "excluir"."""
     aberto = modo in MODOS_COM_FORMULARIO_ABERTO
     painel_campos.setEnabled(aberto)
     botoes["salvar"].setEnabled(aberto)
     if "excluir" in botoes:
         botoes["excluir"].setEnabled(modo == MODO_EDICAO)
+    if "cancelar" in botoes:
+        # Só aparece com o formulário aberto: com ele bloqueado não há o que
+        # cancelar, e um botão morto no meio dos outros só polui.
+        botoes["cancelar"].setVisible(aberto)
     realcar_botao(botoes["novo"], not aberto)
     realcar_botao(botoes["salvar"], aberto)
     aviso.setText(AVISOS_FORMULARIO[modo].format(descricao=descricao))
@@ -144,6 +153,7 @@ def _estilo_aviso(modo: str) -> str:
         MODO_NOVO: theme.BRASS_DARK(),
         MODO_EDICAO: theme.BRASS_DARK(),
         MODO_SALVO: theme.SEAL_GREEN(),
+        MODO_CANCELADO: theme.INK_MUTED(),
     }
     cor = cores[modo]
     return (
@@ -242,15 +252,18 @@ class CrudTab(QWidget):
 
         self.btn_novo = QPushButton("Novo")
         self.btn_salvar = QPushButton("Salvar")
+        self.btn_cancelar = QPushButton("Cancelar")
         self.btn_excluir = QPushButton("Excluir")
         self.btn_excluir.setProperty("role", "perigo")
         self.btn_novo.clicked.connect(self.novo)
         self.btn_salvar.clicked.connect(self.salvar)
+        self.btn_cancelar.clicked.connect(self.cancelar)
         self.btn_excluir.clicked.connect(self.excluir)
 
         botoes = QHBoxLayout()
         botoes.addWidget(self.btn_novo)
         botoes.addWidget(self.btn_salvar)
+        botoes.addWidget(self.btn_cancelar)
         botoes.addWidget(self.btn_excluir)
         botoes.addStretch()
 
@@ -345,7 +358,12 @@ class CrudTab(QWidget):
         aplicar_modo_formulario(
             self.painel_campos,
             self.aviso_form,
-            {"novo": self.btn_novo, "salvar": self.btn_salvar, "excluir": self.btn_excluir},
+            {
+                "novo": self.btn_novo,
+                "salvar": self.btn_salvar,
+                "cancelar": self.btn_cancelar,
+                "excluir": self.btn_excluir,
+            },
             modo,
             descricao,
         )
@@ -379,6 +397,15 @@ class CrudTab(QWidget):
         campo = self.form_layout.itemAt(0, QFormLayout.FieldRole)
         if campo is not None and campo.widget() is not None:
             campo.widget().setFocus()
+
+    def cancelar(self) -> None:
+        """Sai do cadastro/edição sem gravar nada. Descarta o que estiver
+        digitado — é o que "Cancelar" quer dizer, e sem ele a única saída de
+        um formulário aberto era salvar."""
+        self._registro_atual_id = None
+        self.tabela.clearSelection()
+        self.limpar_form()
+        self._definir_modo(MODO_CANCELADO)
 
     def salvar(self) -> None:
         try:

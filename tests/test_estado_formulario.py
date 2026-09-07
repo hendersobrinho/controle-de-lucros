@@ -16,7 +16,13 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from controle_lucros import db, repositories as repo
 from controle_lucros.models import Empresa, Socio
 from controle_lucros.ui import socios_tab as socios_mod
-from controle_lucros.ui.common import MODO_EDICAO, MODO_NOVO, MODO_SALVO, MODO_VAZIO
+from controle_lucros.ui.common import (
+    MODO_CANCELADO,
+    MODO_EDICAO,
+    MODO_NOVO,
+    MODO_SALVO,
+    MODO_VAZIO,
+)
 from controle_lucros.ui.empresas_tab import EmpresasTab
 from controle_lucros.ui.socios_tab import SociosTab
 
@@ -240,3 +246,71 @@ def test_socios_excluir_volta_pro_estado_bloqueado(socios, monkeypatch):
     assert socios._modo == MODO_VAZIO
     assert not socios.painel_campos.isEnabled()
     assert _e_primario(socios.btn_novo)
+
+
+# ------------------------------------------------------------- cancelar --
+
+
+def test_cancelar_so_aparece_com_o_formulario_aberto(empresas):
+    """Bloqueado não há o que cancelar — botão morto no meio dos outros só
+    polui a barra."""
+    assert not empresas.btn_cancelar.isVisibleTo(empresas)
+    empresas.novo()
+    assert empresas.btn_cancelar.isVisibleTo(empresas)
+    empresas.cancelar()
+    assert not empresas.btn_cancelar.isVisibleTo(empresas)
+
+
+def test_cancelar_um_cadastro_novo_descarta_o_que_foi_digitado(empresas):
+    antes = len(repo.listar_empresas(empresas.conn))
+    empresas.novo()
+    empresas.numero_chamada.setText("099")
+    empresas.nome.setText("NAO DEVE SER SALVA")
+    empresas.cancelar()
+
+    assert empresas._modo == MODO_CANCELADO
+    assert not empresas.painel_campos.isEnabled()
+    assert empresas.nome.text() == ""
+    assert len(repo.listar_empresas(empresas.conn)) == antes
+    assert "nada foi alterado" in empresas.aviso_form.text()
+
+
+def test_cancelar_uma_edicao_nao_altera_o_registro(empresas):
+    empresas.tabela.selectRow(0)
+    original = empresas._registros[0].nome
+    empresas.nome.setText("NOME TROCADO POR ENGANO")
+    empresas.cancelar()
+
+    assert empresas._registro_atual_id is None
+    assert not empresas.tabela.selectionModel().selectedRows()
+    assert any(e.nome == original for e in repo.listar_empresas(empresas.conn))
+    assert not any(e.nome == "NOME TROCADO POR ENGANO" for e in repo.listar_empresas(empresas.conn))
+
+
+def test_depois_de_cancelar_da_pra_recomecar(empresas):
+    empresas.novo()
+    empresas.cancelar()
+    empresas.novo()
+    assert empresas._modo == MODO_NOVO
+    assert empresas.painel_campos.isEnabled()
+    assert _e_primario(empresas.btn_salvar)
+
+
+def test_socios_cancelar_descarta_e_solta_o_painel_de_vinculos(socios):
+    socios.tabela.selectRow(0)
+    assert socios._socio_atual_id is not None
+    socios.nome.setText("NOME TROCADO POR ENGANO")
+    socios.btn_cancelar.click()
+
+    assert socios._modo == MODO_CANCELADO
+    assert socios._socio_atual_id is None
+    assert not socios.painel_campos.isEnabled()
+    assert not any(s.nome == "NOME TROCADO POR ENGANO" for s in repo.listar_socios(socios.conn))
+    # O painel da direita não pode seguir mostrando os vínculos de quem saiu de edição.
+    assert not socios.btn_associar.isEnabled()
+
+
+def test_socios_cancelar_so_aparece_com_o_formulario_aberto(socios):
+    assert not socios.btn_cancelar.isVisibleTo(socios)
+    socios._novo_socio()
+    assert socios.btn_cancelar.isVisibleTo(socios)

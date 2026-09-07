@@ -20,6 +20,10 @@ O destaque de botão primário acompanha a próxima ação esperada, e o aviso d
 modo de edição diz de quem é o registro e que salvar **substitui** aquele
 registro — para cadastrar outro é preciso clicar em **Novo** antes.
 
+O botão **Cancelar** aparece sempre que o formulário está aberto: descarta o
+que foi digitado e volta ao estado bloqueado, sem alterar nada do que já
+estava salvo.
+
 ## Modelos de planilha
 
 A importação em massa (**Empresas · Importação em massa**) tem três modelos, e

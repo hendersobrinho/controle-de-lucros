@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 from .. import repositories as repo
 from ..models import Socio, VinculoSocietario
 from .common import (
+    MODO_CANCELADO,
     MODO_EDICAO,
     MODO_NOVO,
     MODO_SALVO,
@@ -347,15 +348,18 @@ class SociosTab(QWidget):
 
         self.btn_novo = QPushButton("Novo")
         self.btn_salvar = QPushButton("Salvar")
+        self.btn_cancelar = QPushButton("Cancelar")
         self.btn_excluir = QPushButton("Excluir")
         self.btn_excluir.setProperty("role", "perigo")
         self.btn_novo.clicked.connect(self._novo_socio)
         self.btn_salvar.clicked.connect(self._salvar_socio)
+        self.btn_cancelar.clicked.connect(self._cancelar_socio)
         self.btn_excluir.clicked.connect(self._excluir_socio)
 
         botoes = QHBoxLayout()
         botoes.addWidget(self.btn_novo)
         botoes.addWidget(self.btn_salvar)
+        botoes.addWidget(self.btn_cancelar)
         botoes.addWidget(self.btn_excluir)
         col.addLayout(botoes)
 
@@ -466,7 +470,12 @@ class SociosTab(QWidget):
         aplicar_modo_formulario(
             self.painel_campos,
             self.aviso_form,
-            {"novo": self.btn_novo, "salvar": self.btn_salvar, "excluir": self.btn_excluir},
+            {
+                "novo": self.btn_novo,
+                "salvar": self.btn_salvar,
+                "cancelar": self.btn_cancelar,
+                "excluir": self.btn_excluir,
+            },
             modo,
             descricao,
         )
@@ -493,6 +502,18 @@ class SociosTab(QWidget):
         self._ajustar_mascara_documento()
         self._definir_modo(MODO_NOVO)
         self.nome.setFocus()
+        self._atualizar_painel_vinculos()
+
+    def _cancelar_socio(self) -> None:
+        """Sai do cadastro/edição sem gravar. O painel de vínculos volta pro
+        estado sem sócio selecionado junto — senão ficaria mostrando os
+        vínculos de alguém que não está mais em edição."""
+        self._socio_atual_id = None
+        self.tabela.clearSelection()
+        self.nome.clear()
+        self.tipo_pessoa.setCurrentIndex(0)
+        self._ajustar_mascara_documento()
+        self._definir_modo(MODO_CANCELADO)
         self._atualizar_painel_vinculos()
 
     def _salvar_socio(self) -> None:

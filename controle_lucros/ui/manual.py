@@ -88,6 +88,9 @@ você salvar <b>substitui aquele registro</b>.</li>
 </ul>
 <p><b>Atenção:</b> com uma linha selecionada, digitar por cima e salvar altera
 aquela empresa. Para cadastrar outra, clique em <b>Novo</b> antes.</p>
+<p>O botão <b>Cancelar</b> aparece sempre que o formulário está aberto e é a
+saída sem gravar nada: descarta o que foi digitado e volta ao estado
+bloqueado. Nada do que estava salvo é alterado.</p>
 
 <h3>Nº da empresa</h3>
 <p>É o código interno do escritório. Serve para achar a empresa rápido na busca
@@ -209,8 +212,9 @@ de que participa. O painel da direita mostra os vínculos do sócio selecionado.
 
 <h3>Cadastro</h3>
 <p>Mesmo formulário de três estados das Empresas: <b>Novo</b> libera os campos
-para um cadastro novo; clicar numa linha entra em edição daquele sócio. O aviso
-acima dos campos diz sempre qual é o caso.</p>
+para um cadastro novo; clicar numa linha entra em edição daquele sócio;
+<b>Cancelar</b> sai sem gravar. O aviso acima dos campos diz sempre qual é o
+caso.</p>
 <p><b>Tipo</b> decide a máscara do documento: pessoa física usa CPF, pessoa
 jurídica usa CNPJ (holding sócia de outra empresa é comum). O CPF/CNPJ não pode
 repetir entre sócios — o sistema recusa e mostra quem já usa aquele
