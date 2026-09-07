@@ -221,7 +221,10 @@ repetir entre sócios — o sistema recusa e mostra quem já usa aquele
 documento.</p>
 
 <h3>Vínculos com empresas</h3>
-<p>Cada botão do painel faz uma coisa diferente, e a diferença importa:</p>
+<p><b>Associar a uma empresa</b> fica solto porque é a única ação que não
+precisa de um vínculo selecionado. As outras quatro estão no menu <b>Ações do
+vínculo</b>, que só destrava depois de clicar numa linha da tabela. A
+diferença entre elas importa:</p>
 <ul>
 <li><b>Associar a uma empresa</b> — cria o vínculo e abre uma alteração
 contratual na empresa.</li>

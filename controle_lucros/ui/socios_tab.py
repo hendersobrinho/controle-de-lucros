@@ -17,9 +17,11 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFormLayout,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QMessageBox,
     QPushButton,
     QSplitter,
@@ -281,11 +283,15 @@ class SociosTab(QWidget):
         painel_vinculos = self._montar_painel_vinculos()
         splitter.addWidget(painel_socios)
         splitter.addWidget(painel_vinculos)
-        painel_socios.setMinimumWidth(320)
-        painel_vinculos.setMinimumWidth(360)
+        # O mínimo da direita é o que a barra de ações precisa pra não truncar
+        # rótulo; com os botões da esquerda em grade, sobra folga pros dois. A
+        # soma fica abaixo do mínimo que a tela de Distribuição trimestral já
+        # impõe à janela, então isto não faz o programa abrir mais largo.
+        painel_socios.setMinimumWidth(280)
+        painel_vinculos.setMinimumWidth(560)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 2)
-        splitter.setSizes([480, 760])
+        splitter.setSizes([400, 820])
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -356,11 +362,16 @@ class SociosTab(QWidget):
         self.btn_cancelar.clicked.connect(self._cancelar_socio)
         self.btn_excluir.clicked.connect(self._excluir_socio)
 
-        botoes = QHBoxLayout()
-        botoes.addWidget(self.btn_novo)
-        botoes.addWidget(self.btn_salvar)
-        botoes.addWidget(self.btn_cancelar)
-        botoes.addWidget(self.btn_excluir)
+        # Grade 2x2 em vez de fila: quatro botões lado a lado exigiriam do
+        # painel esquerdo uma largura que ele só tem em janela grande, e em
+        # 1200px os rótulos truncavam ("ancel", "xclui"). Empilhados, cabem em
+        # qualquer largura e sobra espaço pro painel da direita.
+        botoes = QGridLayout()
+        botoes.setSpacing(8)
+        botoes.addWidget(self.btn_novo, 0, 0)
+        botoes.addWidget(self.btn_salvar, 0, 1)
+        botoes.addWidget(self.btn_cancelar, 1, 0)
+        botoes.addWidget(self.btn_excluir, 1, 1)
         col.addLayout(botoes)
 
         return painel
@@ -395,19 +406,21 @@ class SociosTab(QWidget):
         self.btn_associar.setProperty("role", "primario")
         self.btn_associar.clicked.connect(self._associar_empresa)
 
-        self.btn_editar = QPushButton("Editar datas")
-        self.btn_editar.clicked.connect(self._editar_vinculo)
-
-        self.btn_atualizar_cotas = QPushButton("Atualizar cotas")
-        self.btn_atualizar_cotas.clicked.connect(self._atualizar_cotas)
-
-        self.btn_encerrar = QPushButton("Encerrar vínculo")
-        self.btn_encerrar.setProperty("role", "perigo")
-        self.btn_encerrar.clicked.connect(self._encerrar_vinculo)
-
-        self.btn_excluir_vinculo = QPushButton("Excluir vínculo")
-        self.btn_excluir_vinculo.setProperty("role", "perigo")
-        self.btn_excluir_vinculo.clicked.connect(self._excluir_vinculo)
+        # As quatro ações sobre o vínculo selecionado ficam num menu só:
+        # todas dependem da mesma seleção e nenhuma é de uso frequente, então
+        # como botões soltos só enchiam a barra. "Associar" fica de fora
+        # porque é a única que não precisa de vínculo selecionado — é a ação
+        # com que se começa.
+        self.btn_acoes_vinculo = QPushButton("Ações do vínculo")
+        menu = QMenu(self.btn_acoes_vinculo)
+        self.acao_editar = menu.addAction("Editar datas", self._editar_vinculo)
+        self.acao_atualizar_cotas = menu.addAction("Atualizar cotas", self._atualizar_cotas)
+        # As duas de baixo mexem no histórico; a separação é o aviso visual
+        # que o vermelho dos botões dava antes.
+        menu.addSeparator()
+        self.acao_encerrar = menu.addAction("Encerrar vínculo", self._encerrar_vinculo)
+        self.acao_excluir = menu.addAction("Excluir vínculo", self._excluir_vinculo)
+        self.btn_acoes_vinculo.setMenu(menu)
 
         self.btn_informe = QPushButton("Informe de rendimentos")
         self.btn_informe.setToolTip(
@@ -416,25 +429,14 @@ class SociosTab(QWidget):
         )
         self.btn_informe.clicked.connect(self._emitir_informe)
 
-        # Duas linhas em vez de uma: os seis botões não cabem lado a lado na
-        # largura padrão da janela (1180px), e numa linha só o Qt encolhe todos
-        # até os rótulos ficarem cortados ("Atualizar co…"). A primeira linha
-        # é o que mexe no vínculo; a segunda, o que é destrutivo, com a emissão
-        # do informe separada à direita.
-        linha_vinculo = QHBoxLayout()
-        linha_vinculo.addWidget(self.btn_associar)
-        linha_vinculo.addWidget(self.btn_editar)
-        linha_vinculo.addWidget(self.btn_atualizar_cotas)
-        linha_vinculo.addStretch()
-
-        linha_secundaria = QHBoxLayout()
-        linha_secundaria.addWidget(self.btn_encerrar)
-        linha_secundaria.addWidget(self.btn_excluir_vinculo)
-        linha_secundaria.addStretch()
-        linha_secundaria.addWidget(self.btn_informe)
-
-        col.addLayout(linha_vinculo)
-        col.addLayout(linha_secundaria)
+        # Com as quatro ações no menu, tudo volta a caber numa linha só na
+        # largura padrão da janela.
+        botoes = QHBoxLayout()
+        botoes.addWidget(self.btn_associar)
+        botoes.addWidget(self.btn_acoes_vinculo)
+        botoes.addStretch()
+        botoes.addWidget(self.btn_informe)
+        col.addLayout(botoes)
 
         self._atualizar_disponibilidade_botoes()
         return card
@@ -625,11 +627,15 @@ class SociosTab(QWidget):
         tem_socio = self._socio_atual_id is not None
         self.btn_associar.setEnabled(tem_socio)
         self.btn_informe.setEnabled(tem_socio)
+        tem_vinculo = self._vinculo_selecionado() is not None
         vinculo_ativo_selecionado = self._vinculo_ativo_selecionado() is not None
-        self.btn_editar.setEnabled(self._vinculo_selecionado() is not None)
-        self.btn_atualizar_cotas.setEnabled(vinculo_ativo_selecionado)
-        self.btn_encerrar.setEnabled(vinculo_ativo_selecionado)
-        self.btn_excluir_vinculo.setEnabled(self._vinculo_selecionado() is not None)
+        # Sem vínculo selecionado nenhuma das ações do menu vale, então o
+        # botão inteiro trava — abrir um menu com tudo apagado não ajuda.
+        self.btn_acoes_vinculo.setEnabled(tem_vinculo)
+        self.acao_editar.setEnabled(tem_vinculo)
+        self.acao_atualizar_cotas.setEnabled(vinculo_ativo_selecionado)
+        self.acao_encerrar.setEnabled(vinculo_ativo_selecionado)
+        self.acao_excluir.setEnabled(tem_vinculo)
 
     def _vinculo_selecionado(self) -> VinculoSocietario | None:
         linhas = self.tabela_vinculos.selectionModel().selectedRows() if self.tabela_vinculos.selectionModel() else []

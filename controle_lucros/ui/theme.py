@@ -337,6 +337,35 @@ def build_stylesheet() -> str:
         background: {p["PAPER"]};
     }}
 
+    /* Menus suspensos seguem o tema como o resto: sem isto o Qt desenha o
+       padrão do sistema, que no modo escuro sai claro e destoa. */
+    QMenu {{
+        background: {p["PAPER_RAISED"]};
+        border: 1px solid {p["HAIRLINE"]};
+        padding: 4px;
+    }}
+
+    QMenu::item {{
+        color: {p["INK"]};
+        padding: 7px 24px 7px 14px;
+        border-radius: 3px;
+    }}
+
+    QMenu::item:selected {{
+        background: {p["INK"]};
+        color: {p["PAPER_RAISED"]};
+    }}
+
+    QMenu::item:disabled {{
+        color: {p["INK_MUTED"]};
+    }}
+
+    QMenu::separator {{
+        height: 1px;
+        background: {p["HAIRLINE"]};
+        margin: 5px 10px;
+    }}
+
     QPushButton[role="chevron"] {{
         border-radius: 18px;
         min-width: 36px;
