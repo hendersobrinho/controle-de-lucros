@@ -6,7 +6,7 @@ import re
 import sqlite3
 
 from . import fiscal, sessao
-from .auth import gerar_hash_senha, gerar_token_sessao, senha_confere, token_confere
+from .auth import gerar_hash_senha, senha_confere
 from .models import (
     CAMPOS_VALOR_INFORME,
     TIPOS_MOVIMENTACAO_LABEL,
@@ -1444,74 +1444,18 @@ def atualizar_usuario(conn: sqlite3.Connection, usuario_id: int, nome: str, logi
 
 def definir_ativo(conn: sqlite3.Connection, usuario_id: int, ativo: bool) -> None:
     conn.execute("UPDATE usuario SET ativo=? WHERE id=?", (int(ativo), usuario_id))
-    if not ativo:
-        # Desativar a conta tem que valer na hora; sem isto a pessoa
-        # continuaria entrando pela sessão salva até ela vencer.
-        conn.execute("DELETE FROM sessao_salva WHERE usuario_id=?", (usuario_id,))
     _registrar_log(conn, "ativar" if ativo else "desativar", "usuario", usuario_id, "")
     conn.commit()
 
 
 def alterar_senha(conn: sqlite3.Connection, usuario_id: int, nova_senha: str) -> None:
-    """Troca a senha e derruba a sessão salva: quem troca a senha
-    normalmente está justamente tirando o acesso de alguém, e uma sessão
-    "continuar conectado" sobrevivente anularia isso."""
     senha_hash, senha_salt = gerar_hash_senha(nova_senha)
     conn.execute("UPDATE usuario SET senha_hash=?, senha_salt=? WHERE id=?", (senha_hash, senha_salt, usuario_id))
-    conn.execute("DELETE FROM sessao_salva WHERE usuario_id=?", (usuario_id,))
     _registrar_log(conn, "trocar_senha", "usuario", usuario_id, "")
     conn.commit()
 
 
 # ---------------------------------------------------------- LogAtividade --
-
-
-# ------------------------------------------------- Continuar conectado --
-
-DIAS_SESSAO_SALVA = 30
-
-
-def salvar_sessao(conn: sqlite3.Connection, usuario_id: int, dias: int = DIAS_SESSAO_SALVA) -> str:
-    """Cria (ou substitui) a sessão salva do usuário e devolve o token, que é
-    a única vez em que ele existe em texto — quem chamou tem que guardá-lo na
-    máquina. Uma sessão por usuário: entrar de novo invalida a anterior."""
-    token, token_hash = gerar_token_sessao()
-    agora = dt.datetime.now()
-    conn.execute("DELETE FROM sessao_salva WHERE usuario_id=?", (usuario_id,))
-    conn.execute(
-        "INSERT INTO sessao_salva (usuario_id, token_hash, criado_em, expira_em) VALUES (?, ?, ?, ?)",
-        (
-            usuario_id,
-            token_hash,
-            agora.isoformat(timespec="seconds"),
-            (agora + dt.timedelta(days=dias)).isoformat(timespec="seconds"),
-        ),
-    )
-    conn.commit()
-    return token
-
-
-def usuario_de_sessao_salva(conn: sqlite3.Connection, usuario_id: int, token: str) -> Usuario | None:
-    """O usuário da sessão salva, se o token bater, não tiver vencido e a
-    conta continuar ativa. Qualquer falha devolve None e apaga a sessão —
-    token que não serve mais não tem por que continuar guardado."""
-    row = conn.execute("SELECT * FROM sessao_salva WHERE usuario_id=?", (usuario_id,)).fetchone()
-    if row is None:
-        return None
-    if not token_confere(token, row["token_hash"]) or row["expira_em"] < dt.datetime.now().isoformat():
-        esquecer_sessao(conn, usuario_id)
-        return None
-
-    usuario_row = conn.execute("SELECT * FROM usuario WHERE id=? AND ativo=1", (usuario_id,)).fetchone()
-    if usuario_row is None:
-        esquecer_sessao(conn, usuario_id)
-        return None
-    return _usuario_de_linha(usuario_row)
-
-
-def esquecer_sessao(conn: sqlite3.Connection, usuario_id: int) -> None:
-    conn.execute("DELETE FROM sessao_salva WHERE usuario_id=?", (usuario_id,))
-    conn.commit()
 
 
 def _log_de_linha(row: sqlite3.Row) -> LogAtividade:

@@ -104,14 +104,6 @@ python main.py
 
 No primeiro uso, o sistema pede pra criar o primeiro usuário (administrador).
 
-O login usado fica guardado e vem preenchido nas próximas vezes. A opção
-**Continuar conectado neste computador**, na tela de entrada, faz o programa
-abrir direto na conta por 30 dias — a senha nunca é guardada: o que fica na
-máquina é uma chave aleatória, que o banco conhece só pelo resumo. Sair,
-trocar a senha ou desativar a conta encerram essa conexão. Em computador
-compartilhado, deixe desmarcado: o log de atividades registra as ações no
-nome de quem estiver conectado.
-
 ## Ícone do programa
 
 `controle_lucros/ui/assets/logo.svg` é a fonte; `logo.png` e `logo.ico` são
