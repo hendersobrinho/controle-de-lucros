@@ -20,19 +20,23 @@
 #define MyAppPublisher "HenderLab"
 #define MyAppURL "https://www.henderlab.com.br/"
 #define MyAppExeName "ControleDeLucros.exe"
-#define MyAppExePath "dist\ControleDeLucros\ControleDeLucros.exe"
+; SourcePath é a pasta deste .iss (com barra no fim). O FileExists do
+; pré-processador resolve caminho relativo pelo diretório de trabalho do
+; compilador — que ao compilar pela IDE do Inno não é a pasta do projeto —,
+; então sem o SourcePath a checagem abaixo falha mesmo com o pacote pronto.
+#define MyAppExePath SourcePath + "dist\ControleDeLucros\ControleDeLucros.exe"
 
 ; Sem o pacote pronto não há o que instalar — melhor dizer isso do que falhar
 ; adiante com uma mensagem sobre arquivo não encontrado.
 #if !FileExists(MyAppExePath)
-  #error Gere o pacote antes: pyinstaller controle_lucros.spec
+  #error Rode antes: pyinstaller controle_lucros.spec (nao achei dist\ControleDeLucros\ControleDeLucros.exe)
 #endif
 
 ; MyAppVersion vem daqui, escrito pelo controle_lucros.spec a partir de
 ; controle_lucros/__init__.py. A versão mora num lugar só: subir de versão é
 ; mexer naquele arquivo e gerar o pacote de novo, sem risco de o instalador e
 ; o programa discordarem.
-#include "build\versao_installer.iss"
+#include SourcePath + "build\versao_installer.iss"
 
 [Setup]
 ; Gerado uma única vez pro app — não muda entre versões, é o que permite ao
@@ -49,7 +53,7 @@ DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=installer
 OutputBaseFilename=ControleDeLucros_Setup_{#MyAppVersion}
-SetupIconFile=controle_lucros\ui\assets\logo.ico
+SetupIconFile={#SourcePath}controle_lucros\ui\assets\logo.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 AppCopyright={#MyAppPublisher}
 UninstallDisplayName={#MyAppName}
@@ -85,7 +89,7 @@ Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortugue
 Name: "desktopicon"; Description: "Criar um atalho na Área de Trabalho"; GroupDescription: "Atalhos adicionais:"
 
 [Files]
-Source: "dist\ControleDeLucros\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SourcePath}dist\ControleDeLucros\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
