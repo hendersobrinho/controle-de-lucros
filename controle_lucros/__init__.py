@@ -6,4 +6,4 @@ gerado, e a tela "Sobre" mostra pra quem usa. Assim subir de versão é mexer
 numa linha só.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
