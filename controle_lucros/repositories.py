@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime as dt
 import re
 import sqlite3
+import unicodedata
 
 from . import fiscal, sessao
 from .auth import gerar_hash_senha, senha_confere
@@ -104,6 +105,49 @@ def excluir_empresa(conn: sqlite3.Connection, empresa_id: int) -> None:
 def listar_socios(conn: sqlite3.Connection) -> list[Socio]:
     rows = conn.execute("SELECT * FROM socio ORDER BY nome").fetchall()
     return [Socio(**dict(r)) for r in rows]
+
+
+def chave_nome(valor: str | None) -> str:
+    """Nome sem acento, sem caixa e sem espaço sobrando — "João da Silva" e
+    "JOAO  DA SILVA" viram a mesma chave. Serve pra comparar, nunca pra
+    gravar: o nome fica no banco como foi digitado."""
+    texto = unicodedata.normalize("NFKD", str(valor or ""))
+    sem_acento = "".join(c for c in texto if not unicodedata.combining(c))
+    return " ".join(sem_acento.split()).upper()
+
+
+def socios_semelhantes(
+    conn: sqlite3.Connection, nome: str, documento: str = "", ignorar_id: int | None = None
+) -> list[tuple[Socio, str]]:
+    """Sócios já cadastrados que podem ser a mesma pessoa que está sendo
+    digitada, cada um com o motivo. Existe pra avisar ANTES de duplicar: um
+    sócio repetido se espalha por todas as empresas dele e só aparece na hora
+    de emitir informe, quando já é tarde.
+
+    Não bloqueia nada — quem cadastra decide. Homônimo de verdade existe."""
+    alvo_documento = normalizar_documento(documento)
+    alvo_nome = chave_nome(nome)
+    if not alvo_documento and len(alvo_nome) < 3:
+        return []
+
+    achados: list[tuple[Socio, str]] = []
+    for socio in listar_socios(conn):
+        if socio.id == ignorar_id:
+            continue
+        if alvo_documento and normalizar_documento(socio.cpf) == alvo_documento:
+            achados.append((socio, "mesmo CPF/CNPJ"))
+            continue
+        if len(alvo_nome) < 3:
+            continue
+        chave = chave_nome(socio.nome)
+        if chave == alvo_nome:
+            achados.append((socio, "mesmo nome"))
+        elif alvo_nome in chave or chave in alvo_nome:
+            achados.append((socio, "nome parecido"))
+    # Documento igual é indício mais forte que nome; vem primeiro na lista.
+    ordem = {"mesmo CPF/CNPJ": 0, "mesmo nome": 1, "nome parecido": 2}
+    achados.sort(key=lambda item: (ordem[item[1]], item[0].nome))
+    return achados
 
 
 def salvar_socio(conn: sqlite3.Connection, s: Socio) -> int:

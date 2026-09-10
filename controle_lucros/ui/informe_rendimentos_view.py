@@ -19,6 +19,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QDateEdit,
     QDialog,
     QDialogButtonBox,
@@ -41,7 +42,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import repositories as repo
+from .. import preferencias, repositories as repo
 from ..fiscal import cpf_valido, de_centavos, formatar_cpf, para_centavos
 from ..informe_rendimentos import (
     APELIDOS_CAMPOS,
@@ -299,6 +300,15 @@ class InformeRendimentosDialog(QDialog):
         self.campos_texto["responsavel_nome"] = QLineEdit()
         self.campos_texto["responsavel_nome"].setPlaceholderText("Quem assina o comprovante")
         form.addWidget(self.campos_texto["responsavel_nome"])
+
+        # É quase sempre a mesma pessoa em todos os informes do escritório;
+        # guardar como padrão evita redigitar em cada sócio e cada empresa.
+        self.responsavel_padrao = QCheckBox("Usar como responsável padrão dos próximos informes")
+        self.responsavel_padrao.setToolTip(
+            "Guarda este nome neste computador e já traz preenchido nos informes que "
+            "ainda não foram salvos."
+        )
+        form.addWidget(self.responsavel_padrao)
         form.addStretch()
 
         for widget in self.campos_texto.values():
@@ -440,7 +450,12 @@ class InformeRendimentosDialog(QDialog):
         self.campos_texto["codigo_beneficiario"].setText(informe.codigo_beneficiario)
         self.campos_texto["natureza_rendimento"].setText(informe.natureza_rendimento)
         self.campos_texto["informacoes_complementares"].setPlainText(informe.informacoes_complementares)
-        self.campos_texto["responsavel_nome"].setText(informe.responsavel_nome)
+        # Informe já conferido mantém quem assinou de fato; o que ainda não
+        # foi salvo herda o padrão, que é o caso do primeiro do ano.
+        responsavel = informe.responsavel_nome
+        if not responsavel and not self._salvos[self._empresa_atual]:
+            responsavel = preferencias.responsavel_informe()
+        self.campos_texto["responsavel_nome"].setText(responsavel)
         self._carregando = False
 
     def _limpar_formulario(self) -> None:
@@ -535,6 +550,10 @@ class InformeRendimentosDialog(QDialog):
         except ValueError as exc:
             QMessageBox.warning(self, "Erro ao salvar", str(exc))
             return False
+        if self.responsavel_padrao.isChecked():
+            preferencias.guardar_responsavel_informe(
+                self.campos_texto["responsavel_nome"].text()
+            )
         self._alterado = False
         self._preencher_formulario()
         return True

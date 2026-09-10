@@ -25,7 +25,8 @@ def test_exportar_e_reimportar_modelo(tmp_path):
     importadas = importar_distribuicao(caminho)
     assert len(importadas) == 2
     assert importadas[0]["cpf"] == "111.111.111-11"
-    assert importadas[0]["nome"] == "Fulano de Tal"
+    # A leitura padroniza o nome em maiúsculo (ver normalizar_nome).
+    assert importadas[0]["nome"] == "FULANO DE TAL"
     assert importadas[0]["valor_distribuido"] == 0
 
 
@@ -157,7 +158,7 @@ def test_exportar_e_reimportar_modelo_cadastro(tmp_path):
     linha = importadas[0]
     assert linha["numero_chamada"] == "001"
     assert linha["empresa_nome"] == "ACME LTDA"
-    assert linha["socio_nome"] == "Fulano de Tal"
+    assert linha["socio_nome"] == "FULANO DE TAL"
     assert linha["socio_cpf"] == "111.111.111-11"
     assert linha["tipo_pessoa"] == "fisica"
     assert linha["percentual_capital"] == 100.0
@@ -309,3 +310,28 @@ def test_importar_distribuicao_sem_pro_labore_e_irrf_fica_zero(tmp_path):
     (linha,) = importar_distribuicao(caminho)
     assert linha["pro_labore"] == 0.0
     assert linha["irrf"] == 0.0
+
+
+def test_normalizar_nome_padroniza_caixa_e_espacos():
+    """Planilha preenchida à mão traz a mesma pessoa escrita de três jeitos;
+    sem padronizar, cada variação viraria um cadastro diferente."""
+    from controle_lucros.planilha import normalizar_nome
+
+    assert normalizar_nome("  Fulano   da   Silva ") == "FULANO DA SILVA"
+    assert normalizar_nome("fulano da silva") == "FULANO DA SILVA"
+    assert normalizar_nome("FULANO DA SILVA") == "FULANO DA SILVA"
+    # Acento é preservado: só a caixa e o espaçamento mudam.
+    assert normalizar_nome("joão da conceição") == "JOÃO DA CONCEIÇÃO"
+    assert normalizar_nome("") == ""
+    assert normalizar_nome(None) == ""
+
+
+def test_importar_cadastro_padroniza_nome_de_empresa_e_socio(tmp_path):
+    caminho = tmp_path / "cadastro.csv"
+    with open(caminho, "w", newline="", encoding="utf-8") as f:
+        escritor = csv.writer(f, delimiter=";")
+        escritor.writerow(["Nº Empresa", "Empresa", "Sócio", "CPF/CNPJ do Sócio", "Data de Entrada"])
+        escritor.writerow(["001", "acme  comercio ltda", "fulano  de tal", "111.111.111-11", "01/01/2020"])
+    (linha,) = importar_cadastro(caminho)
+    assert linha["empresa_nome"] == "ACME COMERCIO LTDA"
+    assert linha["socio_nome"] == "FULANO DE TAL"

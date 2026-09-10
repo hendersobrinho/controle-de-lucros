@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import repositories as repo
-from ..models import Socio, VinculoSocietario
+from ..models import TIPOS_PESSOA_LABEL, Socio, VinculoSocietario
 from .common import (
     MODO_CANCELADO,
     MODO_EDICAO,
@@ -48,9 +48,8 @@ from .common import (
     formatar_valor_br,
 )
 from .informe_rendimentos_view import InformeRendimentosDialog
+from .theme import SAIU_BG, SAIU_FG
 from .theme import estado as tema_estado
-
-TIPOS_PESSOA_LABEL = {"fisica": "Pessoa física", "juridica": "Pessoa jurídica"}
 
 
 def _hairline() -> QFrame:
@@ -276,6 +275,12 @@ class SociosTab(QWidget):
         self._socios: list[Socio] = []
         self._socio_atual_id: int | None = None
         self._vinculos_exibidos: list[VinculoSocietario] = []
+        # Definido antes de montar os painéis: ligar os campos ao
+        # _procurar_semelhantes faz o textChanged disparar já na construção
+        # (o ajuste da máscara limpa o campo de documento), e ele consulta o
+        # modo. Sem isto o Qt engole um AttributeError a cada tela aberta.
+        self._modo = MODO_VAZIO
+        self._descricao_modo = ""
 
         splitter = QSplitter(Qt.Horizontal)
         splitter.setChildrenCollapsible(False)
@@ -297,8 +302,6 @@ class SociosTab(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(splitter)
 
-        self._modo = MODO_VAZIO
-        self._descricao_modo = ""
         self.atualizar()
         self._definir_modo(MODO_VAZIO)
         tema_estado().mudou.connect(lambda: self._definir_modo(self._modo, self._descricao_modo))
@@ -347,8 +350,27 @@ class SociosTab(QWidget):
         self.painel_campos = QWidget()
         self.painel_campos.setLayout(form)
         self.aviso_form = criar_aviso_formulario()
+
+        # Aviso de possível duplicata, logo abaixo dos campos: sócio repetido
+        # se espalha por todas as empresas dele e só costuma aparecer na hora
+        # de emitir informe, quando já é trabalhoso desfazer.
+        self.aviso_duplicado = QLabel()
+        self.aviso_duplicado.setWordWrap(True)
+        self.aviso_duplicado.setTextFormat(Qt.RichText)
+        self.aviso_duplicado.hide()
+
+        self.btn_abrir_semelhante = QPushButton("Abrir o cadastro existente")
+        self.btn_abrir_semelhante.clicked.connect(self._abrir_semelhante)
+        self.btn_abrir_semelhante.hide()
+
         col.addWidget(self.aviso_form)
         col.addWidget(self.painel_campos)
+        col.addWidget(self.aviso_duplicado)
+        col.addWidget(self.btn_abrir_semelhante)
+
+        self._semelhante_id: int | None = None
+        self.nome.textChanged.connect(self._procurar_semelhantes)
+        self.cpf.textChanged.connect(self._procurar_semelhantes)
 
         self._ajustar_mascara_documento()
 
@@ -466,6 +488,51 @@ class SociosTab(QWidget):
             configurar_campo_cpf(self.cpf)
             self._rotulo_documento.setText("CPF")
 
+    def _procurar_semelhantes(self, *_args) -> None:
+        """Procura enquanto se digita, mas só em cadastro/edição — com o
+        formulário bloqueado não há nada sendo digitado pra avisar."""
+        if self._modo not in (MODO_NOVO, MODO_EDICAO):
+            self._esconder_aviso_duplicado()
+            return
+
+        achados = repo.socios_semelhantes(
+            self.conn,
+            self.nome.text(),
+            documento_valido_ou_vazio(self.cpf) or self.cpf.text(),
+            ignorar_id=self._socio_atual_id,
+        )
+        if not achados:
+            self._esconder_aviso_duplicado()
+            return
+
+        socio, motivo = achados[0]
+        self._semelhante_id = socio.id
+        extra = f" (e mais {len(achados) - 1})" if len(achados) > 1 else ""
+        self.aviso_duplicado.setText(
+            f"⚠ Já existe <b>{socio.nome}</b> — {motivo}{extra}. "
+            "Confira antes de cadastrar outro."
+        )
+        self.aviso_duplicado.setStyleSheet(
+            f"color: {SAIU_FG()}; background: {SAIU_BG()}; border-radius: 4px; "
+            f"padding: 7px 10px; font-size: 11px;"
+        )
+        self.aviso_duplicado.show()
+        # Só oferece abrir o outro cadastro ao criar um novo; editando, abrir
+        # outro registro no meio da edição descartaria o que está na tela.
+        self.btn_abrir_semelhante.setVisible(self._modo == MODO_NOVO)
+
+    def _esconder_aviso_duplicado(self) -> None:
+        self._semelhante_id = None
+        self.aviso_duplicado.hide()
+        self.btn_abrir_semelhante.hide()
+
+    def _abrir_semelhante(self) -> None:
+        if self._semelhante_id is None:
+            return
+        self.busca.clear()
+        self.atualizar()
+        self._selecionar_socio_na_tabela(self._semelhante_id)
+
     def _definir_modo(self, modo: str, descricao: str = "") -> None:
         self._modo = modo
         self._descricao_modo = descricao
@@ -481,6 +548,7 @@ class SociosTab(QWidget):
             modo,
             descricao,
         )
+        self._procurar_semelhantes()
 
     def _ao_selecionar_socio(self) -> None:
         linhas = self.tabela.selectionModel().selectedRows()

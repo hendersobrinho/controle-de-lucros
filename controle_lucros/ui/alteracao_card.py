@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import datetime as dt
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -29,9 +28,16 @@ from PySide6.QtWidgets import (
 )
 
 from .. import repositories as repo
-from ..models import AlteracaoContratual, VinculoSocietario
-from .common import formatar_numero, formatar_valor_br
+from ..models import TIPOS_PESSOA_LABEL, AlteracaoContratual, Socio, VinculoSocietario
+from .common import (
+    configurar_campo_cnpj,
+    configurar_campo_cpf,
+    documento_valido_ou_vazio,
+    formatar_numero,
+    formatar_valor_br,
+)
 from .selo import Selo
+from .theme import SEAL_RED
 
 
 def _hairline() -> QFrame:
@@ -41,14 +47,50 @@ def _hairline() -> QFrame:
 
 
 class _DialogoIncluirSocio(QDialog):
+    """Escolhe o sócio numa tabela com busca, não numa lista suspensa: com
+    algumas dezenas de sócios cadastrados, a lista virava um rolo comprido em
+    que era preciso procurar de olho, sem dar pra filtrar nem conferir o CPF
+    antes de escolher.
+
+    Traz também o cadastro de um sócio novo aqui dentro — quem está montando
+    uma alteração contratual quase sempre está incluindo alguém que ainda não
+    existe no sistema, e antes era preciso sair pra aba Sócios e voltar."""
+
+    COLUNAS = ["Nome", "CPF/CNPJ", "Tipo"]
+
     def __init__(self, conn, empresa_id: int, ja_vinculados: set[int], parent=None):
         super().__init__(parent)
+        self.conn = conn
+        self._ja_vinculados = ja_vinculados
+        self._socios: list = []
         self.setWindowTitle("Incluir sócio nesta alteração")
+        self.setMinimumSize(560, 460)
 
-        self.socio = QComboBox()
-        for s in repo.listar_socios(conn):
-            if s.id not in ja_vinculados:
-                self.socio.addItem(s.nome, s.id)
+        self.busca = QLineEdit()
+        self.busca.setPlaceholderText("Buscar por nome ou CPF/CNPJ…")
+        self.busca.setClearButtonEnabled(True)
+        self.busca.textChanged.connect(self._filtrar)
+
+        self.tabela = QTableWidget(0, len(self.COLUNAS))
+        self.tabela.setHorizontalHeaderLabels(self.COLUNAS)
+        self.tabela.setAlternatingRowColors(True)
+        self.tabela.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.tabela.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.tabela.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.tabela.verticalHeader().setVisible(False)
+        self.tabela.horizontalHeader().setStretchLastSection(True)
+        self.tabela.itemSelectionChanged.connect(self._ao_selecionar)
+        # Duplo clique escolhe e fecha: é o gesto que se espera de uma lista
+        # de busca, e evita a viagem até o botão pra quem já achou.
+        self.tabela.itemDoubleClicked.connect(self._confirmar_se_valido)
+
+        self.vazio = QLabel()
+        self.vazio.setProperty("role", "subtitulo")
+        self.vazio.setWordWrap(True)
+        self.vazio.hide()
+
+        self.btn_novo_socio = QPushButton("Cadastrar sócio novo…")
+        self.btn_novo_socio.clicked.connect(self._cadastrar_socio)
 
         self.percentual = QDoubleSpinBox()
         self.percentual.setMaximum(100)
@@ -60,20 +102,176 @@ class _DialogoIncluirSocio(QDialog):
         formatar_numero(self.cotas)
 
         form = QFormLayout()
-        form.addRow("Sócio", self.socio)
         form.addRow("% do capital", self.percentual)
         form.addRow("Qtde de cotas", self.cotas)
 
+        self.botoes = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.botoes.button(QDialogButtonBox.Ok).setText("Incluir")
+        self.botoes.accepted.connect(self.accept)
+        self.botoes.rejected.connect(self.reject)
+
+        linha_busca = QHBoxLayout()
+        linha_busca.addWidget(self.busca, 1)
+        linha_busca.addWidget(self.btn_novo_socio)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.addLayout(linha_busca)
+        layout.addWidget(self.tabela, 1)
+        layout.addWidget(self.vazio)
+        layout.addWidget(_hairline())
+        layout.addLayout(form)
+        layout.addWidget(self.botoes)
+
+        self._recarregar()
+        self.busca.setFocus()
+
+    # ------------------------------------------------------------ lista --
+    def _disponiveis(self) -> list:
+        """Sócios que ainda não estão nesta empresa nesta data — incluir de
+        novo quem já está criaria vínculo duplicado."""
+        return [s for s in repo.listar_socios(self.conn) if s.id not in self._ja_vinculados]
+
+    def _recarregar(self, selecionar_id: int | None = None) -> None:
+        self._todos = self._disponiveis()
+        self._filtrar()
+        if selecionar_id is not None:
+            self._selecionar(selecionar_id)
+
+    def _filtrar(self, *_args) -> None:
+        termo = self.busca.text().strip().lower()
+        alvo = repo.normalizar_documento(termo)
+        self._socios = [
+            s
+            for s in self._todos
+            if not termo
+            or termo in s.nome.lower()
+            or (alvo and alvo in repo.normalizar_documento(s.cpf))
+        ]
+
+        self.tabela.setRowCount(len(self._socios))
+        for row, s in enumerate(self._socios):
+            valores = [s.nome, s.cpf or "—", TIPOS_PESSOA_LABEL.get(s.tipo_pessoa, s.tipo_pessoa)]
+            for col, valor in enumerate(valores):
+                self.tabela.setItem(row, col, QTableWidgetItem(valor))
+        self.tabela.resizeColumnsToContents()
+
+        if self._socios:
+            self.vazio.hide()
+        else:
+            self.vazio.setText(
+                "Nenhum sócio encontrado com esse termo. Confira a busca ou cadastre um novo."
+                if termo
+                else "Todos os sócios cadastrados já estão nesta empresa. "
+                "Cadastre um novo pra incluir aqui."
+            )
+            self.vazio.show()
+        self._ao_selecionar()
+
+    def _selecionar(self, socio_id: int) -> None:
+        for row, s in enumerate(self._socios):
+            if s.id == socio_id:
+                self.tabela.selectRow(row)
+                return
+
+    def _socio_selecionado(self):
+        linhas = self.tabela.selectionModel().selectedRows() if self.tabela.selectionModel() else []
+        return self._socios[linhas[0].row()] if linhas else None
+
+    def _ao_selecionar(self) -> None:
+        # Sem sócio escolhido não há o que incluir; travar o botão evita o
+        # diálogo aceitar e o chamador receber None.
+        self.botoes.button(QDialogButtonBox.Ok).setEnabled(self._socio_selecionado() is not None)
+
+    def _confirmar_se_valido(self, *_args) -> None:
+        if self._socio_selecionado() is not None:
+            self.accept()
+
+    def _cadastrar_socio(self) -> None:
+        dialogo = _DialogoNovoSocio(self)
+        if dialogo.exec() != QDialog.Accepted:
+            return
+        try:
+            novo_id = repo.salvar_socio(self.conn, dialogo.socio())
+        except ValueError as exc:
+            QMessageBox.warning(self, "Erro ao cadastrar sócio", str(exc))
+            return
+        # Limpa a busca pra o recém-cadastrado não ficar escondido por um
+        # filtro que não casa com ele.
+        self.busca.clear()
+        self._recarregar(selecionar_id=novo_id)
+
+    def dados(self) -> tuple[int | None, float, float]:
+        socio = self._socio_selecionado()
+        return (socio.id if socio else None), self.percentual.value(), self.cotas.value()
+
+
+class _DialogoNovoSocio(QDialog):
+    """Cadastro rápido de sócio, sem sair da alteração contratual."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Cadastrar sócio")
+        self.setMinimumWidth(380)
+
+        self.nome = QLineEdit()
+        self.nome.setPlaceholderText("Nome completo ou razão social")
+
+        self.tipo_pessoa = QComboBox()
+        for tipo, label in TIPOS_PESSOA_LABEL.items():
+            self.tipo_pessoa.addItem(label, tipo)
+        self.tipo_pessoa.currentIndexChanged.connect(self._ajustar_mascara)
+
+        self.documento = QLineEdit()
+        self.documento.setProperty("role", "mono")
+        self._rotulo_documento = QLabel("CPF")
+
+        form = QFormLayout()
+        form.addRow("Nome", self.nome)
+        form.addRow("Tipo", self.tipo_pessoa)
+        form.addRow(self._rotulo_documento, self.documento)
+        self._ajustar_mascara()
+
+        self.erro = QLabel()
+        self.erro.setStyleSheet(f"color: {SEAL_RED()}; font-size: 11px;")
+        self.erro.setWordWrap(True)
+        self.erro.hide()
+
         botoes = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        botoes.accepted.connect(self.accept)
+        botoes.button(QDialogButtonBox.Ok).setText("Cadastrar")
+        botoes.accepted.connect(self._validar)
         botoes.rejected.connect(self.reject)
 
         layout = QVBoxLayout(self)
         layout.addLayout(form)
+        layout.addWidget(self.erro)
         layout.addWidget(botoes)
+        self.nome.setFocus()
 
-    def dados(self) -> tuple[int | None, float, float]:
-        return self.socio.currentData(), self.percentual.value(), self.cotas.value()
+    def _ajustar_mascara(self, *_args) -> None:
+        tipo = self.tipo_pessoa.currentData() or "fisica"
+        self.documento.clear()
+        if tipo == "juridica":
+            configurar_campo_cnpj(self.documento)
+            self._rotulo_documento.setText("CNPJ")
+        else:
+            configurar_campo_cpf(self.documento)
+            self._rotulo_documento.setText("CPF")
+
+    def _validar(self) -> None:
+        if not self.nome.text().strip():
+            self.erro.setText("Informe o nome do sócio.")
+            self.erro.show()
+            return
+        self.accept()
+
+    def socio(self) -> Socio:
+        return Socio(
+            id=None,
+            nome=self.nome.text().strip(),
+            cpf=documento_valido_ou_vazio(self.documento),
+            tipo_pessoa=self.tipo_pessoa.currentData(),
+        )
 
 
 class _DialogoSaidaSocio(QDialog):
@@ -372,10 +570,10 @@ class AlteracaoCard(QWidget):
             for v in vinculos
             if v.data_entrada <= self.alteracao.data and (v.data_saida is None or v.data_saida > self.alteracao.data)
         }
+        # Sem sócio disponível o diálogo abre assim mesmo: ele diz o que
+        # houve e deixa cadastrar um novo ali dentro, que é justamente o caso
+        # em que antes a tela só avisava e fechava.
         dialogo = _DialogoIncluirSocio(self.conn, self.empresa_id, ativos_ids, self)
-        if dialogo.socio.count() == 0:
-            QMessageBox.information(self, "Incluir sócio", "Todos os sócios cadastrados já estão vinculados.")
-            return
         if dialogo.exec() != QDialog.Accepted:
             return
         socio_id, percentual, cotas = dialogo.dados()

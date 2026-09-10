@@ -284,13 +284,24 @@ def importar_distribuicao(caminho: Path) -> list[dict]:
         resultado.append(
             {
                 "cpf": cpf,
-                "nome": nome,
+                "nome": normalizar_nome(nome),
                 "valor_distribuido": valor,
                 "pro_labore": numero_opcional(linha, indice_pro_labore, numero_linha, "pró-labore"),
                 "irrf": numero_opcional(linha, indice_irrf, numero_linha, "IRRF"),
             }
         )
     return resultado
+
+
+def normalizar_nome(texto: str) -> str:
+    """Nome de planilha vira MAIÚSCULO com espaços colapsados.
+
+    Planilha preenchida à mão chega com "Fulano  da Silva", "fulano da silva"
+    e "FULANO DA SILVA" na mesma coluna, e cada variação viraria um cadastro
+    diferente. Padronizar na leitura resolve antes de o dado entrar: o
+    casamento por nome já ignora caixa, então isto não muda quem casa com
+    quem — muda como o nome fica gravado quando o cadastro é criado."""
+    return " ".join(str(texto or "").split()).upper()
 
 
 def _indice_coluna(cabecalho: list[str], nomes_possiveis: list[str]) -> int | None:
@@ -483,8 +494,8 @@ def importar_cadastro(caminho: Path) -> list[dict]:
 
     resultado = []
     for numero_linha, linha in enumerate(linhas_brutas[1:], start=2):
-        empresa_nome = texto(linha, "empresa_nome")
-        socio_nome = texto(linha, "socio_nome")
+        empresa_nome = normalizar_nome(texto(linha, "empresa_nome"))
+        socio_nome = normalizar_nome(texto(linha, "socio_nome"))
         if not empresa_nome or (not socio_nome and not so_empresas):
             continue
 

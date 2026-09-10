@@ -82,6 +82,8 @@ class DistribuicaoLucro:
     irrf: float = 0.0
 
 
+TIPOS_PESSOA_LABEL = {"fisica": "Pessoa física", "juridica": "Pessoa jurídica"}
+
 TIPOS_MOVIMENTACAO = (
     "emprestimo_empresa_para_socio",
     "emprestimo_socio_para_empresa",

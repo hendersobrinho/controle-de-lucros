@@ -257,8 +257,9 @@ def test_exporta_modelo_com_os_socios_do_trimestre(conn, cenario, sem_dialogos, 
     _exportar(view, caminho, monkeypatch)
 
     linhas = importar_distribuicao(caminho)
-    assert {l["nome"] for l in linhas} == {"Fulano de Tal", "Beltrano da Silva"}
-    fulano = next(l for l in linhas if l["nome"] == "Fulano de Tal")
+    # A leitura padroniza o nome em maiúsculo (ver planilha.normalizar_nome).
+    assert {l["nome"] for l in linhas} == {"FULANO DE TAL", "BELTRANO DA SILVA"}
+    fulano = next(l for l in linhas if l["nome"] == "FULANO DE TAL")
     # Vem preenchido com o que já foi lançado: serve de conferência também.
     assert (fulano["valor_distribuido"], fulano["pro_labore"], fulano["irrf"]) == (10000.0, 6000.0, 138.0)
 

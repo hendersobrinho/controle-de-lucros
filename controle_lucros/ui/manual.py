@@ -121,6 +121,14 @@ criados por ela podem ser alterados enquanto não for reaberta.</li>
 <p>Feche a alteração quando o documento estiver registrado. Reabrir é possível
 a qualquer momento, e fica no log de atividades.</p>
 
+<h3>Incluir sócio na alteração</h3>
+<p><b>Incluir sócio</b> abre uma tela de busca: digite parte do nome ou do
+CPF/CNPJ e escolha na lista (duplo clique já confirma). Só aparecem os sócios
+que ainda não estão nesta empresa nesta data.</p>
+<p>Se a pessoa ainda não estiver cadastrada, <b>Cadastrar sócio novo…</b>
+resolve ali mesmo, sem precisar sair para a aba Sócios e voltar — o
+recém-cadastrado já fica selecionado.</p>
+
 <h3>Alterações criadas automaticamente</h3>
 <p>Mexer nos sócios pela aba <b>Sócios</b> (associar a uma empresa, atualizar
 cotas, encerrar vínculo) <b>gera uma alteração contratual sozinha</b>, com a
@@ -201,8 +209,11 @@ empresa, a linha é contada como "já existia" e ignorada.</li>
 <li>Não altera período trancado.</li>
 </ul>
 <p>O nome tem que bater <b>exatamente</b> (só maiúsculas/minúsculas e espaços
-das pontas são ignorados). "João" e "Joao" não se encontram — cai na
-revisão.</p>
+são ignorados). "João" e "Joao" não se encontram — cai na revisão.</p>
+<p>Os nomes de empresa e de sócio da planilha são <b>gravados em maiúsculo</b>,
+com os espaços a mais retirados. Assim "Fulano  da Silva", "fulano da silva" e
+"FULANO DA SILVA", que numa planilha preenchida à mão aparecem misturados,
+ficam todos iguais no cadastro.</p>
 """
 
 _SOCIOS = """
@@ -219,6 +230,13 @@ caso.</p>
 jurídica usa CNPJ (holding sócia de outra empresa é comum). O CPF/CNPJ não pode
 repetir entre sócios — o sistema recusa e mostra quem já usa aquele
 documento.</p>
+<p>Enquanto você digita o nome ou o documento, o sistema avisa se já existe
+alguém parecido — ignorando acento, maiúsculas e espaço a mais, então "JOAO DA
+SILVA" encontra "João da Silva". O botão <b>Abrir o cadastro existente</b> leva
+direto para ele.</p>
+<p>É só um aviso: homônimo existe, e você continua podendo cadastrar. Ele está
+ali porque sócio duplicado se espalha por todas as empresas dele e costuma
+aparecer só na hora de emitir o informe, quando desfazer já dá trabalho.</p>
 
 <h3>Vínculos com empresas</h3>
 <p><b>Associar a uma empresa</b> fica solto porque é a única ação que não
@@ -391,6 +409,14 @@ guardado por sócio, empresa e ano: reemitir no ano seguinte não exige digitar
 tudo de novo.</p>
 <p><b>Confira sempre antes de emitir.</b> Os valores sugeridos vêm dos
 lançamentos do sistema, que podem estar incompletos.</p>
+
+<h3>Responsável padrão</h3>
+<p>É quase sempre a mesma pessoa que assina todos os informes do escritório.
+Preencha o <b>Responsável pelas Informações</b>, marque <b>Usar como
+responsável padrão dos próximos informes</b> e salve: daí em diante ele já vem
+preenchido nos informes que ainda não foram salvos.</p>
+<p>Informe já conferido e salvo mantém quem assinou de fato, mesmo que o padrão
+mude depois — o que foi entregue não muda sozinho.</p>
 
 <h3>O saldo de empréstimo</h3>
 <p>É a soma dos empréstimos <i>da empresa para o sócio</i> até 31/12 do ano. O

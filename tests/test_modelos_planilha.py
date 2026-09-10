@@ -252,4 +252,4 @@ def test_modelo_de_distribuicao_tambem_tem_aba_de_exemplo(tmp_path):
 
     # O exemplo não pode entrar junto: só o sócio de verdade é importado.
     (linha,) = importar_distribuicao(caminho)
-    assert linha["nome"] == "Fulano"
+    assert linha["nome"] == "FULANO"  # a leitura padroniza em maiúsculo

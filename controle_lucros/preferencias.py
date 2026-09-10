@@ -36,3 +36,17 @@ def salvar_chave(chave: str, valor) -> None:
         arquivo.write_text(json.dumps(dados, ensure_ascii=False, indent=2), encoding="utf-8")
     except OSError:
         pass
+
+
+CHAVE_RESPONSAVEL_INFORME = "responsavel_informe"
+
+
+def responsavel_informe() -> str:
+    """Quem assina o informe de rendimentos (Quadro 8). É quase sempre a
+    mesma pessoa em todos os informes do escritório, então fica guardado e
+    vem preenchido — sem impedir de trocar num informe específico."""
+    return str(obter(CHAVE_RESPONSAVEL_INFORME) or "")
+
+
+def guardar_responsavel_informe(nome: str) -> None:
+    salvar_chave(CHAVE_RESPONSAVEL_INFORME, nome.strip())
