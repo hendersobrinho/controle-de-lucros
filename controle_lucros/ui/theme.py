@@ -32,21 +32,25 @@ PALETA_CLARA = {
     "SAIU_FG": "#7A2E2E",
 }
 
+# Cinza-ardósia em vez de azul-marinho quase preto, e acentos dessaturados: a
+# versão anterior tinha fundo escuro demais e cores vibrantes por cima, o que
+# num programa que se olha o dia inteiro cansa a vista. Todos os pares de
+# texto/fundo daqui ficam acima de 4.5:1 de contraste (o mínimo do WCAG AA).
 PALETA_ESCURA = {
-    "INK": "#BFE3FA",
-    "INK_MUTED": "#7FA0BE",
-    "PAPER": "#0E1A2B",
-    "PAPER_RAISED": "#16273F",
-    "BRASS": "#E8C05E",
-    "BRASS_DARK": "#C79A3D",
-    "SEAL_GREEN": "#7ED9A8",
-    "SEAL_RED": "#F0897E",
-    "HAIRLINE": "#28405E",
-    "ALT_ROW": "#122236",
-    "ENTROU_BG": "#3D3313",
-    "ENTROU_FG": "#F0C869",
-    "SAIU_BG": "#3D2220",
-    "SAIU_FG": "#F0897E",
+    "INK": "#DCE1E7",
+    "INK_MUTED": "#9BA5B1",
+    "PAPER": "#262C35",
+    "PAPER_RAISED": "#2F3640",
+    "BRASS": "#CBA971",
+    "BRASS_DARK": "#AC8B55",
+    "SEAL_GREEN": "#8CB897",
+    "SEAL_RED": "#DDA39C",
+    "HAIRLINE": "#434C58",
+    "ALT_ROW": "#2B323B",
+    "ENTROU_BG": "#403A2B",
+    "ENTROU_FG": "#DCC189",
+    "SAIU_BG": "#3F302C",
+    "SAIU_FG": "#DDA39C",
 }
 
 class _EstadoTema(QObject):
