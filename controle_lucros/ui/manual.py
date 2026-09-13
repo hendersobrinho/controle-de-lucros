@@ -180,6 +180,11 @@ linhas, repetindo os dados da empresa iguais em todas.</li>
 reconhecido pelo CPF e não vira sócio duplicado.</li>
 <li><b>Sócio pode ser pessoa jurídica</b>: CNPJ no lugar do CPF e tipo
 "Jurídica".</li>
+<li><b>Sociedade dividida em partes não redondas</b>: o percentual de capital
+aceita até 4 casas decimais (33,3333%, por exemplo), pra sócios com participação
+igual sem precisar arredondar.</li>
+<li><b>CNPJ no formato alfanumérico novo</b> da Receita Federal também é
+aceito, para empresas cadastradas depois da mudança.</li>
 </ul>
 <p>O exemplo fica numa aba separada de propósito: se estivesse junto dos dados,
 quem esquecesse de apagar importaria empresas fictícias para dentro do

@@ -129,7 +129,7 @@ def _linhas_de_exemplo(caminho, modelo) -> list[list]:
 
 def test_exemplo_de_so_empresas_traz_uma_linha_por_empresa(tmp_path):
     """Sem coluna de sócio, repetir a empresa não ensina nada e faria parecer
-    que o exemplo tem cinco empresas quando tem três."""
+    que o exemplo tem uma linha por sócio, em vez de uma por empresa."""
     modelo = modelo_cadastro("empresas")
     caminho = tmp_path / "empresas.xlsx"
     exportar_modelo_cadastro(caminho, modelo=modelo)

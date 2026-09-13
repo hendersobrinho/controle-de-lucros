@@ -95,11 +95,12 @@ def modelo_cadastro(id_modelo: str) -> ModeloCadastro:
 
 
 # Dados fictícios que aparecem na aba "Exemplo" de todo modelo exportado.
-# Foram escolhidos pra mostrar, sem precisar de legenda, as três dúvidas que
-# aparecem sempre: como repetir a empresa pra cada sócio, que o mesmo sócio
-# se repete em empresas diferentes (e é o mesmo cadastro), e que sócio pode
-# ser pessoa jurídica.
+# Cada empresa mostra UM caso de uso diferente — de propósito, pra quem abre a
+# planilha pela primeira vez reconhecer a própria situação sem precisar
+# adivinhar. As notas logo abaixo funcionam como legenda: uma linha por
+# empresa, dizendo o que ela ilustra.
 LINHAS_EXEMPLO_CADASTRO = [
+    # 001 — caso básico: dois sócios pessoa física, sociedade simples.
     {
         "numero_chamada": "001", "empresa_nome": "PADARIA MODELO LTDA",
         "cnpj": "11.111.111/0001-11", "capital_social": 100000, "quantidade_cotas": 100000,
@@ -116,6 +117,7 @@ LINHAS_EXEMPLO_CADASTRO = [
         "data_entrada": "01/01/2020", "data_saida": "",
         "ano_base": 2025, "valor_distribuido": 40000, "pro_labore": 18000, "irrf": 900,
     },
+    # 002 — mesmo sócio (MARIA) numa segunda empresa, sócia única, sem pró-labore.
     {
         "numero_chamada": "002", "empresa_nome": "TRANSPORTES EXEMPLO ME",
         "cnpj": "22.222.222/0001-22", "capital_social": 50000, "quantidade_cotas": 50000,
@@ -124,6 +126,8 @@ LINHAS_EXEMPLO_CADASTRO = [
         "data_entrada": "15/03/2021", "data_saida": "",
         "ano_base": 2025, "valor_distribuido": 30000, "pro_labore": 0, "irrf": 0,
     },
+    # 003 — sócio pessoa jurídica (holding), sócio que já saiu, ainda sem
+    # distribuição lançada (Ano Base e valores em branco).
     {
         "numero_chamada": "003", "empresa_nome": "CLINICA EXEMPLO LTDA",
         "cnpj": "33.333.333/0001-33", "capital_social": 200000, "quantidade_cotas": 200000,
@@ -140,15 +144,59 @@ LINHAS_EXEMPLO_CADASTRO = [
         "data_entrada": "01/01/2019", "data_saida": "30/06/2025",
         "ano_base": "", "valor_distribuido": "", "pro_labore": "", "irrf": "",
     },
+    # 004 — sociedade dividida em partes não redondas (% com 4 casas
+    # decimais) e só o administrador com pró-labore, os demais só com lucro.
+    {
+        "numero_chamada": "004", "empresa_nome": "CONSULTORIA EXEMPLO ASSOCIADOS",
+        "cnpj": "55.555.555/0001-55", "capital_social": 90000, "quantidade_cotas": 90000,
+        "socio_nome": "RENATO EXEMPLO ALVES", "socio_cpf": "555.555.555-55",
+        "tipo_pessoa": "Física", "percentual_capital": 33.3334, "cotas_socio": 30000,
+        "data_entrada": "01/06/2022", "data_saida": "",
+        "ano_base": 2025, "valor_distribuido": 20000, "pro_labore": 9000, "irrf": 220,
+    },
+    {
+        "numero_chamada": "004", "empresa_nome": "CONSULTORIA EXEMPLO ASSOCIADOS",
+        "cnpj": "55.555.555/0001-55", "capital_social": 90000, "quantidade_cotas": 90000,
+        "socio_nome": "BEATRIZ EXEMPLO LIMA", "socio_cpf": "666.666.666-66",
+        "tipo_pessoa": "Física", "percentual_capital": 33.3333, "cotas_socio": 30000,
+        "data_entrada": "01/06/2022", "data_saida": "",
+        "ano_base": 2025, "valor_distribuido": 20000, "pro_labore": 0, "irrf": 0,
+    },
+    {
+        "numero_chamada": "004", "empresa_nome": "CONSULTORIA EXEMPLO ASSOCIADOS",
+        "cnpj": "55.555.555/0001-55", "capital_social": 90000, "quantidade_cotas": 90000,
+        "socio_nome": "CARLOS EXEMPLO ROCHA", "socio_cpf": "777.777.777-77",
+        "tipo_pessoa": "Física", "percentual_capital": 33.3333, "cotas_socio": 30000,
+        "data_entrada": "01/06/2022", "data_saida": "",
+        "ano_base": 2025, "valor_distribuido": 20000, "pro_labore": 0, "irrf": 0,
+    },
+    # 005 — empresa recém-fundada, CNPJ no formato alfanumérico novo da
+    # Receita Federal (vigente desde jul/2026), sem distribuição ainda.
+    {
+        "numero_chamada": "005", "empresa_nome": "TECH EXEMPLO SOLUCOES LTDA",
+        "cnpj": "12.ABC.345/01DE-35", "capital_social": 15000, "quantidade_cotas": 15000,
+        "socio_nome": "DIEGO EXEMPLO FREITAS", "socio_cpf": "888.888.888-88",
+        "tipo_pessoa": "Física", "percentual_capital": 100, "cotas_socio": 15000,
+        "data_entrada": "01/03/2026", "data_saida": "",
+        "ano_base": "", "valor_distribuido": "", "pro_labore": "", "irrf": "",
+    },
 ]
 
 NOTAS_EXEMPLO_CADASTRO = [
-    "Uma linha por (empresa, sócio). Empresa com três sócios ocupa três linhas, "
-    "repetindo os dados da empresa igual em todas.",
-    "O mesmo sócio pode aparecer em empresas diferentes (veja MARIA nas empresas 001 e 002) "
-    "— é o mesmo cadastro, reconhecido pelo CPF, e não vira sócio duplicado.",
-    "Sócio pode ser pessoa jurídica: preencha o CNPJ no lugar do CPF e marque o tipo como "
-    "Jurídica (veja a HOLDING na empresa 003).",
+    "Uma linha por (empresa, sócio) — repita os dados da empresa em cada linha dela.",
+    "PADARIA MODELO LTDA (nº 001): caso básico — dois sócios pessoa física, cada um "
+    "com sua distribuição, pró-labore e IRRF do ano.",
+    "TRANSPORTES EXEMPLO ME (nº 002): sócia única, com 100% do capital — e é a MESMA "
+    "MARIA da empresa 001, reconhecida pelo CPF, sem duplicar cadastro. Recebeu só "
+    "lucro este ano, sem pró-labore (linhas zeradas).",
+    "CLINICA EXEMPLO LTDA (nº 003): um sócio pessoa jurídica (a HOLDING, com CNPJ no "
+    "lugar do CPF) e um sócio que já SAIU da sociedade em 30/06/2025 (Data de Saída "
+    "preenchida). Sem distribuição lançada ainda — Ano Base e os valores ficam em branco.",
+    "CONSULTORIA EXEMPLO ASSOCIADOS (nº 004): sociedade dividida em três partes quase "
+    "iguais — % Capital aceita até 4 casas decimais (33,3334% / 33,3333% / 33,3333%). "
+    "Só o sócio-administrador (RENATO) tem pró-labore; os outros dois recebem só lucro.",
+    "TECH EXEMPLO SOLUCOES LTDA (nº 005): empresa recém-fundada, com o CNPJ já no "
+    "formato alfanumérico novo da Receita Federal, e ainda sem distribuição lançada.",
     "Empresa é reconhecida pelo nº da empresa, pelo CNPJ ou pelo nome; se não existir, "
     "é criada. Sócio nunca é criado sem você confirmar na tela.",
     "Data de Saída só para quem já saiu da sociedade. Ano Base, Valor Distribuído, "
@@ -163,6 +211,10 @@ LINHAS_EXEMPLO_DISTRIBUICAO = [
      "pro_labore": 18000, "irrf": 900},
     {"cpf": "333.333.333-33", "nome": "ANA EXEMPLO PEREIRA", "valor_distribuido": 0,
      "pro_labore": 0, "irrf": 0},
+    # Sócio pessoa jurídica: o CNPJ entra na mesma coluna "CPF", normalmente.
+    # Holding não costuma ter pró-labore — só lucro.
+    {"cpf": "44.444.444/0001-44", "nome": "HOLDING EXEMPLO PARTICIPACOES LTDA",
+     "valor_distribuido": 35000, "pro_labore": 0, "irrf": 0},
 ]
 
 NOTAS_EXEMPLO_DISTRIBUICAO = [
@@ -171,6 +223,8 @@ NOTAS_EXEMPLO_DISTRIBUICAO = [
     "Uma linha por sócio. O sócio é reconhecido pelo CPF; o nome só é usado se o CPF "
     "não bater, e precisa ser exatamente igual ao cadastrado.",
     "Sócio que não recebeu nada pode ficar com 0 (veja ANA) ou ser apagado da planilha.",
+    "Sócio pessoa jurídica também entra aqui — a coluna CPF aceita CNPJ normalmente "
+    "(veja a HOLDING EXEMPLO).",
     "Pró-labore e IRRF são opcionais: apague as duas colunas se só for lançar a "
     "distribuição de lucro.",
     "Importar substitui os valores do ano para os sócios que estiverem na planilha; "
