@@ -440,7 +440,7 @@ def test_importacao_cadastro_reconhece_empresa_e_socio_existentes(conn):
     assert pronta["socio_id"] == socio_id
 
     aplicado = repo.aplicar_importacao_cadastro(conn, resultado["prontas"])
-    assert aplicado == {"empresas_criadas": 0, "vinculos_criados": 1, "vinculos_ja_existentes": 0, "vinculos_encerrados": 0, "distribuicoes_lancadas": 0}
+    assert aplicado == {"empresas_criadas": 0, "vinculos_criados": 1, "vinculos_ja_existentes": 0, "vinculos_encerrados": 0, "distribuicoes_lancadas": 0, "alteracoes_criadas": 0}
     vinculos = repo.listar_vinculos_empresa(conn, empresa_id)
     assert len(vinculos) == 1
     assert vinculos[0].socio_id == socio_id
@@ -460,7 +460,7 @@ def test_importacao_cadastro_nao_duplica_vinculo_ja_ativo(conn):
 
     resultado = repo.preparar_importacao_cadastro(conn, [_linha_cadastro()])
     aplicado = repo.aplicar_importacao_cadastro(conn, resultado["prontas"])
-    assert aplicado == {"empresas_criadas": 0, "vinculos_criados": 0, "vinculos_ja_existentes": 1, "vinculos_encerrados": 0, "distribuicoes_lancadas": 0}
+    assert aplicado == {"empresas_criadas": 0, "vinculos_criados": 0, "vinculos_ja_existentes": 1, "vinculos_encerrados": 0, "distribuicoes_lancadas": 0, "alteracoes_criadas": 0}
     assert len(repo.listar_vinculos_empresa(conn, empresa_id)) == 1
 
 
@@ -934,6 +934,72 @@ def test_importacao_cadastro_sem_ano_base_nao_lanca_distribuicao(conn):
     resultado = repo.preparar_importacao_cadastro(conn, [_linha_cadastro(valor_distribuido=50000.0)])
     aplicado = repo.aplicar_importacao_cadastro(conn, resultado["prontas"])
     assert aplicado["distribuicoes_lancadas"] == 0
+
+
+def test_importacao_cadastro_com_alteracao_id_amarra_vinculo_a_ela(conn):
+    """Import feito de dentro de um card da aba Alterações: todo vínculo
+    criado (e, se houver, encerrado) pela linha entra amarrado à mesma
+    alteração já aberta — não é criada nenhuma outra."""
+    empresa_id = _nova_empresa(conn)
+    repo.salvar_socio(conn, Socio(id=None, nome="Fulano de Tal", cpf="111.111.111-11"))
+    alteracao_id = repo.salvar_alteracao(
+        conn,
+        AlteracaoContratual(
+            id=None, empresa_id=empresa_id, numero=1, data="2024-01-01",
+            nome_empresa="ACME LTDA", capital_social=10000, quantidade_cotas=1000, descricao="",
+        ),
+    )
+    resultado = repo.preparar_importacao_cadastro(conn, [_linha_cadastro(data_saida="2025-06-15")])
+    aplicado = repo.aplicar_importacao_cadastro(conn, resultado["prontas"], alteracao_id=alteracao_id)
+
+    assert aplicado["alteracoes_criadas"] == 0
+    (vinculo,) = repo.listar_vinculos_empresa(conn, empresa_id)
+    assert vinculo.alteracao_entrada_id == alteracao_id
+    assert vinculo.alteracao_saida_id == alteracao_id
+    assert repo.listar_alteracoes(conn, empresa_id) == [repo.buscar_alteracao(conn, alteracao_id)]
+
+
+def test_importacao_cadastro_criar_alteracao_por_empresa_abre_uma_por_empresa(conn):
+    """Sem alteração já escolhida (import pela tela geral), cada empresa
+    tocada por um vínculo novo ganha sua própria alteração automática —
+    linhas da mesma empresa reaproveitam a mesma, não uma por linha."""
+    socio_a = repo.salvar_socio(conn, Socio(id=None, nome="Fulano de Tal", cpf="111.111.111-11"))
+    socio_b = repo.salvar_socio(conn, Socio(id=None, nome="Ciclana de Tal", cpf="222.222.222-22"))
+    linhas = [
+        _linha_cadastro(numero_chamada="101", empresa_nome="Empresa A LTDA", cnpj="", socio_nome="Fulano de Tal", socio_cpf="111.111.111-11"),
+        _linha_cadastro(numero_chamada="101", empresa_nome="Empresa A LTDA", cnpj="", socio_nome="Ciclana de Tal", socio_cpf="222.222.222-22"),
+        _linha_cadastro(numero_chamada="102", empresa_nome="Empresa B LTDA", cnpj="", socio_nome="Fulano de Tal", socio_cpf="111.111.111-11"),
+    ]
+    resultado = repo.preparar_importacao_cadastro(conn, linhas)
+    aplicado = repo.aplicar_importacao_cadastro(conn, resultado["prontas"], criar_alteracao_por_empresa=True)
+
+    assert aplicado["alteracoes_criadas"] == 2
+    empresa_a = next(e for e in repo.listar_empresas(conn) if e.numero_chamada == "101")
+    empresa_b = next(e for e in repo.listar_empresas(conn) if e.numero_chamada == "102")
+    (alteracao_a,) = repo.listar_alteracoes(conn, empresa_a.id)
+    (alteracao_b,) = repo.listar_alteracoes(conn, empresa_b.id)
+
+    vinculos_a = repo.listar_vinculos_empresa(conn, empresa_a.id)
+    assert len(vinculos_a) == 2
+    assert {v.alteracao_entrada_id for v in vinculos_a} == {alteracao_a.id}
+
+    (vinculo_b,) = repo.listar_vinculos_empresa(conn, empresa_b.id)
+    assert vinculo_b.alteracao_entrada_id == alteracao_b.id
+
+
+def test_importacao_cadastro_sem_flags_nao_cria_nem_amarra_alteracao(conn):
+    """Comportamento de sempre, preservado: planilha de cadastro comum (sem
+    passar alteracao_id nem criar_alteracao_por_empresa) não mexe em
+    alteração contratual nenhuma."""
+    empresa_id = _nova_empresa(conn)
+    repo.salvar_socio(conn, Socio(id=None, nome="Fulano de Tal", cpf="111.111.111-11"))
+    resultado = repo.preparar_importacao_cadastro(conn, [_linha_cadastro()])
+    aplicado = repo.aplicar_importacao_cadastro(conn, resultado["prontas"])
+
+    assert aplicado["alteracoes_criadas"] == 0
+    assert repo.listar_alteracoes(conn, empresa_id) == []
+    (vinculo,) = repo.listar_vinculos_empresa(conn, empresa_id)
+    assert vinculo.alteracao_entrada_id is None
 
 
 def test_excluir_vinculo_bloqueado_por_alteracao_fechada(conn):

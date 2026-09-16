@@ -66,7 +66,26 @@ from .theme import SAIU_FG
 _CHAVE_FORMATO = "importacao_formato"
 
 
-class _DialogoRevisaoCadastro(QDialog):
+def ler_relatorio_arquivo(caminho: Path):
+    """Lê o relatório "Cadastro de Sócios" de outro sistema contábil, em PDF
+    ou em planilha, escolhendo como extrair pelo conteúdo do arquivo e não
+    pela extensão.
+
+    Relatório salvo como ".xls" por um sistema e reaberto/salvo por outro
+    vira .xlsx ou HTML sem mudar de nome — conferir a assinatura evita
+    recusar um arquivo que dá perfeitamente para ler. Módulo nível, e não
+    método: usado tanto por esta tela quanto pelo import direto de dentro de
+    um card da aba Alterações."""
+    if caminho.suffix.lower() == ".pdf":
+        return ler_relatorio_socios(extrair_texto(caminho))
+    if e_xls_antigo(caminho):
+        return ler_relatorio_de_planilha(ler_xls(caminho))
+    # .xlsx e .csv: as linhas vêm sem descartar as vazias, porque aqui a
+    # posição não importa e uma linha em branco no meio não atrapalha.
+    return ler_relatorio_de_planilha(ler_linhas_brutas(caminho, descartar_vazias=False))
+
+
+class DialogoRevisaoCadastro(QDialog):
     """Uma pendência por sócio que não bateu com segurança contra o cadastro
     existente (CPF ausente ou nome ambíguo) — escolher um sócio já
     cadastrado ou criar um novo, sempre com confirmação humana antes de
@@ -533,7 +552,9 @@ class ImportacaoCadastroView(QWidget):
         self.btn_importar_relatorio.setToolTip(
             "Lê o relatório \"Cadastro de Sócios\" emitido por outro sistema contábil — em "
             "PDF ou em planilha (.xls, .xlsx, .csv) — e traz empresas, sócios, participação "
-            "e datas de entrada/saída."
+            "e datas de entrada/saída. Cada empresa tocada ganha uma alteração contratual "
+            "automática registrando a movimentação; pra lançar direto numa alteração já aberta "
+            "de uma empresa só, use o botão de importar dentro do card dela, na aba Alterações."
         )
         self.btn_importar_relatorio.clicked.connect(self._importar_relatorio)
 
@@ -909,7 +930,7 @@ class ImportacaoCadastroView(QWidget):
             return
         try:
             with ocupado(self, "Importar relatório", f"Lendo {Path(caminho).name}…"):
-                leitura = self._ler_relatorio(Path(caminho))
+                leitura = ler_relatorio_arquivo(Path(caminho))
         except (PdfIlegivel, XlsIlegivel, RelatorioInvalido) as exc:
             QMessageBox.warning(self, "Não consegui ler o relatório", str(exc))
             return
@@ -964,26 +985,21 @@ class ImportacaoCadastroView(QWidget):
         if confirmar != QMessageBox.Yes:
             return
 
-        self._aplicar_linhas(linhas_importadas, "Importar relatório de sócios")
+        self._aplicar_linhas(
+            linhas_importadas, "Importar relatório de sócios", criar_alteracao_por_empresa=True
+        )
 
-    def _ler_relatorio(self, caminho: Path):
-        """Escolhe como extrair, pelo conteúdo do arquivo e não pela extensão.
-
-        Relatório salvo como ".xls" por um sistema e reaberto/salvo por outro
-        vira .xlsx ou HTML sem mudar de nome — conferir a assinatura evita
-        recusar um arquivo que dá perfeitamente para ler."""
-        if caminho.suffix.lower() == ".pdf":
-            return ler_relatorio_socios(extrair_texto(caminho))
-        if e_xls_antigo(caminho):
-            return ler_relatorio_de_planilha(ler_xls(caminho))
-        # .xlsx e .csv: as linhas vêm sem descartar as vazias, porque aqui a
-        # posição não importa e uma linha em branco no meio não atrapalha.
-        return ler_relatorio_de_planilha(ler_linhas_brutas(caminho, descartar_vazias=False))
-
-    def _aplicar_linhas(self, linhas_importadas: list[dict], titulo: str) -> None:
+    def _aplicar_linhas(
+        self, linhas_importadas: list[dict], titulo: str, *, criar_alteracao_por_empresa: bool = False
+    ) -> None:
         """Casa as linhas contra o cadastro, resolve pendências com a pessoa e
         aplica. É o mesmo caminho para planilha, layout e relatório em PDF — o
-        que muda entre eles é só de onde as linhas vieram."""
+        que muda entre eles é só de onde as linhas vieram.
+
+        `criar_alteracao_por_empresa` só vale pro relatório de sócios: é
+        movimentação de quadro societário, então cada empresa tocada ganha
+        sua alteração contratual automática. Planilha de cadastro comum não
+        passa por aqui como movimentação — fica como estava."""
         resultado = repo.preparar_importacao_cadastro(self.conn, linhas_importadas)
         prontas = list(resultado["prontas"])
         pendencias = resultado["pendencias"]
@@ -1005,7 +1021,7 @@ class ImportacaoCadastroView(QWidget):
             )
 
         if pendencias:
-            dialogo = _DialogoRevisaoCadastro(self.conn, pendencias, self)
+            dialogo = DialogoRevisaoCadastro(self.conn, pendencias, self)
             if dialogo.exec() == QDialog.Accepted:
                 prontas.extend(dialogo.resolvidos())
 
@@ -1026,6 +1042,7 @@ class ImportacaoCadastroView(QWidget):
                     progresso=lambda feitas, total: barra.passo(
                         feitas, total, f"Gravando linha {feitas} de {total}…"
                     ),
+                    criar_alteracao_por_empresa=criar_alteracao_por_empresa,
                 )
         except ValueError as exc:
             QMessageBox.warning(self, "Erro ao importar", str(exc))
@@ -1039,6 +1056,13 @@ class ImportacaoCadastroView(QWidget):
             f"{aplicado['vinculos_encerrados']} vínculo(s) com saída registrada · "
             f"{aplicado['distribuicoes_lancadas']} distribuição(ões) lançada(s)."
         )
+        if aplicado.get("alteracoes_criadas"):
+            qtd = aplicado["alteracoes_criadas"]
+            resumo += (
+                "\n1 alteração contratual criada automaticamente pra registrar a movimentação."
+                if qtd == 1
+                else f"\n{qtd} alterações contratuais criadas automaticamente pra registrar a movimentação."
+            )
         if nao_aplicadas > 0:
             resumo += f"\n{nao_aplicadas} linha(s) não foram aplicadas"
             resumo += f" ({len(conflitos)} por dados contraditórios)." if conflitos else "."

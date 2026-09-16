@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from controle_lucros import db, repositories as repo
 from controle_lucros.models import Socio
 from controle_lucros.ui import importacao_cadastro_view as vista
-from controle_lucros.ui.importacao_cadastro_view import _DialogoRevisaoCadastro
+from controle_lucros.ui.importacao_cadastro_view import DialogoRevisaoCadastro
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -53,7 +53,7 @@ def test_mesmo_socio_novo_em_varias_empresas_vira_um_cartao_so(conn, monkeypatch
     assert resultado["prontas"] == []
     assert len(resultado["pendencias"]) == 3
 
-    dialogo = _DialogoRevisaoCadastro(conn, resultado["pendencias"])
+    dialogo = DialogoRevisaoCadastro(conn, resultado["pendencias"])
     assert len(dialogo._grupos_ui) == 1
 
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))
@@ -68,7 +68,7 @@ def test_mesmo_socio_novo_em_varias_empresas_vira_um_cartao_so(conn, monkeypatch
     assert {r["socio_id"] for r in resolvidos} == {socios[0].id}
 
     aplicado = repo.aplicar_importacao_cadastro(conn, resultado["prontas"] + resolvidos)
-    assert aplicado == {"empresas_criadas": 3, "vinculos_criados": 3, "vinculos_ja_existentes": 0, "vinculos_encerrados": 0, "distribuicoes_lancadas": 0}
+    assert aplicado == {"empresas_criadas": 3, "vinculos_criados": 3, "vinculos_ja_existentes": 0, "vinculos_encerrados": 0, "distribuicoes_lancadas": 0, "alteracoes_criadas": 0}
 
     for empresa in repo.listar_empresas(conn):
         (vinculo,) = repo.listar_vinculos_empresa(conn, empresa.id)
@@ -81,7 +81,7 @@ def test_socios_diferentes_ficam_em_cartoes_separados(conn):
         _linha("102", "Empresa B LTDA", socio_nome="Ana Paula", socio_cpf="666.666.666-66"),
     ]
     resultado = repo.preparar_importacao_cadastro(conn, linhas_planilha)
-    dialogo = _DialogoRevisaoCadastro(conn, resultado["pendencias"])
+    dialogo = DialogoRevisaoCadastro(conn, resultado["pendencias"])
     assert len(dialogo._grupos_ui) == 2
 
 
@@ -91,7 +91,7 @@ def test_agrupa_por_nome_quando_cpf_esta_vazio(conn):
         _linha("102", "Empresa B LTDA", socio_nome="Carlos Mendes", socio_cpf=""),
     ]
     resultado = repo.preparar_importacao_cadastro(conn, linhas_planilha)
-    dialogo = _DialogoRevisaoCadastro(conn, resultado["pendencias"])
+    dialogo = DialogoRevisaoCadastro(conn, resultado["pendencias"])
     assert len(dialogo._grupos_ui) == 1
 
 
@@ -104,7 +104,7 @@ def test_cadastrar_todos_resolve_o_quadro_inteiro_de_uma_vez(conn, monkeypatch):
         for i in range(1, 8)
     ]
     resultado = repo.preparar_importacao_cadastro(conn, linhas_arquivo)
-    dialogo = _DialogoRevisaoCadastro(conn, resultado["pendencias"])
+    dialogo = DialogoRevisaoCadastro(conn, resultado["pendencias"])
     assert len(dialogo._pendentes()) == 7
 
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))
@@ -129,7 +129,7 @@ def test_cadastrar_todos_nao_mexe_em_quem_ja_foi_resolvido(conn, monkeypatch):
         _linha("102", "Empresa B LTDA", socio_nome="Ana Paula", socio_cpf="666.666.666-66"),
     ]
     resultado = repo.preparar_importacao_cadastro(conn, linhas_arquivo)
-    dialogo = _DialogoRevisaoCadastro(conn, resultado["pendencias"])
+    dialogo = DialogoRevisaoCadastro(conn, resultado["pendencias"])
     assert len(dialogo._pendentes()) == 2
 
     # A pessoa resolve um cartão à mão, apontando pro sócio existente.
@@ -148,7 +148,7 @@ def test_cadastrar_todos_nao_mexe_em_quem_ja_foi_resolvido(conn, monkeypatch):
 
 def test_cadastrar_todos_recusado_nao_cria_ninguem(conn, monkeypatch):
     resultado = repo.preparar_importacao_cadastro(conn, [_linha("101", "Empresa A LTDA")])
-    dialogo = _DialogoRevisaoCadastro(conn, resultado["pendencias"])
+    dialogo = DialogoRevisaoCadastro(conn, resultado["pendencias"])
 
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.No))
     dialogo._cadastrar_todos()
@@ -182,7 +182,7 @@ def test_importar_relatorio_pdf_alimenta_o_cadastro(conn, monkeypatch, tmp_path)
         self_dialogo._cadastrar_todos()
         return vista.QDialog.Accepted
 
-    monkeypatch.setattr(vista._DialogoRevisaoCadastro, "exec", revisar)
+    monkeypatch.setattr(vista.DialogoRevisaoCadastro, "exec", revisar)
     view._importar_relatorio()
 
     (empresa,) = repo.listar_empresas(conn)
@@ -198,6 +198,13 @@ def test_importar_relatorio_pdf_alimenta_o_cadastro(conn, monkeypatch, tmp_path)
     assert andre.data_saida in (None, "")
     # Quem saiu entra já com a saída registrada, que é o ponto do relatório.
     assert vinculos[socios["LUIZA DIAS TORRES"].id].data_saida == "2026-05-20"
+
+    # Movimentação de sócio é alteração contratual: a empresa tocada pelo
+    # relatório ganha uma automática, e todo vínculo criado/encerrado por
+    # ele fica amarrado a ela.
+    (alteracao,) = repo.listar_alteracoes(conn, empresa.id)
+    assert all(v.alteracao_entrada_id == alteracao.id for v in vinculos.values())
+    assert vinculos[socios["LUIZA DIAS TORRES"].id].alteracao_saida_id == alteracao.id
 
 
 def test_importar_relatorio_pdf_recusado_na_confirmacao_nao_grava(conn, monkeypatch, tmp_path):
@@ -289,7 +296,7 @@ def test_importa_o_relatorio_em_xls_pela_mesma_tela(conn, monkeypatch, tmp_path)
     monkeypatch.setattr(vista.QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))
     monkeypatch.setattr(vista.QMessageBox, "information", staticmethod(lambda *a, **k: None))
     monkeypatch.setattr(
-        vista._DialogoRevisaoCadastro, "exec",
+        vista.DialogoRevisaoCadastro, "exec",
         lambda self: (self._cadastrar_todos(), vista.QDialog.Accepted)[1],
     )
 
@@ -331,7 +338,7 @@ def test_relatorio_em_xlsx_tambem_e_aceito(conn, monkeypatch, tmp_path):
     monkeypatch.setattr(vista.QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))
     monkeypatch.setattr(vista.QMessageBox, "information", staticmethod(lambda *a, **k: None))
     monkeypatch.setattr(
-        vista._DialogoRevisaoCadastro, "exec",
+        vista.DialogoRevisaoCadastro, "exec",
         lambda self: (self._cadastrar_todos(), vista.QDialog.Accepted)[1],
     )
 

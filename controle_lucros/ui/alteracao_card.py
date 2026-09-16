@@ -4,6 +4,7 @@ trancamento (fechamento) do período."""
 from __future__ import annotations
 
 import datetime as dt
+from pathlib import Path
 
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -12,6 +13,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QFrame,
     QHBoxLayout,
@@ -28,7 +30,9 @@ from PySide6.QtWidgets import (
 )
 
 from .. import repositories as repo
-from ..models import TIPOS_PESSOA_LABEL, AlteracaoContratual, Socio, VinculoSocietario
+from ..leitor_xls import XlsIlegivel
+from ..models import TIPOS_PESSOA_LABEL, AlteracaoContratual, Empresa, Socio, VinculoSocietario
+from ..relatorio_socios import EmpresaDoRelatorio, RelatorioInvalido, linhas_para_importacao, resumo as resumo_do_relatorio
 from .common import (
     configurar_campo_cnpj,
     configurar_campo_cpf,
@@ -37,8 +41,32 @@ from .common import (
     formatar_valor_br,
     TabelaLista,
 )
+from .importacao_cadastro_view import DialogoRevisaoCadastro, ler_relatorio_arquivo
+from .leitor_pdf import PdfIlegivel
+from .ocupado import Progresso, ocupado
 from .selo import Selo
 from .theme import SEAL_RED
+
+
+_FILTRO_RELATORIO_SOCIOS = (
+    "Relatório de sócios — PDF ou Excel (*.pdf *.xls *.xlsx *.csv);;"
+    "Relatório em PDF (*.pdf);;"
+    "Planilha do Excel (*.xls *.xlsx);;"
+    "Texto separado por ponto e vírgula (*.csv);;"
+    "Todos os arquivos (*)"
+)
+
+
+def _empresa_do_relatorio_bate(empresa: Empresa, relatorio_empresa: EmpresaDoRelatorio) -> bool:
+    """Mesmo critério de casamento de repo.preparar_importacao_cadastro,
+    aplicado a uma empresa já conhecida em vez de buscá-la pelo cadastro
+    inteiro — aqui já se sabe qual é a empresa (a da alteração aberta), só
+    falta achar as linhas do relatório que são dela."""
+    if relatorio_empresa.numero and empresa.numero_chamada and relatorio_empresa.numero.strip() == empresa.numero_chamada.strip():
+        return True
+    if relatorio_empresa.cnpj and empresa.cnpj and repo.normalizar_documento(relatorio_empresa.cnpj) == repo.normalizar_documento(empresa.cnpj):
+        return True
+    return relatorio_empresa.nome.strip().lower() == empresa.nome.strip().lower()
 
 
 def _hairline() -> QFrame:
@@ -382,10 +410,18 @@ class AlteracaoCard(QWidget):
         self.btn_incluir_socio.clicked.connect(self._incluir_socio)
         self.btn_saida_socio = QPushButton("Registrar saída de sócio")
         self.btn_saida_socio.clicked.connect(self._registrar_saida)
+        self.btn_importar_relatorio = QPushButton("Importar relatório de sócios…")
+        self.btn_importar_relatorio.setToolTip(
+            "Lê o relatório \"Cadastro de Sócios\" de outro sistema contábil — em PDF ou "
+            "planilha — e lança a movimentação desta empresa direto nesta alteração "
+            "contratual. Linhas de outras empresas no mesmo arquivo são ignoradas."
+        )
+        self.btn_importar_relatorio.clicked.connect(self._importar_relatorio_socios)
 
         botoes_socios = QHBoxLayout()
         botoes_socios.addWidget(self.btn_incluir_socio)
         botoes_socios.addWidget(self.btn_saida_socio)
+        botoes_socios.addWidget(self.btn_importar_relatorio)
         botoes_socios.addStretch()
 
         miolo = QVBoxLayout(conteudo)
@@ -447,6 +483,7 @@ class AlteracaoCard(QWidget):
         self.btn_salvar.setEnabled(editavel)
         self.btn_incluir_socio.setEnabled(editavel and self.alteracao is not None)
         self.btn_saida_socio.setEnabled(editavel and self.alteracao is not None)
+        self.btn_importar_relatorio.setEnabled(editavel and self.alteracao is not None)
 
         self.btn_cancelar.setVisible(self.alteracao is None)
         self.btn_excluir.setVisible(self.alteracao is not None)
@@ -613,5 +650,152 @@ class AlteracaoCard(QWidget):
         except ValueError as exc:
             QMessageBox.warning(self, "Erro ao registrar saída", str(exc))
             return
+        self._preencher_tabela_socios()
+        self._ao_mudar(self)
+
+    def _importar_relatorio_socios(self) -> None:
+        """Lê o relatório "Cadastro de Sócios" de outro sistema contábil e
+        lança a movimentação direto nesta alteração contratual — a mesma
+        leitura usada na tela de Importação de cadastro, mas já amarrada à
+        empresa e à alteração abertas aqui, sem perguntar qual é.
+
+        O relatório pode trazer várias empresas no mesmo arquivo; só as
+        linhas da empresa desta alteração entram, o resto é ignorado (com
+        aviso de quantas linhas ficaram de fora)."""
+        if self.alteracao is None:
+            return
+        caminho, _ = QFileDialog.getOpenFileName(
+            self, "Importar relatório de sócios", "", _FILTRO_RELATORIO_SOCIOS
+        )
+        if not caminho:
+            return
+        try:
+            with ocupado(self, "Importar relatório", f"Lendo {Path(caminho).name}…"):
+                leitura = ler_relatorio_arquivo(Path(caminho))
+        except (PdfIlegivel, XlsIlegivel, RelatorioInvalido) as exc:
+            QMessageBox.warning(self, "Não consegui ler o relatório", str(exc))
+            return
+        except ValueError as exc:
+            QMessageBox.warning(self, "Erro ao ler o relatório", str(exc))
+            return
+        except OSError as exc:
+            QMessageBox.warning(self, "Erro ao abrir arquivo", str(exc))
+            return
+
+        empresa = repo.buscar_empresa(self.conn, self.empresa_id)
+        empresas_da_alteracao = [e for e in leitura.empresas if _empresa_do_relatorio_bate(empresa, e)]
+        ignoradas_outra_empresa = len(leitura.empresas) - len(empresas_da_alteracao)
+
+        if not empresas_da_alteracao:
+            aviso_outras = (
+                f"\n\n{len(leitura.empresas)} outra(s) empresa(s) do arquivo foram ignoradas — esta "
+                "importação só entra no quadro societário desta empresa."
+                if leitura.empresas
+                else ""
+            )
+            QMessageBox.information(
+                self,
+                "Importar relatório de sócios",
+                f'O relatório não traz nenhuma linha de "{empresa.nome}". Confira se é o '
+                f"arquivo certo.{aviso_outras}",
+            )
+            return
+
+        linhas_importadas = linhas_para_importacao(empresas_da_alteracao)
+        # Força o casamento nesta empresa (já conhecida) em vez de deixar
+        # repo.preparar_importacao_cadastro casar pelo nome como veio escrito
+        # no relatório — que pode divergir em maiúscula/pontuação do cadastro
+        # e criar uma empresa duplicada em vez de reconhecer esta.
+        for linha in linhas_importadas:
+            linha["numero_chamada"] = empresa.numero_chamada
+            linha["cnpj"] = empresa.cnpj
+            linha["empresa_nome"] = empresa.nome
+        if not linhas_importadas:
+            QMessageBox.information(
+                self,
+                "Importar relatório de sócios",
+                f'Li a empresa "{empresa.nome}" no relatório, mas ela não tem nenhum sócio listado.',
+            )
+            return
+
+        aviso_outras = (
+            f"\n\n{ignoradas_outra_empresa} outra(s) empresa(s) do arquivo foram ignoradas — esta "
+            "importação entra só no quadro societário desta empresa, dentro da alteração selecionada."
+            if ignoradas_outra_empresa
+            else ""
+        )
+        alerta = ""
+        if leitura.ignoradas:
+            exemplos = "\n".join(f"   {linha[:90]}" for linha in leitura.ignoradas[:3])
+            if len(leitura.ignoradas) > 3:
+                exemplos += f"\n   (e mais {len(leitura.ignoradas) - 3})"
+            alerta = (
+                f"\n\n⚠ {len(leitura.ignoradas)} linha(s) com cara de sócio não foram "
+                f"reconhecidas e ficarão de fora:\n{exemplos}"
+            )
+
+        confirmar = QMessageBox.question(
+            self,
+            "Importar relatório de sócios",
+            f'Li {resumo_do_relatorio(empresas_da_alteracao)} para "{empresa.nome}", a lançar na '
+            f"alteração contratual Nº {self.alteracao.numero}.{aviso_outras}{alerta}\n\n"
+            "Seguir com a importação?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if confirmar != QMessageBox.Yes:
+            return
+
+        resultado = repo.preparar_importacao_cadastro(self.conn, linhas_importadas)
+        prontas = list(resultado["prontas"])
+        pendencias = resultado["pendencias"]
+        conflitos = resultado["conflitos"]
+
+        if conflitos:
+            detalhe = "\n\n".join(
+                f'Linha de "{c["empresa_nome"]}" / "{c["socio_nome"]}":\n{c["aviso"]}' for c in conflitos[:5]
+            )
+            if len(conflitos) > 5:
+                detalhe += f"\n\n(e mais {len(conflitos) - 5} linha(s) com o mesmo tipo de problema)"
+            QMessageBox.warning(
+                self,
+                "Linhas com dados contraditórios",
+                f"{len(conflitos)} linha(s) não serão importadas:\n\n{detalhe}",
+            )
+
+        if pendencias:
+            dialogo = DialogoRevisaoCadastro(self.conn, pendencias, self)
+            if dialogo.exec() == QDialog.Accepted:
+                prontas.extend(dialogo.resolvidos())
+
+        if not prontas:
+            QMessageBox.information(
+                self,
+                "Importar relatório de sócios",
+                "Nenhuma linha foi aplicada."
+                + (" Corrija os dados contraditórios apontados acima." if conflitos else ""),
+            )
+            return
+
+        try:
+            with Progresso(self, "Importar relatório de sócios", len(prontas), "Gravando o que foi importado…") as barra:
+                aplicado = repo.aplicar_importacao_cadastro(
+                    self.conn,
+                    prontas,
+                    progresso=lambda feitas, total: barra.passo(
+                        feitas, total, f"Gravando linha {feitas} de {total}…"
+                    ),
+                    alteracao_id=self.alteracao.id,
+                )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Erro ao importar", str(exc))
+            return
+
+        resumo_txt = (
+            f"{aplicado['vinculos_criados']} vínculo(s) criado(s) · "
+            f"{aplicado['vinculos_ja_existentes']} já existiam (ignorados) · "
+            f"{aplicado['vinculos_encerrados']} vínculo(s) com saída registrada."
+        )
+        QMessageBox.information(self, "Importação concluída", resumo_txt)
         self._preencher_tabela_socios()
         self._ao_mudar(self)

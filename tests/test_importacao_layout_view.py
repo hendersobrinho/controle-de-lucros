@@ -153,7 +153,7 @@ def test_importa_planilha_de_outra_origem_pelo_layout(tela, conn, tmp_path, monk
                         staticmethod(lambda *a, **k: (str(caminho), "")))
     monkeypatch.setattr(vista.QMessageBox, "information", staticmethod(lambda *a, **k: None))
     monkeypatch.setattr(vista._DialogoPrevia, "exec", lambda self: QDialog.Accepted)
-    monkeypatch.setattr(vista._DialogoRevisaoCadastro, "exec",
+    monkeypatch.setattr(vista.DialogoRevisaoCadastro, "exec",
                         lambda self: (self._cadastrar_todos(), QDialog.Accepted)[1])
     monkeypatch.setattr(vista.QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))
 

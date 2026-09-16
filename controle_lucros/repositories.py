@@ -1242,7 +1242,13 @@ def preparar_importacao_cadastro(conn: sqlite3.Connection, linhas: list[dict]) -
 
 
 def aplicar_importacao_cadastro(
-    conn: sqlite3.Connection, linhas_resolvidas: list[dict], progresso=None
+    conn: sqlite3.Connection,
+    linhas_resolvidas: list[dict],
+    progresso=None,
+    *,
+    alteracao_id: int | None = None,
+    criar_alteracao_por_empresa: bool = False,
+    descricao_alteracao_automatica: str = "Importação de relatório de sócios",
 ) -> dict:
     """Aplica linhas já resolvidas (empresa existente em "empresa_existente",
     ou dados pra criar uma nova; "socio_id" já definido, ou None quando a
@@ -1253,13 +1259,34 @@ def aplicar_importacao_cadastro(
     já está encerrado. Se a linha trouxer "data_saida", encerra o vínculo (o
     recém-criado ou o que já existia). Se trouxer
     "ano_base" com valor distribuído, pró-labore ou IRRF, lança a
-    distribuição daquele ano pra esse sócio."""
+    distribuição daquele ano pra esse sócio.
+
+    Movimentação de sócio é alteração contratual, então todo vínculo criado ou
+    encerrado aqui é amarrado a uma: `alteracao_id` força a mesma alteração já
+    aberta pra todas as linhas (importação feita de dentro de um card da aba
+    Alterações, sempre de uma empresa só); sem ele, `criar_alteracao_por_empresa`
+    abre — e reaproveita entre linhas da mesma empresa nesta chamada — uma
+    alteração automática por empresa tocada, no mesmo espírito de
+    _abrir_alteracao_automatica. Nenhum dos dois é passado por quem importa
+    planilha de cadastro comum, que não é movimentação societária."""
     empresas_criadas = 0
     vinculos_criados = 0
     vinculos_ja_existentes = 0
     vinculos_encerrados = 0
     distribuicoes_lancadas = 0
     cache_empresa_nova: dict[tuple[str, str], int] = {}
+    alteracoes_automaticas: dict[int, int] = {}
+
+    def alteracao_para(empresa_id: int, data_referencia: str) -> int | None:
+        if alteracao_id is not None:
+            return alteracao_id
+        if not criar_alteracao_por_empresa:
+            return None
+        existente = alteracoes_automaticas.get(empresa_id)
+        if existente is None:
+            existente = _abrir_alteracao_automatica(conn, empresa_id, data_referencia, descricao_alteracao_automatica)
+            alteracoes_automaticas[empresa_id] = existente
+        return existente
 
     # `progresso` é opcional e recebe (feitas, total): permite à tela mostrar a
     # barra andando numa importação grande sem que este módulo precise saber
@@ -1329,6 +1356,7 @@ def aplicar_importacao_cadastro(
                     quantidade_cotas=linha["cotas_socio"] or None,
                     data_entrada=linha["data_entrada"],
                     data_saida=None,
+                    alteracao_entrada_id=alteracao_para(empresa_id, linha["data_entrada"]),
                 ),
             )
             vinculos_criados += 1
@@ -1337,7 +1365,9 @@ def aplicar_importacao_cadastro(
             vinculos_ja_existentes += 1
 
         if linha.get("data_saida"):
-            encerrar_vinculo(conn, vinculo_ativo.id, linha["data_saida"], None)
+            encerrar_vinculo(
+                conn, vinculo_ativo.id, linha["data_saida"], alteracao_para(empresa_id, linha["data_saida"])
+            )
             vinculos_encerrados += 1
 
         if linha.get("ano_base") and (linha.get("valor_distribuido") or linha.get("pro_labore") or linha.get("irrf")):
@@ -1358,6 +1388,7 @@ def aplicar_importacao_cadastro(
         "vinculos_ja_existentes": vinculos_ja_existentes,
         "vinculos_encerrados": vinculos_encerrados,
         "distribuicoes_lancadas": distribuicoes_lancadas,
+        "alteracoes_criadas": len(alteracoes_automaticas),
     }
 
 
