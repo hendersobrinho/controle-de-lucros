@@ -437,10 +437,25 @@ class AlteracaoCard(QWidget):
         miolo.addLayout(botoes_socios)
         miolo.addStretch()
 
+        # Em tela larga, um formulário esticado até a borda vira campo de
+        # texto do tamanho de uma frase pra guardar "R$ 10.000,00" — a
+        # largura do card é limitada e centralizada no espaço disponível, em
+        # vez de a grade (formulário + tabela de sócios) ocupar a tela
+        # inteira. Quem tem tela estreita não perde nada: abaixo do limite o
+        # card só encolhe normalmente, como qualquer widget responsivo.
+        conteudo.setMaximumWidth(820)
+
+        centralizador = QWidget()
+        linha_centralizada = QHBoxLayout(centralizador)
+        linha_centralizada.setContentsMargins(0, 0, 0, 0)
+        linha_centralizada.addStretch()
+        linha_centralizada.addWidget(conteudo)
+        linha_centralizada.addStretch()
+
         rolagem = QScrollArea()
         rolagem.setWidgetResizable(True)
         rolagem.setFrameShape(QFrame.NoFrame)
-        rolagem.setWidget(conteudo)
+        rolagem.setWidget(centralizador)
 
         layout_externo = QVBoxLayout(self)
         layout_externo.setContentsMargins(4, 4, 4, 4)
