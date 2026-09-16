@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sqlite3
 import sys
 from pathlib import Path
@@ -12,16 +13,43 @@ from pathlib import Path
 # no modo --onefile, ou a pasta do próprio .exe no --onedir) — gravar o
 # banco ali seria gravar num lugar que ou não é permitido (instalado em
 # Arquivos de Programas) ou é apagado a cada execução, perdendo os dados.
-# Empacotado, o banco vai pra pasta de dados do usuário (%LOCALAPPDATA% no
-# Windows), que é sempre gravável e persiste entre execuções.
+#
+# Empacotado, o banco vai pra %PROGRAMDATA% (C:\ProgramData), que é a pasta
+# de dados da MÁQUINA, não a de cada conta do Windows. É o que faz o
+# escritório inteiro ver o mesmo cadastro: com %LOCALAPPDATA%, cada usuário
+# do Windows abria o programa e encontrava um banco vazio só dele, sem
+# enxergar nada do que o colega tinha lançado.
+#
+# O instalador é que abre a permissão de escrita dessa pasta pros usuários
+# comuns (ver [Dirs] em controle_lucros.iss) — o padrão do Windows deixaria
+# só quem criou o arquivo poder alterá-lo.
+NOME_DA_PASTA = "ControleDeLucros"
+
+
 def _pasta_dados_padrao() -> Path:
     if getattr(sys, "frozen", False):
-        base = os.getenv("LOCALAPPDATA") or os.getenv("APPDATA") or str(Path.home())
-        return Path(base) / "ControleDeLucros" / "data"
+        base = os.getenv("PROGRAMDATA") or os.getenv("LOCALAPPDATA") or str(Path.home())
+        return Path(base) / NOME_DA_PASTA / "data"
     return Path(__file__).resolve().parent.parent / "data"
 
 
+def pasta_dados_por_usuario() -> Path | None:
+    """Onde o banco ficava até a versão 1.1.0: dentro da conta do Windows.
+
+    Serve pra migração — uma instalação que já rodou guarda o cadastro lá, e
+    atualizar o programa não pode fazer esse cadastro sumir da vista."""
+    base = os.getenv("LOCALAPPDATA") or os.getenv("APPDATA")
+    return Path(base) / NOME_DA_PASTA / "data" if base else None
+
+
 DEFAULT_DB_PATH = _pasta_dados_padrao() / "controle_lucros.db"
+
+# Quanto tempo uma gravação espera a vez quando outro usuário está gravando
+# naquele instante. Sem isso o SQLite devolve "database is locked" na hora, e
+# com duas pessoas usando ao mesmo tempo isso apareceria como erro na tela em
+# vez de uma espera de milissegundos. As gravações aqui são curtas (um
+# INSERT, um UPDATE), então dez segundos é folga de sobra.
+ESPERA_DE_BLOQUEIO_MS = 10_000
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS empresa (
@@ -203,9 +231,51 @@ def connect(db_path: Path | None = None) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
+    # WAL deixa quem está lendo a tela seguir lendo enquanto outro grava; o
+    # busy_timeout cobre o que o WAL não cobre, que é gravação x gravação.
     conn.execute("PRAGMA journal_mode = WAL;")
+    conn.execute(f"PRAGMA busy_timeout = {ESPERA_DE_BLOQUEIO_MS};")
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn
+
+
+def migrar_banco_por_usuario(destino: Path | None = None) -> Path | None:
+    """Traz pro banco compartilhado o cadastro que ficou na conta do Windows.
+
+    Só roda quando não há banco compartilhado ainda e existe um antigo: numa
+    atualização, o usuário abriria o programa e daria de cara com o sistema
+    vazio, achando que perdeu tudo.
+
+    Copia pelo backup do próprio SQLite, e não com copy do arquivo, porque o
+    banco em WAL tem gravação confirmada que ainda mora no arquivo -wal ao
+    lado — copiar só o .db traria um cadastro desatualizado. O original é
+    deixado onde está: se algo der errado aqui, ele continua lá inteiro.
+
+    Devolve a origem quando migrou, None quando não havia o que migrar."""
+    destino = destino or get_db_path()
+    if destino.exists():
+        return None
+
+    antiga = pasta_dados_por_usuario()
+    if antiga is None:
+        return None
+    origem = antiga / "controle_lucros.db"
+    if not origem.exists() or origem.resolve() == destino.resolve():
+        return None
+
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    de_origem = sqlite3.connect(origem)
+    para_destino = sqlite3.connect(destino)
+    try:
+        de_origem.backup(para_destino)
+    finally:
+        para_destino.close()
+        de_origem.close()
+
+    preferencias_antigas = antiga / "preferencias.json"
+    if preferencias_antigas.exists():
+        shutil.copy2(preferencias_antigas, destino.parent / "preferencias.json")
+    return origem
 
 
 # Colunas adicionadas ao schema depois que as tabelas já existiam em bancos

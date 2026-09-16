@@ -349,10 +349,32 @@ python -m PyInstaller --clean controle_lucros.spec
 ### Onde ficam os dados depois de empacotado
 
 Rodando o `.exe`, o banco de dados, backups e preferências (tema
-claro/escuro) ficam em `%LOCALAPPDATA%\ControleDeLucros\` — não dentro da
-pasta do programa. Isso significa que dá pra atualizar o programa (trocar os
-arquivos em `dist\ControleDeLucros\` por uma versão nova) sem perder os
-dados: eles moram em outro lugar, específico do usuário do Windows logado.
+claro/escuro) ficam em `%PROGRAMDATA%\ControleDeLucros\` (normalmente
+`C:\ProgramData\ControleDeLucros\`) — não dentro da pasta do programa. Isso
+significa que dá pra atualizar o programa (trocar os arquivos em
+`dist\ControleDeLucros\` por uma versão nova) sem perder os dados: eles moram
+em outro lugar.
+
+`%PROGRAMDATA%` é a pasta de dados da **máquina**, não a de cada conta do
+Windows — é isso que faz todos os usuários daquele PC trabalharem no mesmo
+cadastro. Duas pessoas podem estar com o programa aberto ao mesmo tempo (em
+contas diferentes, via troca rápida de usuário): o banco roda em modo WAL,
+então quem está lendo uma tela não trava quem está gravando, e cada gravação
+espera a vez por até dez segundos em vez de devolver erro. A tela aberta não
+se atualiza sozinha — o que o colega gravou aparece ao entrar de novo naquela
+tela (trocar de aba e voltar já basta).
+
+> A permissão de escrita dessa pasta pra usuário comum é o instalador que
+> abre (seção `[Dirs]` do `controle_lucros.iss`). Copiando a pasta
+> `dist\ControleDeLucros\` na mão, sem instalador, é preciso liberar
+> `C:\ProgramData\ControleDeLucros` pro grupo Usuários — senão só quem criou
+> cada arquivo consegue alterá-lo, e o segundo usuário lê mas não grava.
+
+**Atualizando de uma versão anterior à 1.2.0**, o banco ficava em
+`%LOCALAPPDATA%`, dentro da conta de quem usava. Na primeira vez que a versão
+nova abre, esse cadastro é copiado pro lugar compartilhado. O original não é
+apagado: fica lá como garantia, e pode ser removido depois de conferir que o
+sistema abriu com tudo no lugar.
 
 ### Gerar um instalador (Inno Setup)
 
@@ -368,9 +390,11 @@ isso, em vez de gerar um instalador vazio.
 ```
 
 O instalador final fica em `installer\ControleDeLucros_Setup_<versão>.exe`.
-Os dados do usuário (banco, backups, preferências) ficam em
-`%LOCALAPPDATA%\ControleDeLucros\`, fora da pasta de instalação — então
-desinstalar ou reinstalar/atualizar o programa nunca apaga os dados.
+Ele instala em Arquivos de Programas (pede elevação) e cria
+`C:\ProgramData\ControleDeLucros\` já com escrita liberada pro grupo
+Usuários — é o que permite a qualquer conta do Windows daquele PC abrir o
+programa e gravar no mesmo cadastro. Os dados ficam fora da pasta de
+instalação, então desinstalar ou reinstalar/atualizar nunca apaga o banco.
 
 ### Lançar uma nova versão
 

@@ -1,3 +1,4 @@
+import sqlite3
 import sys
 
 from PySide6.QtWidgets import QApplication, QDialog
@@ -10,6 +11,17 @@ from controle_lucros.ui.theme import build_stylesheet
 
 
 def main() -> None:
+    # Antes de abrir o banco: numa máquina que já rodou a versão anterior, o
+    # cadastro está na conta do Windows de quem usou, e o compartilhado ainda
+    # não existe. Sem isto, atualizar o programa daria a impressão de ter
+    # apagado tudo.
+    try:
+        db.migrar_banco_por_usuario()
+    except (OSError, sqlite3.Error):
+        # Migração que falha não pode impedir o programa de abrir: o banco
+        # antigo continua intacto no lugar dele, e o novo nasce vazio.
+        pass
+
     conn = db.connect()
     db.init_schema(conn)
 

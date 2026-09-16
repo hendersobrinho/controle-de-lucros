@@ -13,10 +13,15 @@
 ; manter aqui. Pra subir de versão, mexa em controle_lucros/__init__.py e
 ; gere o pacote de novo antes de compilar este script.
 ;
-; O instalador some, mas os dados do usuário (banco, backups, preferências)
-; ficam em %LOCALAPPDATA%\ControleDeLucros\ — fora da pasta de instalação —
-; então desinstalar o programa NUNCA apaga os dados. Reinstalar/atualizar
-; também não mexe neles.
+; O instalador some, mas os dados (banco, backups, preferências) ficam em
+; %PROGRAMDATA%\ControleDeLucros\ — fora da pasta de instalação — então
+; desinstalar o programa NUNCA apaga os dados. Reinstalar/atualizar também
+; não mexe neles.
+;
+; %PROGRAMDATA% e não %LOCALAPPDATA%: é o que faz todos os usuários do
+; Windows daquele PC trabalharem no MESMO cadastro. Ver [Dirs] no fim deste
+; arquivo — é lá que a pasta ganha permissão de escrita pra usuário comum,
+; sem a qual só quem criou cada arquivo conseguiria alterá-lo.
 
 #define MyAppName "Controle de Distribuição de Lucros"
 #define MyAppPublisher "HenderLab"
@@ -89,6 +94,16 @@ Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortugue
 
 [Tasks]
 Name: "desktopicon"; Description: "Criar um atalho na Área de Trabalho"; GroupDescription: "Atalhos adicionais:"
+
+[Dirs]
+; A pasta de dados da máquina, criada já com escrita liberada pra usuário
+; comum. Sem "users-modify" o Windows deixa cada um mexer só no que ele
+; mesmo criou: o segundo usuário a abrir o programa conseguiria ler o banco
+; do primeiro, mas não gravar nele — e o sistema inteiro é gravação.
+; O -wal e o -shm que o SQLite cria ao lado do banco entram na mesma regra.
+Name: "{commonappdata}\ControleDeLucros"; Permissions: users-modify
+Name: "{commonappdata}\ControleDeLucros\data"; Permissions: users-modify
+Name: "{commonappdata}\ControleDeLucros\backups"; Permissions: users-modify
 
 [Files]
 Source: "{#SourcePath}dist\ControleDeLucros\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
