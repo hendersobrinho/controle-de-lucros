@@ -440,7 +440,7 @@ def test_importacao_cadastro_reconhece_empresa_e_socio_existentes(conn):
     assert pronta["socio_id"] == socio_id
 
     aplicado = repo.aplicar_importacao_cadastro(conn, resultado["prontas"])
-    assert aplicado == {"empresas_criadas": 0, "vinculos_criados": 1, "vinculos_ja_existentes": 0, "vinculos_encerrados": 0, "distribuicoes_lancadas": 0, "alteracoes_criadas": 0}
+    assert aplicado == {"empresas_criadas": 0, "vinculos_criados": 1, "vinculos_ja_existentes": 0, "vinculos_encerrados": 0, "participacoes_atualizadas": 0, "participacoes_nao_atualizadas": 0, "distribuicoes_lancadas": 0, "alteracoes_criadas": 0}
     vinculos = repo.listar_vinculos_empresa(conn, empresa_id)
     assert len(vinculos) == 1
     assert vinculos[0].socio_id == socio_id
@@ -460,7 +460,7 @@ def test_importacao_cadastro_nao_duplica_vinculo_ja_ativo(conn):
 
     resultado = repo.preparar_importacao_cadastro(conn, [_linha_cadastro()])
     aplicado = repo.aplicar_importacao_cadastro(conn, resultado["prontas"])
-    assert aplicado == {"empresas_criadas": 0, "vinculos_criados": 0, "vinculos_ja_existentes": 1, "vinculos_encerrados": 0, "distribuicoes_lancadas": 0, "alteracoes_criadas": 0}
+    assert aplicado == {"empresas_criadas": 0, "vinculos_criados": 0, "vinculos_ja_existentes": 1, "vinculos_encerrados": 0, "participacoes_atualizadas": 0, "participacoes_nao_atualizadas": 0, "distribuicoes_lancadas": 0, "alteracoes_criadas": 0}
     assert len(repo.listar_vinculos_empresa(conn, empresa_id)) == 1
 
 
@@ -1272,3 +1272,107 @@ def test_importacao_sem_callback_continua_funcionando(conn):
     }])
 
     assert resultado["vinculos_criados"] == 1
+
+
+def _empresa_com_socio_ativo(conn, percentual=100.0, data_entrada="2023-01-01"):
+    empresa_id = _nova_empresa(conn)
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="Fulano de Tal", cpf="111.111.111-11"))
+    repo.salvar_vinculo(
+        conn,
+        VinculoSocietario(
+            id=None, empresa_id=empresa_id, socio_id=socio_id,
+            percentual_capital=percentual, quantidade_cotas=1000,
+            data_entrada=data_entrada, data_saida=None,
+        ),
+    )
+    alteracao_id = repo.salvar_alteracao(
+        conn,
+        AlteracaoContratual(
+            id=None, empresa_id=empresa_id, numero=1, data="2025-06-01",
+            nome_empresa="ACME LTDA", capital_social=10000, quantidade_cotas=1000, descricao="",
+        ),
+    )
+    return empresa_id, socio_id, alteracao_id
+
+
+def test_importacao_atualiza_participacao_de_socio_ja_vinculado(conn):
+    """O relatório é o quadro vigente: sócio que já existe com outro
+    percentual tem o vínculo fechado e outro aberto com o valor do arquivo,
+    os dois na alteração da importação — preserva o histórico, igual ao que
+    atualizar_cotas_vinculo faz pela aba de Sócios."""
+    empresa_id, socio_id, alteracao_id = _empresa_com_socio_ativo(conn, percentual=84.55)
+
+    resultado = repo.preparar_importacao_cadastro(conn, [_linha_cadastro(percentual_capital=46.94)])
+    aplicado = repo.aplicar_importacao_cadastro(
+        conn, resultado["prontas"], alteracao_id=alteracao_id, atualizar_participacao=True
+    )
+
+    assert aplicado["participacoes_atualizadas"] == 1
+    assert aplicado["vinculos_ja_existentes"] == 0
+
+    vinculos = repo.listar_vinculos_empresa(conn, empresa_id)
+    assert len(vinculos) == 2
+    antigo = next(v for v in vinculos if v.data_saida is not None)
+    novo = next(v for v in vinculos if v.data_saida is None)
+    assert antigo.percentual_capital == 84.55
+    assert antigo.data_saida == "2025-06-01"
+    assert antigo.alteracao_saida_id == alteracao_id
+    assert novo.percentual_capital == 46.94
+    assert novo.data_entrada == "2025-06-01"
+    assert novo.alteracao_entrada_id == alteracao_id
+    # O relatório não traz cotas: as que já estavam são preservadas, senão
+    # cada importação zeraria a participação em cotas do quadro inteiro.
+    assert novo.quantidade_cotas == 1000
+
+
+def test_importacao_nao_mexe_em_participacao_igual(conn):
+    """Sem mudança não há o que registrar — senão toda reimportação encheria
+    o histórico de vínculos abertos e fechados no mesmo dia."""
+    empresa_id, _socio_id, alteracao_id = _empresa_com_socio_ativo(conn, percentual=100.0)
+
+    resultado = repo.preparar_importacao_cadastro(conn, [_linha_cadastro(percentual_capital=100.0)])
+    aplicado = repo.aplicar_importacao_cadastro(
+        conn, resultado["prontas"], alteracao_id=alteracao_id, atualizar_participacao=True
+    )
+
+    assert aplicado["participacoes_atualizadas"] == 0
+    assert aplicado["vinculos_ja_existentes"] == 1
+    assert len(repo.listar_vinculos_empresa(conn, empresa_id)) == 1
+
+
+def test_importacao_sem_a_opcao_continua_ignorando_o_que_ja_existe(conn):
+    """Planilha de cadastro pode trazer só parte do quadro; reescrever
+    participação a partir dela seria perigoso, então o comportamento de
+    sempre é preservado quando a opção não é pedida."""
+    empresa_id, _socio_id, _alteracao_id = _empresa_com_socio_ativo(conn, percentual=84.55)
+
+    resultado = repo.preparar_importacao_cadastro(conn, [_linha_cadastro(percentual_capital=46.94)])
+    aplicado = repo.aplicar_importacao_cadastro(conn, resultado["prontas"])
+
+    assert aplicado["participacoes_atualizadas"] == 0
+    assert aplicado["vinculos_ja_existentes"] == 1
+    (vinculo,) = repo.listar_vinculos_empresa(conn, empresa_id)
+    assert vinculo.percentual_capital == 84.55
+
+
+def test_importacao_avisa_participacao_que_nao_pode_ser_atualizada(conn):
+    """Alteração anterior à entrada do sócio não pode fechar o vínculo dele:
+    a participação fica como estava, e o número volta pra tela dizer isso."""
+    empresa_id, _socio_id, _alt = _empresa_com_socio_ativo(conn, percentual=84.55, data_entrada="2026-01-01")
+    alteracao_antiga = repo.salvar_alteracao(
+        conn,
+        AlteracaoContratual(
+            id=None, empresa_id=empresa_id, numero=2, data="2024-01-01",
+            nome_empresa="ACME LTDA", capital_social=10000, quantidade_cotas=1000, descricao="",
+        ),
+    )
+
+    resultado = repo.preparar_importacao_cadastro(conn, [_linha_cadastro(percentual_capital=46.94)])
+    aplicado = repo.aplicar_importacao_cadastro(
+        conn, resultado["prontas"], alteracao_id=alteracao_antiga, atualizar_participacao=True
+    )
+
+    assert aplicado["participacoes_nao_atualizadas"] == 1
+    assert aplicado["participacoes_atualizadas"] == 0
+    (vinculo,) = repo.listar_vinculos_empresa(conn, empresa_id)
+    assert vinculo.percentual_capital == 84.55

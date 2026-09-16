@@ -1014,6 +1014,7 @@ class ImportacaoCadastroView(QWidget):
             "Importar relatório de sócios",
             alteracao_id=alteracao_id,
             criar_alteracao_por_empresa=alteracao_id is None,
+            atualizar_participacao=True,
         )
 
     def _empresa_cadastrada_unica(self, empresas: list):
@@ -1044,6 +1045,7 @@ class ImportacaoCadastroView(QWidget):
         *,
         alteracao_id: int | None = None,
         criar_alteracao_por_empresa: bool = False,
+        atualizar_participacao: bool = False,
     ) -> None:
         """Casa as linhas contra o cadastro, resolve pendências com a pessoa e
         aplica. É o mesmo caminho para planilha, layout e relatório em PDF — o
@@ -1097,6 +1099,7 @@ class ImportacaoCadastroView(QWidget):
                     ),
                     alteracao_id=alteracao_id,
                     criar_alteracao_por_empresa=criar_alteracao_por_empresa,
+                    atualizar_participacao=atualizar_participacao,
                 )
         except ValueError as exc:
             QMessageBox.warning(self, "Erro ao importar", str(exc))
@@ -1110,6 +1113,13 @@ class ImportacaoCadastroView(QWidget):
             f"{aplicado['vinculos_encerrados']} vínculo(s) com saída registrada · "
             f"{aplicado['distribuicoes_lancadas']} distribuição(ões) lançada(s)."
         )
+        if aplicado.get("participacoes_atualizadas"):
+            resumo += f"\n{aplicado['participacoes_atualizadas']} participação(ões) atualizada(s) pelo relatório."
+        if aplicado.get("participacoes_nao_atualizadas"):
+            resumo += (
+                f"\n⚠ {aplicado['participacoes_nao_atualizadas']} participação(ões) não foram atualizadas: "
+                "a data da alteração é anterior à entrada desses sócios."
+            )
         if aplicado.get("alteracoes_criadas"):
             qtd = aplicado["alteracoes_criadas"]
             resumo += (

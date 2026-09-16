@@ -550,6 +550,42 @@ def encerrar_vinculo_registrando_alteracao(
     encerrar_vinculo(conn, vinculo.id, data_saida, alteracao_id)
 
 
+def _participacao_mudou(vinculo: VinculoSocietario, linha: dict) -> bool:
+    """Quatro casas é a precisão com que a participação é mostrada e guardada;
+    comparar além disso faria toda importação "mudar" tudo por ruído de float."""
+    atual = round(float(vinculo.percentual_capital or 0.0), 4)
+    novo = round(float(linha.get("percentual_capital") or 0.0), 4)
+    return atual != novo
+
+
+def _registrar_nova_participacao(
+    conn: sqlite3.Connection,
+    vinculo: VinculoSocietario,
+    linha: dict,
+    data_mudanca: str,
+    alteracao_id: int | None,
+) -> int:
+    """Mesma mecânica de atualizar_cotas_vinculo — fecha o vínculo vigente e
+    abre outro com a participação nova, os dois na mesma alteração —, só que
+    na alteração que a importação já escolheu, em vez de abrir uma própria."""
+    encerrar_vinculo(conn, vinculo.id, data_mudanca, alteracao_id)
+    return salvar_vinculo(
+        conn,
+        VinculoSocietario(
+            id=None,
+            empresa_id=vinculo.empresa_id,
+            socio_id=vinculo.socio_id,
+            percentual_capital=linha["percentual_capital"],
+            # O relatório de sócios não traz cotas: sem esta retaguarda, cada
+            # importação zeraria a quantidade de cotas de todo o quadro.
+            quantidade_cotas=linha.get("cotas_socio") or vinculo.quantidade_cotas,
+            data_entrada=data_mudanca,
+            data_saida=None,
+            alteracao_entrada_id=alteracao_id,
+        ),
+    )
+
+
 def atualizar_cotas_vinculo(
     conn: sqlite3.Connection,
     vinculo: VinculoSocietario,
@@ -1249,6 +1285,7 @@ def aplicar_importacao_cadastro(
     alteracao_id: int | None = None,
     criar_alteracao_por_empresa: bool = False,
     descricao_alteracao_automatica: str = "Importação de relatório de sócios",
+    atualizar_participacao: bool = False,
 ) -> dict:
     """Aplica linhas já resolvidas (empresa existente em "empresa_existente",
     ou dados pra criar uma nova; "socio_id" já definido, ou None quando a
@@ -1268,11 +1305,20 @@ def aplicar_importacao_cadastro(
     abre — e reaproveita entre linhas da mesma empresa nesta chamada — uma
     alteração automática por empresa tocada, no mesmo espírito de
     _abrir_alteracao_automatica. Nenhum dos dois é passado por quem importa
-    planilha de cadastro comum, que não é movimentação societária."""
+    planilha de cadastro comum, que não é movimentação societária.
+
+    `atualizar_participacao` trata o arquivo como o retrato vigente da
+    sociedade: sócio que já tem vínculo e vem com participação diferente tem o
+    vínculo atual fechado e outro aberto com o valor novo (ver
+    _registrar_nova_participacao), em vez de ser ignorado por "já existir".
+    Também é do relatório de sócios: planilha de cadastro pode trazer só parte
+    do quadro, e reescrever participação a partir dela seria perigoso."""
     empresas_criadas = 0
     vinculos_criados = 0
     vinculos_ja_existentes = 0
     vinculos_encerrados = 0
+    participacoes_atualizadas = 0
+    participacoes_nao_atualizadas = 0
     distribuicoes_lancadas = 0
     cache_empresa_nova: dict[tuple[str, str], int] = {}
     alteracoes_automaticas: dict[int, int] = {}
@@ -1361,6 +1407,28 @@ def aplicar_importacao_cadastro(
             )
             vinculos_criados += 1
             vinculo_ativo = buscar_vinculo(conn, novo_id)
+        elif (
+            atualizar_participacao
+            and not linha.get("data_saida")
+            and _participacao_mudou(vinculo_ativo, linha)
+        ):
+            # A mudança é datada na alteração que está recebendo a importação
+            # — é ela que está registrando a nova divisão do capital —, e não
+            # na data de ingresso do sócio, que é história antiga.
+            alteracao_da_mudanca = alteracao_para(empresa_id, linha["data_entrada"])
+            alteracao = buscar_alteracao(conn, alteracao_da_mudanca) if alteracao_da_mudanca else None
+            data_mudanca = alteracao.data if alteracao else linha["data_entrada"]
+            if data_mudanca < vinculo_ativo.data_entrada:
+                # Fechar um vínculo antes de ele começar não existe: a
+                # alteração é anterior ao ingresso deste sócio, e quem importou
+                # precisa saber que a participação dele ficou como estava.
+                participacoes_nao_atualizadas += 1
+            else:
+                novo_id = _registrar_nova_participacao(
+                    conn, vinculo_ativo, linha, data_mudanca, alteracao_da_mudanca
+                )
+                participacoes_atualizadas += 1
+                vinculo_ativo = buscar_vinculo(conn, novo_id)
         else:
             vinculos_ja_existentes += 1
 
@@ -1387,6 +1455,8 @@ def aplicar_importacao_cadastro(
         "vinculos_criados": vinculos_criados,
         "vinculos_ja_existentes": vinculos_ja_existentes,
         "vinculos_encerrados": vinculos_encerrados,
+        "participacoes_atualizadas": participacoes_atualizadas,
+        "participacoes_nao_atualizadas": participacoes_nao_atualizadas,
         "distribuicoes_lancadas": distribuicoes_lancadas,
         "alteracoes_criadas": len(alteracoes_automaticas),
     }

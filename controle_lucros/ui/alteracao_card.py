@@ -58,6 +58,57 @@ _FILTRO_RELATORIO_SOCIOS = (
 )
 
 
+def _aviso_fora_do_relatorio(conn, empresa_id: int, linhas: list[dict], data_corte: str) -> str:
+    """O relatório é o quadro societário vigente: sócio que continua ativo
+    aqui e não aparece nele é saída que ninguém registrou, e é o que faz a
+    soma das participações passar de 100%.
+
+    Só avisa — dar baixa em alguém por ausência num arquivo seria apagar
+    vínculo com base no que o arquivo NÃO diz, e relatório parcial existe."""
+    do_relatorio = {repo.normalizar_documento(l["socio_cpf"]) for l in linhas if l.get("socio_cpf")}
+    nomes = {s.id: s for s in repo.listar_socios(conn)}
+    ativos = [
+        v
+        for v in repo.listar_vinculos_empresa(conn, empresa_id)
+        if v.data_entrada <= data_corte and (v.data_saida is None or v.data_saida > data_corte)
+    ]
+
+    ausentes = [
+        v for v in ativos
+        if repo.normalizar_documento(nomes[v.socio_id].cpf if v.socio_id in nomes else "") not in do_relatorio
+    ]
+    soma = round(sum(v.percentual_capital or 0.0 for v in ativos), 4)
+
+    if not ausentes and abs(soma - 100.0) < 0.01:
+        return ""
+
+    partes = []
+    if ausentes:
+        lista = ", ".join(nomes[v.socio_id].nome for v in ausentes[:5] if v.socio_id in nomes)
+        if len(ausentes) > 5:
+            lista += f" (e mais {len(ausentes) - 5})"
+        partes.append(
+            f"{len(ausentes)} sócio(s) continuam ativos aqui e não aparecem no relatório: {lista}. "
+            "Se eles saíram, registre a saída — a importação não dá baixa em ninguém por ausência."
+        )
+    if abs(soma - 100.0) >= 0.01:
+        partes.append(f"A soma das participações ficou em {soma}%.")
+    return "\n\n⚠ " + " ".join(partes)
+
+
+def _aviso_nao_atualizadas(aplicado: dict) -> str:
+    """Participação que ficou como estava porque a alteração escolhida é
+    anterior à entrada do sócio. Dizer é obrigatório: o relatório mostra um
+    número e o sistema ficou com outro."""
+    quantidade = aplicado.get("participacoes_nao_atualizadas") or 0
+    if not quantidade:
+        return ""
+    return (
+        f"\n\n⚠ {quantidade} participação(ões) não foram atualizadas: a data desta alteração é "
+        "anterior à entrada desses sócios. Registre a mudança numa alteração com data posterior."
+    )
+
+
 def _empresa_do_relatorio_bate(empresa: Empresa, relatorio_empresa: EmpresaDoRelatorio) -> bool:
     """Mesmo critério de casamento de repo.preparar_importacao_cadastro,
     aplicado a uma empresa já conhecida em vez de buscá-la pelo cadastro
@@ -818,6 +869,7 @@ class AlteracaoCard(QWidget):
                         feitas, total, f"Gravando linha {feitas} de {total}…"
                     ),
                     alteracao_id=alteracao_id,
+                    atualizar_participacao=True,
                 )
         except ValueError as exc:
             QMessageBox.warning(self, "Erro ao importar", str(exc))
@@ -834,9 +886,12 @@ class AlteracaoCard(QWidget):
             else ""
         )
         resumo_txt = (
-            f"{aplicado['vinculos_criados']} vínculo(s) criado(s) · "
-            f"{aplicado['vinculos_ja_existentes']} já existiam (ignorados) · "
-            f"{aplicado['vinculos_encerrados']} vínculo(s) com saída registrada."
+            f"{aplicado['vinculos_criados']} sócio(s) incluído(s) · "
+            f"{aplicado['participacoes_atualizadas']} participação(ões) atualizada(s) · "
+            f"{aplicado['vinculos_encerrados']} saída(s) registrada(s) · "
+            f"{aplicado['vinculos_ja_existentes']} sem mudança."
+            f"{_aviso_nao_atualizadas(aplicado)}"
+            f"{_aviso_fora_do_relatorio(self.conn, self.empresa_id, linhas_importadas, self.alteracao.data)}"
             f"{alteracao_nova}"
         )
         QMessageBox.information(self, "Importação concluída", resumo_txt)

@@ -15,10 +15,13 @@ import datetime as dt
 
 from PySide6.QtWidgets import (
     QButtonGroup,
+    QCheckBox,
     QComboBox,
     QDateEdit,
     QDialog,
     QDialogButtonBox,
+    QDoubleSpinBox,
+    QFormLayout,
     QLabel,
     QLineEdit,
     QRadioButton,
@@ -27,6 +30,7 @@ from PySide6.QtWidgets import (
 
 from .. import repositories as repo
 from ..models import AlteracaoContratual
+from .common import formatar_numero
 
 DESCRICAO_PADRAO = "Importação do relatório de sócios"
 
@@ -73,8 +77,8 @@ class DialogoDestinoAlteracao(QDialog):
         estado = repo.estado_atual_empresa(conn, empresa_id)
         numero = repo.proximo_numero_alteracao(conn, empresa_id)
         self.rotulo_nova = QLabel(
-            f"Vai nascer como a alteração Nº {numero} de {estado['nome']}, herdando o capital "
-            "social e a quantidade de cotas vigentes."
+            f"Vai nascer como a alteração Nº {numero} de {estado['nome']} — o número é o próximo "
+            "da empresa, e a data vem do quadro societário do relatório."
         )
         self.rotulo_nova.setWordWrap(True)
         self.rotulo_nova.setProperty("role", "subtitulo")
@@ -87,6 +91,31 @@ class DialogoDestinoAlteracao(QDialog):
         self.data.setDate(_para_qdate(data_sugerida))
 
         self.descricao = QLineEdit(DESCRICAO_PADRAO)
+
+        # Entrada e saída de sócio não mexem no capital social: o normal é a
+        # alteração herdar o capital e as cotas vigentes, e só quem de fato
+        # mudou o capital naquele ato precisa dizer o valor novo.
+        self.mudou_capital = QCheckBox("Esta alteração também mudou o capital social")
+        self.mudou_capital.toggled.connect(self._ajustar_campos)
+
+        # formatar_numero antes do setValue: o contrário grava o valor com a
+        # pontuação do locale anterior e o campo abre com "R$ 10.000.00".
+        self.capital = QDoubleSpinBox()
+        self.capital.setMaximum(1_000_000_000)
+        self.capital.setDecimals(2)
+        self.capital.setPrefix("R$ ")
+        formatar_numero(self.capital)
+        self.capital.setValue(estado["capital_social"])
+
+        self.cotas = QDoubleSpinBox()
+        self.cotas.setMaximum(1_000_000_000)
+        self.cotas.setDecimals(0)
+        formatar_numero(self.cotas)
+        self.cotas.setValue(estado["quantidade_cotas"])
+
+        self.form_capital = QFormLayout()
+        self.form_capital.addRow("Capital social", self.capital)
+        self.form_capital.addRow("Quantidade de cotas", self.cotas)
 
         self.existentes = QComboBox()
         for a in self._abertas:
@@ -110,6 +139,8 @@ class DialogoDestinoAlteracao(QDialog):
         layout.addWidget(self.data)
         layout.addWidget(QLabel("Descrição"))
         layout.addWidget(self.descricao)
+        layout.addWidget(self.mudou_capital)
+        layout.addLayout(self.form_capital)
         layout.addSpacing(6)
         layout.addWidget(self.opcao_existente)
         layout.addWidget(self.existentes)
@@ -137,8 +168,10 @@ class DialogoDestinoAlteracao(QDialog):
 
     def _ajustar_campos(self, *_args) -> None:
         nova = self.opcao_nova.isChecked()
-        for campo in (self.rotulo_nova, self.data, self.descricao):
+        for campo in (self.rotulo_nova, self.data, self.descricao, self.mudou_capital):
             campo.setEnabled(nova)
+        for campo in (self.capital, self.cotas):
+            campo.setEnabled(nova and self.mudou_capital.isChecked())
         self.existentes.setEnabled(not nova and bool(self._abertas))
 
     def resolver(self) -> int:
@@ -149,6 +182,7 @@ class DialogoDestinoAlteracao(QDialog):
             return self.existentes.currentData()
 
         estado = repo.estado_atual_empresa(self.conn, self.empresa_id)
+        mudou = self.mudou_capital.isChecked()
         return repo.salvar_alteracao(
             self.conn,
             AlteracaoContratual(
@@ -157,8 +191,8 @@ class DialogoDestinoAlteracao(QDialog):
                 numero=repo.proximo_numero_alteracao(self.conn, self.empresa_id),
                 data=self.data.date().toString("yyyy-MM-dd"),
                 nome_empresa=estado["nome"],
-                capital_social=estado["capital_social"],
-                quantidade_cotas=estado["quantidade_cotas"],
+                capital_social=self.capital.value() if mudou else estado["capital_social"],
+                quantidade_cotas=self.cotas.value() if mudou else estado["quantidade_cotas"],
                 descricao=self.descricao.text().strip() or DESCRICAO_PADRAO,
             ),
         )
