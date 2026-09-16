@@ -9,6 +9,15 @@ from .alteracao_card import AlteracaoCard
 from .carrossel import CarrosselDeslizante
 from .common import preencher_combo
 
+# A tela inteira (seletor de empresa + carrossel) vive numa coluna só: ela
+# acompanha a janela, ocupando a maior parte da largura e deixando uma folga
+# proporcional dos dois lados, em vez de esticar campo e tabela até a borda
+# num monitor largo. Proporcional, e não largura fixa, porque é tela de
+# computador: num monitor maior a coluna cresce junto, só parando no teto,
+# onde um formulário mais largo já não ajuda a ler nada.
+PROPORCAO_COLUNA = 8  # 8 de 10 — 80% da largura disponível
+LARGURA_MAXIMA_COLUNA = 1240
+
 
 class AlteracoesView(QWidget):
     def __init__(self, conn, parent=None):
@@ -29,11 +38,19 @@ class AlteracoesView(QWidget):
 
         self.carrossel = CarrosselDeslizante()
 
-        layout = QVBoxLayout(self)
+        coluna = QWidget()
+        coluna.setMaximumWidth(LARGURA_MAXIMA_COLUNA)
+        conteudo = QVBoxLayout(coluna)
+        conteudo.setContentsMargins(0, 0, 0, 0)
+        conteudo.setSpacing(12)
+        conteudo.addLayout(topo)
+        conteudo.addWidget(self.carrossel, 1)
+
+        layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
-        layout.addLayout(topo)
-        layout.addWidget(self.carrossel, 1)
+        layout.addStretch(1)
+        layout.addWidget(coluna, PROPORCAO_COLUNA)
+        layout.addStretch(1)
 
         self.atualizar()
 
