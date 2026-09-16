@@ -231,12 +231,44 @@ def connect(db_path: Path | None = None) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
+    _garantir_wal(conn)
     # WAL deixa quem está lendo a tela seguir lendo enquanto outro grava; o
     # busy_timeout cobre o que o WAL não cobre, que é gravação x gravação.
-    conn.execute("PRAGMA journal_mode = WAL;")
     conn.execute(f"PRAGMA busy_timeout = {ESPERA_DE_BLOQUEIO_MS};")
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn
+
+
+# Espera curta só para a conversão do journal_mode: ela não desiste antes do
+# timeout, então um valor alto aqui viraria o programa parado olhando pra
+# nada antes da tela de login.
+ESPERA_DA_CONVERSAO_MS = 2_000
+
+
+def _garantir_wal(conn: sqlite3.Connection) -> None:
+    """Liga o WAL tolerando o banco estar ocupado por outra conta.
+
+    Trocar o journal_mode reescreve o cabeçalho do arquivo e exige que mais
+    ninguém o tenha aberto. É a única operação daqui que o busy_timeout não
+    salva: com outra conexão aberta ela espera o timeout inteiro e falha
+    assim mesmo. Sem este cuidado, duas pessoas abrindo o programa no mesmo
+    instante faziam a segunda receber "database is locked" antes da tela de
+    login.
+
+    Na prática isso só alcança a primeiríssima abertura do banco: WAL é
+    propriedade gravada no arquivo, então da segunda vez em diante o pragma
+    vira no-op instantâneo — é por isso que o teste precisa de um banco
+    nascido fora do WAL para reproduzir o caso.
+
+    Falhar aqui não impede nada: sem WAL o banco continua correto, só com
+    bloqueio mais grosseiro, e a primeira abertura sem disputa converte."""
+    if str(conn.execute("PRAGMA journal_mode;").fetchone()[0]).lower() == "wal":
+        return
+    conn.execute(f"PRAGMA busy_timeout = {ESPERA_DA_CONVERSAO_MS};")
+    try:
+        conn.execute("PRAGMA journal_mode = WAL;")
+    except sqlite3.OperationalError:
+        pass
 
 
 def migrar_banco_por_usuario(destino: Path | None = None) -> Path | None:

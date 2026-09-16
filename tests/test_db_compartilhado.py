@@ -10,12 +10,15 @@ por gravação concorrente (sem ela, dois usuários ao mesmo tempo viram erro na
 tela) e a migração do banco antigo (sem ela, atualizar parece ter apagado
 tudo).
 """
+import pathlib
 import sqlite3
 
 import pytest
 
 from controle_lucros import db, repositories as repo
 from controle_lucros.models import Empresa
+
+PROJETO = pathlib.Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture()
@@ -161,3 +164,59 @@ def test_migracao_leva_gravacao_que_ainda_estava_no_wal(como_instalado):
     conn = db.connect(destino)
     assert "SO NO WAL LTDA" in [e.nome for e in repo.listar_empresas(conn)]
     conn.close()
+
+
+def test_abrir_o_banco_novo_com_outra_conta_dentro_nao_derruba(tmp_path):
+    """Duas contas do Windows abrindo o programa no mesmo instante, na
+    primeiríssima vez que o banco compartilhado é usado.
+
+    Converter o banco para WAL reescreve o cabeçalho e exige que mais ninguém
+    o tenha aberto — é a única operação que o busy_timeout não salva: ela
+    espera o timeout inteiro e falha assim mesmo. Sem tolerar essa falha, a
+    segunda conta a abrir recebia "database is locked" antes da tela de
+    login.
+
+    O banco precisa nascer FORA do WAL: já convertido, o pragma vira no-op e
+    não disputa nada — que é por que isso só alcança a primeira abertura."""
+    caminho = tmp_path / "compartilhado.db"
+    fora_do_wal = sqlite3.connect(caminho)
+    fora_do_wal.execute("CREATE TABLE marca (id INTEGER PRIMARY KEY)")
+    fora_do_wal.commit()
+    assert fora_do_wal.execute("PRAGMA journal_mode;").fetchone()[0].lower() != "wal"
+
+    # A outra conta, com o programa aberto e uma leitura em curso.
+    outra_conta = sqlite3.connect(caminho)
+    outra_conta.execute("BEGIN")
+    outra_conta.execute("SELECT * FROM marca").fetchall()
+
+    conn = db.connect(caminho)  # não pode levantar: é aqui que quebrava
+
+    # A outra conta termina o que estava fazendo — no programa real as
+    # leituras são curtas, não uma transação segurada a tarde inteira.
+    outra_conta.rollback()
+    outra_conta.close()
+
+    db.init_schema(conn)
+    repo.salvar_empresa(conn, Empresa(None, "91", "ABRIU ASSIM MESMO LTDA", "", 1, 1))
+    assert [e.nome for e in repo.listar_empresas(conn)] == ["ABRIU ASSIM MESMO LTDA"]
+    conn.close()
+    fora_do_wal.close()
+
+
+def test_banco_ja_em_wal_abre_na_hora_mesmo_com_outra_conta_dentro(tmp_path):
+    """O caso de todo dia, depois da primeira vez: o pragma é no-op e não
+    disputa bloqueio nenhum."""
+    caminho = tmp_path / "compartilhado.db"
+    primeira = db.connect(caminho)
+    db.init_schema(primeira)
+
+    lendo = sqlite3.connect(caminho)
+    lendo.execute("BEGIN")
+    lendo.execute("SELECT * FROM empresa").fetchall()
+
+    segunda = db.connect(caminho)
+    assert segunda.execute("PRAGMA journal_mode;").fetchone()[0].lower() == "wal"
+
+    lendo.close()
+    primeira.close()
+    segunda.close()
