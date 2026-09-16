@@ -22,11 +22,13 @@ from PySide6.QtWidgets import (
 from .. import repositories as repo
 from ..planilha import exportar_relatorio_excel
 from .classificacao import CLASSE_PDF, LABEL
+from . import theme
+from ..analise import resumo_sem_pro_labore, sem_pro_labore
 from .common import CartaoEstatistica, formatar_valor_br
 from .graficos import (
     grafico_barras_emprestimos_por_empresa,
     grafico_barras_por_empresa,
-    grafico_pizza_proporcionalidade,
+    grafico_sem_pro_labore,
     nova_chart_view,
 )
 from .relatorio_pdf import exportar_relatorio_pdf
@@ -35,6 +37,17 @@ COLUNAS_RELATORIO = [
     "Empresa", "Ano", "Sócio", "CPF", "% Capital", "% Distribuído", "Valor Distribuído",
     "Pró-labore", "IRRF", "Empréstimo", "Classificação",
 ]
+
+
+def _lista_curta(nomes: list[str], quantos: int = 2) -> str:
+    """Os primeiros nomes e um "e mais N". O cartão tem uma linha para o
+    contexto; despejar dez razões sociais ali esticava a caixa e desalinhava a
+    fileira inteira."""
+    if not nomes:
+        return ""
+    mostrados = ", ".join(nomes[:quantos])
+    resto = len(nomes) - quantos
+    return f"{mostrados} e mais {resto}" if resto > 0 else mostrados
 
 
 class DashboardVisaoGeralView(QWidget):
@@ -75,12 +88,18 @@ class DashboardVisaoGeralView(QWidget):
         topo.addWidget(self.tolerancia)
         topo.addStretch()
 
-        self.cartao_empresas = CartaoEstatistica("Empresas no período")
-        self.cartao_sem_distribuicao = CartaoEstatistica("Sem distribuição no período")
-        self.cartao_total = CartaoEstatistica("Total distribuído")
-        self.cartao_proporcional = CartaoEstatistica("Distribuído proporcionalmente")
-        self.cartao_desproporcional = CartaoEstatistica("Distribuído desproporcionalmente")
-        self.cartao_emprestimos = CartaoEstatistica("Total emprestado a sócios")
+        self.cartao_empresas = CartaoEstatistica(
+            "Empresas", descricao="Empresas com movimento no período filtrado acima")
+        self.cartao_sem_distribuicao = CartaoEstatistica(
+            "Sem distribuição", descricao="Empresas sem nenhuma distribuição no período")
+        self.cartao_total = CartaoEstatistica(
+            "Total distribuído", descricao="Soma de tudo o que foi distribuído no período")
+        self.cartao_proporcional = CartaoEstatistica(
+            "Proporcional", descricao="Distribuído na proporção do capital de cada sócio")
+        self.cartao_desproporcional = CartaoEstatistica(
+            "Desproporcional", descricao="Distribuído fora da proporção do capital")
+        self.cartao_emprestimos = CartaoEstatistica(
+            "Emprestado a sócios", descricao="Total emprestado a sócios no período")
 
         cartoes = QHBoxLayout()
         cartoes.setSpacing(12)
@@ -93,6 +112,12 @@ class DashboardVisaoGeralView(QWidget):
             self.cartao_emprestimos,
         ):
             cartoes.addWidget(cartao, 1)
+
+        # A frase que resume o achado do período. Fica entre os cartões e os
+        # gráficos porque é a única linha da tela que pede uma providência —
+        # os números acima descrevem, esta aponta.
+        self.aviso_pro_labore = QLabel("")
+        self.aviso_pro_labore.setWordWrap(True)
 
         self.grafico_pizza = nova_chart_view()
         self.grafico_barras = nova_chart_view()
@@ -119,6 +144,7 @@ class DashboardVisaoGeralView(QWidget):
         layout.setSpacing(14)
         layout.addLayout(topo)
         layout.addLayout(cartoes)
+        layout.addWidget(self.aviso_pro_labore)
         layout.addLayout(graficos, 1)
         layout.addLayout(botoes)
 
@@ -152,21 +178,31 @@ class DashboardVisaoGeralView(QWidget):
         self.cartao_empresas.definir(str(r["total_empresas"]))
 
         sem_dist = r["empresas_sem_distribuicao"]
-        contexto_sem_dist = ", ".join(sem_dist) if 0 < len(sem_dist) <= 4 else ""
-        self.cartao_sem_distribuicao.definir(str(len(sem_dist)), contexto_sem_dist)
+        self.cartao_sem_distribuicao.definir(
+            str(len(sem_dist)),
+            _lista_curta(sem_dist),
+            # Empresa sem distribuição no período é o que se vai procurar, não
+            # um número neutro: em vermelho ela se acha de longe.
+            cor=theme.SEAL_RED() if sem_dist else None,
+        )
 
         self.cartao_total.definir(f"R$ {formatar_valor_br(total)}")
 
+        # Proporcional e desproporcional são o julgamento que esta tela existe
+        # para dar. Em preto os dois são só dois números; com a cor do selo,
+        # verde e vermelho, o olho separa antes de ler.
         pct_proporcional = (100 * r["total_proporcional"] / total) if total else 0
         self.cartao_proporcional.definir(
             f"R$ {formatar_valor_br(r['total_proporcional'])}",
             f"{formatar_valor_br(pct_proporcional, 1)}% do total",
+            cor=theme.SEAL_GREEN() if r["total_proporcional"] else None,
         )
 
         pct_desproporcional = (100 * r["total_desproporcional"] / total) if total else 0
         self.cartao_desproporcional.definir(
             f"R$ {formatar_valor_br(r['total_desproporcional'])}",
             f"{formatar_valor_br(pct_desproporcional, 1)}% do total",
+            cor=theme.SEAL_RED() if r["total_desproporcional"] else None,
         )
 
         pct_emprestimo = (100 * r["total_emprestimos"] / total) if total else 0
@@ -175,7 +211,15 @@ class DashboardVisaoGeralView(QWidget):
 
     def _atualizar_graficos(self) -> None:
         r = self._resultado
-        grafico_pizza_proporcionalidade(self.grafico_pizza, r["total_proporcional"], r["total_desproporcional"])
+        # Quem recebeu lucro sem pró-labore, em vez da pizza proporcional x
+        # desproporcional — que só repetia em desenho os dois cartões acima.
+        self._sem_pro_labore = sem_pro_labore(r["linhas"])
+        grafico_sem_pro_labore(self.grafico_pizza, self._sem_pro_labore)
+        self.aviso_pro_labore.setText(resumo_sem_pro_labore(self._sem_pro_labore))
+        self.aviso_pro_labore.setStyleSheet(
+            f"color: {theme.SAIU_FG() if self._sem_pro_labore else theme.INK_MUTED()};"
+            " font-size: 12px; font-weight: 600;"
+        )
         grafico_barras_por_empresa(self.grafico_barras, r["resumo_empresas"])
         grafico_barras_emprestimos_por_empresa(self.grafico_emprestimos, r["resumo_empresas"])
 

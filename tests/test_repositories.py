@@ -3,6 +3,7 @@ import sqlite3
 import pytest
 
 from controle_lucros import db, repositories as repo
+from controle_lucros.layout_importacao import LayoutImportacao
 from controle_lucros.models import AlteracaoContratual, Empresa, Movimentacao, Socio, VinculoSocietario
 
 
@@ -1055,3 +1056,153 @@ def test_panorama_nao_trava_com_vinculo_de_data_entrada_igual_saida(conn):
     linhas = repo.panorama_distribuicao_anual(conn, empresa_id, 2026)  # nao pode travar
     assert len(linhas) == 1
     assert linhas[0]["reentrou_no_ano"] is False
+
+
+# ----------------------------------------------------- layouts de importação
+def _layout(nome="Sistema antigo", **colunas):
+    linha_inicial = colunas.pop("linha_inicial", 2)
+    return LayoutImportacao(nome, colunas or {"empresa_nome": "A", "socio_nome": "B"}, linha_inicial)
+
+
+def test_layout_salvo_volta_igual(conn):
+    layout_id = repo.salvar_layout_importacao(
+        conn, _layout(empresa_nome="c", socio_nome="E", data_saida="J", linha_inicial=3)
+    )
+
+    (salvo,) = repo.listar_layouts_importacao(conn)
+    assert salvo.id == layout_id
+    assert salvo.nome == "Sistema antigo"
+    assert salvo.linha_inicial == 3
+    # A letra é gravada padronizada: "c" e "C" não podem virar layouts diferentes.
+    assert salvo.colunas == {"empresa_nome": "C", "socio_nome": "E", "data_saida": "J"}
+
+
+def test_layout_invalido_nao_e_gravado(conn):
+    with pytest.raises(ValueError):
+        repo.salvar_layout_importacao(conn, LayoutImportacao("Sem empresa", {"socio_nome": "A"}))
+    assert repo.listar_layouts_importacao(conn) == []
+
+
+def test_nome_repetido_e_recusado_mesmo_com_outra_caixa(conn):
+    repo.salvar_layout_importacao(conn, _layout("Domínio"))
+    with pytest.raises(ValueError, match="Já existe"):
+        repo.salvar_layout_importacao(conn, _layout("domínio"))
+
+
+def test_editar_layout_nao_conflita_com_ele_mesmo(conn):
+    layout_id = repo.salvar_layout_importacao(conn, _layout("Domínio"))
+    layout = repo.listar_layouts_importacao(conn)[0]
+    layout.colunas["cnpj"] = "F"
+
+    repo.salvar_layout_importacao(conn, layout)
+
+    (salvo,) = repo.listar_layouts_importacao(conn)
+    assert salvo.id == layout_id
+    assert salvo.colunas["cnpj"] == "F"
+
+
+def test_excluir_layout(conn):
+    layout_id = repo.salvar_layout_importacao(conn, _layout())
+    repo.excluir_layout_importacao(conn, layout_id)
+    assert repo.listar_layouts_importacao(conn) == []
+    # Excluir de novo não explode — a tela pode estar com a lista velha.
+    repo.excluir_layout_importacao(conn, layout_id)
+
+
+def test_mexer_em_layout_fica_no_log(conn):
+    layout_id = repo.salvar_layout_importacao(conn, _layout())
+    repo.excluir_layout_importacao(conn, layout_id)
+
+    acoes = [
+        (l["acao"], l["entidade"])
+        for l in conn.execute("SELECT acao, entidade FROM log_atividade").fetchall()
+    ]
+    assert ("criar", "layout_importacao") in acoes
+    assert ("excluir", "layout_importacao") in acoes
+
+
+def test_reimportar_nao_duplica_vinculo_ja_encerrado(conn):
+    """Reimportar é o uso normal: o relatório do mês seguinte traz o histórico
+    inteiro de novo. Sem reconhecer o vínculo encerrado, cada importação
+    acrescentaria uma cópia de todo sócio que já saiu."""
+    empresa_id = _nova_empresa(conn)
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="FULANO", cpf="111.111.111-11"))
+    linha = {
+        "numero_chamada": "001", "empresa_nome": "ACME LTDA", "cnpj": "00000000000100",
+        "capital_social": 10000, "quantidade_cotas": 1000,
+        "socio_nome": "FULANO", "socio_cpf": "111.111.111-11", "tipo_pessoa": "fisica",
+        "percentual_capital": 50.0, "cotas_socio": 500,
+        "data_entrada": "2020-01-01", "data_saida": "2023-12-31",
+        "socio_id": socio_id, "empresa_existente": repo.buscar_empresa(conn, empresa_id),
+    }
+
+    primeira = repo.aplicar_importacao_cadastro(conn, [dict(linha)])
+    segunda = repo.aplicar_importacao_cadastro(conn, [dict(linha)])
+
+    assert primeira["vinculos_criados"] == 1
+    assert segunda["vinculos_criados"] == 0
+    assert segunda["vinculos_ja_existentes"] == 1
+    vinculos = repo.listar_vinculos_empresa(conn, empresa_id)
+    assert len(vinculos) == 1
+    assert vinculos[0].data_saida == "2023-12-31"
+
+
+def test_mesmo_socio_com_duas_passagens_mantem_as_duas(conn):
+    """Quem saiu e voltou tem duas passagens de verdade: a data de entrada é o
+    que as distingue, e nenhuma pode engolir a outra."""
+    empresa_id = _nova_empresa(conn)
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="FULANO", cpf="111.111.111-11"))
+    base = {
+        "numero_chamada": "001", "empresa_nome": "ACME LTDA", "cnpj": "00000000000100",
+        "capital_social": 10000, "quantidade_cotas": 1000,
+        "socio_nome": "FULANO", "socio_cpf": "111.111.111-11", "tipo_pessoa": "fisica",
+        "percentual_capital": 50.0, "cotas_socio": 500,
+        "socio_id": socio_id, "empresa_existente": repo.buscar_empresa(conn, empresa_id),
+    }
+    linhas = [
+        {**base, "data_entrada": "2015-01-01", "data_saida": "2018-06-30"},
+        {**base, "data_entrada": "2020-01-01", "data_saida": "2023-12-31"},
+    ]
+
+    repo.aplicar_importacao_cadastro(conn, [dict(l) for l in linhas])
+    repo.aplicar_importacao_cadastro(conn, [dict(l) for l in linhas])
+
+    vinculos = repo.listar_vinculos_empresa(conn, empresa_id)
+    assert sorted(v.data_entrada for v in vinculos) == ["2015-01-01", "2020-01-01"]
+
+
+def test_importacao_avisa_o_progresso_linha_a_linha(conn):
+    """A tela precisa da contagem para a barra andar; sem ela, uma importação
+    de cento e sessenta empresas fica segundos parada sem dizer nada."""
+    empresa_id = _nova_empresa(conn)
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="FULANO", cpf="111.111.111-11"))
+    linha = {
+        "numero_chamada": "001", "empresa_nome": "ACME LTDA", "cnpj": "00000000000100",
+        "capital_social": 10000, "quantidade_cotas": 1000,
+        "socio_nome": "FULANO", "socio_cpf": "111.111.111-11", "tipo_pessoa": "fisica",
+        "percentual_capital": 50.0, "cotas_socio": 500, "data_entrada": "2020-01-01",
+        "socio_id": socio_id, "empresa_existente": repo.buscar_empresa(conn, empresa_id),
+    }
+    passos = []
+
+    repo.aplicar_importacao_cadastro(
+        conn, [dict(linha), dict(linha)], progresso=lambda feitas, total: passos.append((feitas, total))
+    )
+
+    assert passos == [(1, 2), (2, 2)]
+
+
+def test_importacao_sem_callback_continua_funcionando(conn):
+    """O repositório não pode depender de haver tela: os testes e a importação
+    em lote chamam sem callback nenhum."""
+    empresa_id = _nova_empresa(conn)
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="FULANO", cpf="111.111.111-11"))
+    resultado = repo.aplicar_importacao_cadastro(conn, [{
+        "numero_chamada": "001", "empresa_nome": "ACME LTDA", "cnpj": "00000000000100",
+        "capital_social": 10000, "quantidade_cotas": 1000,
+        "socio_nome": "FULANO", "socio_cpf": "111.111.111-11", "tipo_pessoa": "fisica",
+        "percentual_capital": 50.0, "cotas_socio": 500, "data_entrada": "2020-01-01",
+        "socio_id": socio_id, "empresa_existente": repo.buscar_empresa(conn, empresa_id),
+    }])
+
+    assert resultado["vinculos_criados"] == 1

@@ -47,7 +47,7 @@ class Sidebar(QFrame):
 
         layout.addWidget(self._espacador())
         layout.addWidget(self._secao("SISTEMA"))
-        layout.addWidget(self._item("Importação em massa", "sistema.importar", sub=True))
+        layout.addWidget(self._item("Importação e exportação", "sistema.importar", sub=True))
         layout.addWidget(self._item("Log de atividades", "sistema.log", sub=True))
         self._botao_usuarios = self._item("Usuários", "sistema.usuarios", sub=True)
         layout.addWidget(self._botao_usuarios)

@@ -24,6 +24,8 @@ from PySide6.QtWidgets import (
 )
 
 from .. import backup
+from .common import TabelaLista
+from .ocupado import ocupado
 
 COLUNAS = ["Arquivo", "Criado em", "Tamanho"]
 
@@ -75,13 +77,12 @@ class BackupView(QWidget):
         subtitulo_lista = QLabel("Backups existentes")
         subtitulo_lista.setProperty("role", "secao")
 
-        self.tabela = QTableWidget(0, len(COLUNAS))
+        self.tabela = TabelaLista(0, len(COLUNAS), coluna_flexivel=0,
+                                  mensagem_vazia="Nenhum backup gerado ainda.")
         self.tabela.setHorizontalHeaderLabels(COLUNAS)
-        self.tabela.setAlternatingRowColors(True)
         self.tabela.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tabela.setSelectionMode(QAbstractItemView.SingleSelection)
         self.tabela.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.tabela.verticalHeader().setVisible(False)
         self.tabela.itemSelectionChanged.connect(self._atualizar_disponibilidade)
 
         self.btn_abrir_pasta = QPushButton("Abrir pasta")
@@ -126,7 +127,7 @@ class BackupView(QWidget):
             ]
             for col, valor in enumerate(valores):
                 self.tabela.setItem(row, col, QTableWidgetItem(valor))
-        self.tabela.resizeColumnsToContents()
+        self.tabela.ajustar_colunas()
         self._atualizar_disponibilidade()
 
     def _atualizar_disponibilidade(self) -> None:
@@ -146,7 +147,8 @@ class BackupView(QWidget):
 
     def _fazer_backup_agora(self) -> None:
         try:
-            caminho = backup.criar_backup(self.conn)
+            with ocupado(self, "Backup", "Copiando o banco de dados…"):
+                caminho = backup.criar_backup(self.conn)
         except OSError as exc:
             QMessageBox.warning(self, "Erro ao fazer backup", str(exc))
             return

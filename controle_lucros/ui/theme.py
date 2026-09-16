@@ -11,8 +11,26 @@ from PySide6.QtWidgets import QApplication
 
 from .. import preferencias
 
-FONT_DISPLAY = 'Constantia, Cambria, Georgia, "Liberation Serif", serif'
-FONT_BODY = '"Segoe UI Variable Text", "Segoe UI", "Segoe UI Variable", "Noto Sans", Inter, sans-serif'
+# Uma família só para tudo, humanista e de traço arredondado. A versão
+# anterior usava serifa (Constantia/Cambria) nos títulos, o que dava ao
+# programa um ar de documento antigo; o corpo já era sem serifa, e a mistura
+# das duas era o que mais pesava.
+#
+# A ordem é deliberada: no Windows, que é onde o programa roda instalado, a
+# Segoe UI Variable/Segoe UI é a fonte do próprio sistema — a mais comum que
+# existe por lá, e a que faz o programa parecer parte do ambiente em vez de
+# um intruso. As seguintes cobrem Linux e macOS sem depender de nada
+# empacotado junto.
+_FAMILIA = (
+    '"Segoe UI Variable Text", "Segoe UI", Inter, "SF Pro Text", '
+    '"Noto Sans", Cantarell, "DejaVu Sans", sans-serif'
+)
+
+FONT_DISPLAY = (
+    '"Segoe UI Variable Display", "Segoe UI Semibold", "Segoe UI", Inter, '
+    '"SF Pro Display", "Noto Sans", Cantarell, sans-serif'
+)
+FONT_BODY = _FAMILIA
 FONT_MONO = 'Consolas, "Cascadia Mono", "Liberation Mono", "DejaVu Sans Mono", monospace'
 
 PALETA_CLARA = {
@@ -157,12 +175,20 @@ def build_stylesheet() -> str:
     return f"""
     * {{
         font-family: {FONT_BODY};
-        font-size: 13px;
+        font-size: 14px;
         color: {p["INK"]};
     }}
 
     QMainWindow, QWidget {{
         background: {p["PAPER"]};
+    }}
+
+    /* Seletor de tipo em QSS pega as subclasses também, então a regra acima
+       pinta cada QLabel com o fundo da página — e dentro de um cartão (que é
+       mais claro) cada rótulo vira uma tarja visível. Texto não tem fundo
+       próprio: acompanha o que estiver atrás dele. */
+    QLabel {{
+        background: transparent;
     }}
 
     QToolTip {{
@@ -282,24 +308,34 @@ def build_stylesheet() -> str:
         font-family: {FONT_MONO};
     }}
 
+    /* Botão secundário: contorno fino e discreto em repouso. O contorno
+       grosso em tinta cheia que havia antes fazia toda a barra de ações
+       parecer uma fileira de botões primários competindo entre si. */
     QPushButton {{
         background: {p["PAPER_RAISED"]};
-        border: 1px solid {p["INK"]};
-        border-radius: 4px;
-        padding: 7px 16px;
+        border: 1px solid {p["HAIRLINE"]};
+        border-radius: 6px;
+        padding: 8px 18px;
         font-weight: 500;
+        min-height: 20px;
         color: {p["INK"]};
     }}
 
     QPushButton:hover {{
-        background: {p["INK"]};
-        color: {p["PAPER_RAISED"]};
+        background: {p["ALT_ROW"]};
+        border-color: {p["INK_MUTED"]};
     }}
 
     QPushButton:pressed {{
-        background: {p["BRASS_DARK"]};
-        border-color: {p["BRASS_DARK"]};
-        color: {p["PAPER_RAISED"]};
+        background: {p["HAIRLINE"]};
+        border-color: {p["INK_MUTED"]};
+    }}
+
+    /* Foco visível: quem usa o programa pelo teclado precisa enxergar onde
+       está, e o retângulo pontilhado padrão do Qt some no fundo claro. */
+    QPushButton:focus {{
+        border-color: {p["BRASS"]};
+        outline: none;
     }}
 
     QPushButton:disabled {{
@@ -312,11 +348,22 @@ def build_stylesheet() -> str:
         background: {p["INK"]};
         color: {p["PAPER_RAISED"]};
         border-color: {p["INK"]};
+        font-weight: 600;
     }}
 
     QPushButton[role="primario"]:hover {{
         background: {p["BRASS_DARK"]};
         border-color: {p["BRASS_DARK"]};
+    }}
+
+    QPushButton[role="primario"]:pressed {{
+        background: {p["BRASS"]};
+        border-color: {p["BRASS"]};
+        color: {p["INK"]};
+    }}
+
+    QPushButton[role="primario"]:focus {{
+        border-color: {p["BRASS"]};
     }}
 
     QPushButton[role="primario"]:disabled {{
@@ -332,6 +379,13 @@ def build_stylesheet() -> str:
 
     QPushButton[role="perigo"]:hover {{
         background: {p["SEAL_RED"]};
+        border-color: {p["SEAL_RED"]};
+        color: {p["PAPER_RAISED"]};
+    }}
+
+    QPushButton[role="perigo"]:pressed {{
+        background: {p["SEAL_RED"]};
+        border-color: {p["SEAL_RED"]};
         color: {p["PAPER_RAISED"]};
     }}
 
@@ -380,7 +434,13 @@ def build_stylesheet() -> str:
         padding: 0;
     }}
 
+    /* Um ponto menor que o resto: a tabela é grade densa, e o corpo a 14px
+       empurrava oito colunas para fora do painel — aí a barra de rolagem
+       horizontal voltava, que é justamente o que a gente tirou. Em formulário
+       e rótulo o 14 fica; aqui a leitura é de varredura, não de leitura
+       corrida. */
     QTableWidget {{
+        font-size: 13px;
         background: {p["PAPER_RAISED"]};
         border: 1px solid {p["HAIRLINE"]};
         border-radius: 6px;
@@ -389,20 +449,42 @@ def build_stylesheet() -> str:
     }}
 
     QHeaderView::section {{
+        font-size: 13px;
         background: {p["INK"]};
         color: {p["PAPER_RAISED"]};
-        padding: 8px;
+        padding: 9px 8px;
         border: none;
         font-weight: 600;
     }}
 
+    /* O fio embaixo de cada célula substitui a grade quadriculada (ver
+       common.TabelaLista): separa um registro do outro sem desenhar trilhos
+       verticais que descem até o último e param no ar. */
     QTableWidget::item {{
-        padding: 4px;
+        padding: 6px 8px;
+        border: none;
+        border-bottom: 1px solid {p["HAIRLINE"]};
     }}
 
     QTableWidget::item:selected {{
         background: {p["BRASS"]};
         color: {p["PAPER_RAISED"]};
+    }}
+
+    /* Barra de progresso na paleta do programa: o azul padrão do Qt é a única
+       coisa na tela que não pertence ao conjunto. */
+    QProgressBar {{
+        background: {p["PAPER"]};
+        border: 1px solid {p["HAIRLINE"]};
+        border-radius: 5px;
+        text-align: center;
+        font-size: 11px;
+        color: {p["INK_MUTED"]};
+    }}
+
+    QProgressBar::chunk {{
+        background: {p["BRASS"]};
+        border-radius: 4px;
     }}
 
     QSplitter::handle {{

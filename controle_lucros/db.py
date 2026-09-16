@@ -167,6 +167,19 @@ CREATE TABLE IF NOT EXISTS usuario (
     criado_em TEXT NOT NULL
 );
 
+-- Como ler uma planilha de origem: cada campo do cadastro e a letra da coluna
+-- em que ele está naquele arquivo. Guardado como JSON porque é um conjunto de
+-- pares campo->letra que muda com os campos do sistema; uma coluna por campo
+-- viraria ALTER TABLE a cada campo novo, e nada aqui é consultado por campo.
+CREATE TABLE IF NOT EXISTS layout_importacao (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome TEXT NOT NULL UNIQUE,
+    linha_inicial INTEGER NOT NULL DEFAULT 2,
+    colunas_json TEXT NOT NULL,
+    criado_em TEXT NOT NULL,
+    atualizado_em TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS log_atividade (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     usuario_id INTEGER REFERENCES usuario(id) ON DELETE SET NULL,

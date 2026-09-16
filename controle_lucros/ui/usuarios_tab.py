@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 
 from .. import repositories as repo
 from .. import sessao
+from .common import TabelaLista
 from . import theme
 
 
@@ -134,13 +135,12 @@ class UsuariosTab(QWidget):
         self._usuarios = []
         self._usuario_atual_id: int | None = None
 
-        self.tabela = QTableWidget(0, len(self.COLUNAS))
+        self.tabela = TabelaLista(0, len(self.COLUNAS), coluna_flexivel=0,
+                                  mensagem_vazia="Nenhum usuário cadastrado.")
         self.tabela.setHorizontalHeaderLabels(self.COLUNAS)
-        self.tabela.setAlternatingRowColors(True)
         self.tabela.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tabela.setSelectionMode(QAbstractItemView.SingleSelection)
         self.tabela.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.tabela.verticalHeader().setVisible(False)
         self.tabela.itemSelectionChanged.connect(self._ao_selecionar)
 
         self.nome = QLineEdit()
@@ -207,7 +207,7 @@ class UsuariosTab(QWidget):
             valores = [u.nome, u.login, "Administrador" if u.admin else "Usuário", "Ativo" if u.ativo else "Desativado"]
             for col, valor in enumerate(valores):
                 self.tabela.setItem(row, col, QTableWidgetItem(valor))
-        self.tabela.resizeColumnsToContents()
+        self.tabela.ajustar_colunas()
 
     def _ao_selecionar(self) -> None:
         linhas = self.tabela.selectionModel().selectedRows()

@@ -59,6 +59,7 @@ from ..informe_rendimentos import (
 from ..models import InformeRendimento, Socio
 from .icones import icone_app
 from .informe_pdf import gerar_pdfs
+from .ocupado import Progresso
 
 # O modelo do comprovante vale a partir do ano-calendário de 1996 (é o ano em
 # que os lucros passaram a ser isentos — a linha 5 do Quadro 4 diz isso).
@@ -590,7 +591,14 @@ class InformeRendimentosDialog(QDialog):
             for e in empresas
         ]
         try:
-            gerados = gerar_pdfs(paginas, Path(pasta))
+            with Progresso(self, "Emitindo informes", len(paginas)) as barra:
+                gerados = gerar_pdfs(
+                    paginas,
+                    Path(pasta),
+                    progresso=lambda feitos, total: barra.passo(
+                        feitos, total, f"Gerando o informe {feitos} de {total}…"
+                    ),
+                )
         except OSError as exc:
             QMessageBox.warning(self, "Erro ao emitir", f"Não foi possível gravar os PDFs: {exc}")
             return

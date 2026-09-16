@@ -9,14 +9,12 @@ from PySide6.QtCharts import (
     QChart,
     QChartView,
     QHorizontalBarSeries,
-    QPieSeries,
     QValueAxis,
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont, QPainter
 
-from .classificacao import LABEL, cor_classificacao
-from .theme import BRASS, HAIRLINE, INK, INK_MUTED, PAPER_RAISED, SAIU_FG, SEAL_GREEN
+from .theme import BRASS, HAIRLINE, INK, INK_MUTED, PAPER_RAISED, SAIU_FG
 
 FONTE_TITULO = QFont("Constantia", 12, QFont.Bold)
 FONTE_LEGENDA = QFont("Segoe UI", 9)
@@ -47,37 +45,6 @@ def _novo_chart(titulo: str) -> QChart:
     chart.legend().setFont(FONTE_LEGENDA)
     chart.legend().setLabelColor(QColor(INK()))
     return chart
-
-
-def grafico_pizza_proporcionalidade(view: QChartView, proporcional: float, desproporcional: float) -> None:
-    chart = _novo_chart("Proporcional vs desproporcional")
-
-    if proporcional <= 0 and desproporcional <= 0:
-        chart.setTitle("Proporcional vs desproporcional — sem dados no período")
-        view.setChart(chart)
-        return
-
-    serie = QPieSeries()
-    serie.setHoleSize(0.45)
-    if proporcional > 0:
-        serie.append("Proporcional", proporcional)
-    if desproporcional > 0:
-        serie.append("Desproporcional", desproporcional)
-
-    for fatia in serie.slices():
-        cor = SEAL_GREEN() if fatia.label() == "Proporcional" else SAIU_FG()
-        fatia.setBrush(QColor(cor))
-        fatia.setPen(QColor(PAPER_RAISED()))
-        fatia.setBorderWidth(2)
-        fatia.setLabelVisible(False)
-        fatia.setLabelColor(QColor(INK()))
-        fatia.setLabelFont(FONTE_EIXO)
-        fatia.setLabel(f"{fatia.label()} — {fatia.percentage() * 100:.0f}%")
-
-    chart.addSeries(serie)
-    chart.legend().setVisible(True)
-    chart.legend().setAlignment(Qt.AlignBottom)
-    view.setChart(chart)
 
 
 def grafico_barras_por_empresa(view: QChartView, resumo_empresas: list[dict], limite: int = 8) -> None:
@@ -111,6 +78,9 @@ def grafico_barras_por_empresa(view: QChartView, resumo_empresas: list[dict], li
     eixo_valores = QValueAxis()
     eixo_valores.setLabelsFont(FONTE_EIXO)
     eixo_valores.setLabelFormat("R$ %.0f")
+    # Menos marcas no eixo: com o padrão, os rótulos de reais se encostam e
+    # viram uma tira ilegível na base do gráfico.
+    eixo_valores.setTickCount(4)
     _estilizar_eixo(eixo_valores)
     chart.addAxis(eixo_valores, Qt.AlignBottom)
     serie.attachAxis(eixo_valores)
@@ -150,45 +120,14 @@ def grafico_barras_emprestimos_por_empresa(view: QChartView, resumo_empresas: li
     eixo_valores = QValueAxis()
     eixo_valores.setLabelsFont(FONTE_EIXO)
     eixo_valores.setLabelFormat("R$ %.0f")
+    # Menos marcas no eixo: com o padrão, os rótulos de reais se encostam e
+    # viram uma tira ilegível na base do gráfico.
+    eixo_valores.setTickCount(4)
     _estilizar_eixo(eixo_valores)
     chart.addAxis(eixo_valores, Qt.AlignBottom)
     serie.attachAxis(eixo_valores)
 
     chart.legend().setVisible(False)
-    view.setChart(chart)
-
-
-def grafico_pizza_classificacoes(view: QChartView, linhas: list[dict]) -> None:
-    chart = _novo_chart("Sócios por classificação")
-
-    if not linhas:
-        chart.setTitle("Sócios por classificação — sem dados no período")
-        view.setChart(chart)
-        return
-
-    contagem: dict[str, int] = {}
-    for linha in linhas:
-        contagem[linha["classificacao"]] = contagem.get(linha["classificacao"], 0) + 1
-
-    serie = QPieSeries()
-    serie.setHoleSize(0.45)
-    for chave in ("proporcional", "desproporcional", "socio_sem_distribuicao", "empresa_sem_distribuicao"):
-        if contagem.get(chave):
-            serie.append(LABEL[chave], contagem[chave])
-
-    for fatia in serie.slices():
-        chave = next(k for k, v in LABEL.items() if v == fatia.label())
-        fatia.setBrush(QColor(cor_classificacao(chave)))
-        fatia.setPen(QColor(PAPER_RAISED()))
-        fatia.setBorderWidth(2)
-        fatia.setLabelVisible(False)
-        fatia.setLabelColor(QColor(INK()))
-        fatia.setLabelFont(FONTE_EIXO)
-        fatia.setLabel(f"{fatia.label()} — {fatia.value():.0f}")
-
-    chart.addSeries(serie)
-    chart.legend().setVisible(True)
-    chart.legend().setAlignment(Qt.AlignBottom)
     view.setChart(chart)
 
 
@@ -235,3 +174,139 @@ def grafico_capital_vs_distribuido(view: QChartView, linhas: list[dict]) -> None
     chart.legend().setVisible(True)
     chart.legend().setAlignment(Qt.AlignBottom)
     view.setChart(chart)
+
+
+def grafico_sem_pro_labore(view: QChartView, itens: list, limite: int = 8) -> None:
+    """Quem recebeu lucro sem pró-labore, do maior para o menor.
+
+    Entrou no lugar da pizza de proporcional × desproporcional, que só
+    repetia em desenho o que os dois cartões acima já diziam em número. Este
+    aponta nome e valor — dá para pegar o telefone depois de olhar."""
+    chart = _novo_chart("Distribuição sem pró-labore")
+
+    ordenado = [i for i in itens if i.valor_distribuido > 0][:limite]
+    if not ordenado:
+        chart.setTitle("Distribuição sem pró-labore — nenhum caso no período")
+        view.setChart(chart)
+        return
+
+    conjunto = QBarSet("Lucro recebido")
+    conjunto.setColor(QColor(SAIU_FG()))
+    rotulos = []
+    for item in ordenado:
+        conjunto.append(item.valor_distribuido)
+        anos = f" · {item.anos_sem_pro_labore} anos" if item.anos_sem_pro_labore > 1 else ""
+        # Uma palavra de cada lado: o eixo é estreito, e "ANDRE · ENDOGASTRO"
+        # identifica o caso melhor do que "ANDRE FRANZOTTI …" cortado.
+        rotulos.append(
+            f"{_primeiro_nome(item.socio_nome, 1)} · {_primeiro_nome(item.empresa_nome, 1)}{anos}"
+        )
+    categorias = _categorias_unicas(rotulos)
+
+    serie = QHorizontalBarSeries()
+    serie.append(conjunto)
+    chart.addSeries(serie)
+
+    eixo_categorias = QBarCategoryAxis()
+    eixo_categorias.append(categorias)
+    eixo_categorias.setLabelsFont(FONTE_EIXO)
+    _estilizar_eixo(eixo_categorias)
+    chart.addAxis(eixo_categorias, Qt.AlignLeft)
+    serie.attachAxis(eixo_categorias)
+
+    eixo_valores = QValueAxis()
+    eixo_valores.setLabelsFont(FONTE_EIXO)
+    eixo_valores.setLabelFormat("R$ %.0f")
+    # Menos marcas no eixo: com o padrão, os rótulos de reais se encostam e
+    # viram uma tira ilegível na base do gráfico.
+    eixo_valores.setTickCount(4)
+    _estilizar_eixo(eixo_valores)
+    chart.addAxis(eixo_valores, Qt.AlignBottom)
+    serie.attachAxis(eixo_valores)
+
+    chart.legend().setVisible(False)
+    view.setChart(chart)
+
+
+def grafico_desvio_por_socio(view: QChartView, itens: list, limite: int = 10) -> None:
+    """Quanto cada sócio recebeu além (ou aquém) do que a participação daria.
+
+    Duas barras em cores opostas a partir do zero: à direita quem recebeu a
+    mais, à esquerda quem recebeu a menos. Substituiu a pizza de
+    classificações, que dizia quantos sócios estavam fora do eixo sem dizer
+    por quanto — e é o "por quanto" que vira conversa com o cliente."""
+    chart = _novo_chart("Desvio em relação à participação")
+
+    ordenado = [i for i in itens if abs(i.desvio) >= 0.01][:limite]
+    if not ordenado:
+        chart.setTitle("Desvio — distribuição proporcional no período")
+        view.setChart(chart)
+        return
+
+    # Dois conjuntos no mesmo eixo, cada um com zero onde o outro tem valor:
+    # é assim que o QtCharts desenha barra divergente mantendo uma cor para
+    # cada lado.
+    # Nenhum dos dois lados é "o certo": receber aquém da participação é tão
+    # fora do eixo quanto receber além. Por isso não há verde aqui — verde
+    # leria como "este está ok". O vermelho fica com quem recebeu a mais, que
+    # é o lado que costuma vir acompanhado de pergunta da fiscalização; o
+    # outro fica em tinta, sóbrio.
+    a_mais = QBarSet("Recebeu a mais")
+    a_mais.setColor(QColor(SAIU_FG()))
+    a_menos = QBarSet("Recebeu a menos")
+    a_menos.setColor(QColor(INK()))
+
+    rotulos = []
+    for item in ordenado:
+        a_mais.append(item.desvio if item.desvio > 0 else 0)
+        a_menos.append(item.desvio if item.desvio < 0 else 0)
+        rotulos.append(_primeiro_nome(item.socio_nome))
+    categorias = _categorias_unicas(rotulos)
+
+    serie = QHorizontalBarSeries()
+    serie.append(a_mais)
+    serie.append(a_menos)
+    chart.addSeries(serie)
+
+    eixo_categorias = QBarCategoryAxis()
+    eixo_categorias.append(categorias)
+    eixo_categorias.setLabelsFont(FONTE_EIXO)
+    _estilizar_eixo(eixo_categorias)
+    chart.addAxis(eixo_categorias, Qt.AlignLeft)
+    serie.attachAxis(eixo_categorias)
+
+    maior = max(abs(i.desvio) for i in ordenado)
+    eixo_valores = QValueAxis()
+    # Simétrico em torno do zero: sem isso o lado com o maior desvio domina a
+    # escala e o outro vira um risco, como se não houvesse desvio nenhum ali.
+    eixo_valores.setRange(-maior * 1.1, maior * 1.1)
+    eixo_valores.setLabelsFont(FONTE_EIXO)
+    eixo_valores.setLabelFormat("R$ %.0f")
+    _estilizar_eixo(eixo_valores)
+    chart.addAxis(eixo_valores, Qt.AlignBottom)
+    serie.attachAxis(eixo_valores)
+
+    chart.legend().setVisible(True)
+    chart.legend().setAlignment(Qt.AlignBottom)
+    view.setChart(chart)
+
+
+def _categorias_unicas(rotulos: list[str]) -> list[str]:
+    """O eixo de categorias do QtCharts usa o texto como identidade: dois
+    rótulos iguais viram uma barra só, e o mesmo sócio em duas empresas
+    desaparecia do gráfico. Um espaço invisível no fim resolve sem sujar o
+    rótulo."""
+    vistos: dict[str, int] = {}
+    unicos = []
+    for rotulo in rotulos:
+        repeticoes = vistos.get(rotulo, 0)
+        vistos[rotulo] = repeticoes + 1
+        unicos.append(rotulo + "\u2009" * repeticoes)
+    return unicos
+
+
+def _primeiro_nome(nome: str, palavras: int = 2) -> str:
+    """Razão social e nome completo não cabem no eixo de um gráfico estreito;
+    duas palavras bastam para reconhecer quem é."""
+    partes = str(nome or "").split()
+    return " ".join(partes[:palavras]) if partes else "?"

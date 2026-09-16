@@ -8,6 +8,10 @@ from .common import CrudTab, cnpj_valido_ou_vazio, configurar_campo_cnpj, format
 
 
 class EmpresasTab(CrudTab):
+    # O nº da empresa é curto e fixo; quem se beneficia da largura é a razão
+    # social, que é longa e varia.
+    coluna_flexivel = 1
+    mensagem_tabela_vazia = "Nenhuma empresa cadastrada ainda."
     colunas = [
         ("Nº empresa", "numero_chamada"),
         ("Nome", "nome"),

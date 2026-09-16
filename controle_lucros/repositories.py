@@ -8,6 +8,7 @@ import unicodedata
 
 from . import fiscal, sessao
 from .auth import gerar_hash_senha, senha_confere
+from .layout_importacao import LayoutImportacao, de_json, garantir_valido, limpar_colunas, para_json
 from .models import (
     CAMPOS_VALOR_INFORME,
     TIPOS_MOVIMENTACAO_LABEL,
@@ -1240,14 +1241,17 @@ def preparar_importacao_cadastro(conn: sqlite3.Connection, linhas: list[dict]) -
     return {"prontas": prontas, "pendencias": pendencias, "conflitos": conflitos}
 
 
-def aplicar_importacao_cadastro(conn: sqlite3.Connection, linhas_resolvidas: list[dict]) -> dict:
+def aplicar_importacao_cadastro(
+    conn: sqlite3.Connection, linhas_resolvidas: list[dict], progresso=None
+) -> dict:
     """Aplica linhas já resolvidas (empresa existente em "empresa_existente",
     ou dados pra criar uma nova; "socio_id" já definido, ou None quando a
     linha só cadastra a empresa): cria a empresa se
     for nova (reaproveitando entre linhas da mesma planilha), cria o vínculo
-    só se o sócio ainda não tiver vínculo ativo com essa empresa — nunca
-    duplica nem a empresa nem o vínculo. Se a linha trouxer "data_saida",
-    encerra o vínculo (o recém-criado ou o que já existia). Se trouxer
+    só se o sócio ainda não tiver vínculo com essa empresa naquele período —
+    nunca duplica nem a empresa nem o vínculo, nem quando o vínculo em questão
+    já está encerrado. Se a linha trouxer "data_saida", encerra o vínculo (o
+    recém-criado ou o que já existia). Se trouxer
     "ano_base" com valor distribuído, pró-labore ou IRRF, lança a
     distribuição daquele ano pra esse sócio."""
     empresas_criadas = 0
@@ -1257,7 +1261,13 @@ def aplicar_importacao_cadastro(conn: sqlite3.Connection, linhas_resolvidas: lis
     distribuicoes_lancadas = 0
     cache_empresa_nova: dict[tuple[str, str], int] = {}
 
-    for linha in linhas_resolvidas:
+    # `progresso` é opcional e recebe (feitas, total): permite à tela mostrar a
+    # barra andando numa importação grande sem que este módulo precise saber
+    # que existe uma tela.
+    total = len(linhas_resolvidas)
+    for feitas, linha in enumerate(linhas_resolvidas, start=1):
+        if progresso is not None:
+            progresso(feitas, total)
         empresa_existente = linha.get("empresa_existente")
         if empresa_existente is not None:
             empresa_id = empresa_existente.id
@@ -1282,14 +1292,31 @@ def aplicar_importacao_cadastro(conn: sqlite3.Connection, linhas_resolvidas: lis
         if linha.get("socio_id") is None:
             continue  # modelo "Só empresas": a empresa acima é tudo que a linha traz
 
-        vinculo_ativo = next(
-            (
-                v
-                for v in listar_vinculos_empresa(conn, empresa_id)
-                if v.socio_id == linha["socio_id"] and v.data_saida is None
-            ),
-            None,
-        )
+        vinculos_do_socio = [
+            v for v in listar_vinculos_empresa(conn, empresa_id) if v.socio_id == linha["socio_id"]
+        ]
+        vinculo_ativo = next((v for v in vinculos_do_socio if v.data_saida is None), None)
+
+        # Vínculo que já foi encerrado não é reconhecido pela busca acima, que
+        # só olha os ativos. Sem esta checagem, reimportar o mesmo relatório
+        # (o uso normal: o arquivo do mês seguinte traz o histórico inteiro de
+        # novo) recriaria uma cópia de cada sócio que já saiu, e o quadro
+        # societário iria enchendo de passado repetido a cada importação.
+        if vinculo_ativo is None and linha.get("data_saida"):
+            ja_encerrado = next(
+                (
+                    v
+                    for v in vinculos_do_socio
+                    if v.data_saida is not None and v.data_entrada == linha["data_entrada"]
+                ),
+                None,
+            )
+            if ja_encerrado is not None:
+                vinculos_ja_existentes += 1
+                # A data de saída gravada não é mexida de propósito: se o
+                # relatório mudou de ideia sobre ela, isso é correção de
+                # histórico e se faz na aba Sócios, onde fica registrada.
+                continue
 
         if vinculo_ativo is None:
             novo_id = salvar_vinculo(
@@ -1725,4 +1752,63 @@ def registrar_emissao_informe(
         f"{socio['nome'] if socio else '?'} — {empresa['nome'] if empresa else '?'} — "
         f"ano-calendário {ano_base} — {destino}",
     )
+    conn.commit()
+
+
+# ----------------------------------------------------- layouts de importação
+def listar_layouts_importacao(conn: sqlite3.Connection) -> list[LayoutImportacao]:
+    linhas = conn.execute(
+        "SELECT id, nome, linha_inicial, colunas_json FROM layout_importacao ORDER BY nome COLLATE NOCASE"
+    ).fetchall()
+    return [
+        LayoutImportacao(
+            id=linha["id"],
+            nome=linha["nome"],
+            linha_inicial=linha["linha_inicial"],
+            colunas=de_json(linha["colunas_json"]),
+        )
+        for linha in linhas
+    ]
+
+
+def salvar_layout_importacao(conn: sqlite3.Connection, layout: LayoutImportacao) -> int:
+    """Grava o layout já validado. O nome é a identidade dele na tela, então
+    dois com o mesmo nome seriam impossíveis de distinguir na lista."""
+    garantir_valido(layout)
+    nome = layout.nome.strip()
+    colunas = para_json(limpar_colunas(layout.colunas))
+    agora = dt.datetime.now().isoformat(timespec="seconds")
+
+    repetido = conn.execute(
+        "SELECT id FROM layout_importacao WHERE nome = ? COLLATE NOCASE AND id IS NOT ?",
+        (nome, layout.id),
+    ).fetchone()
+    if repetido is not None:
+        raise ValueError(f'Já existe um layout chamado "{nome}". Use outro nome.')
+
+    if layout.id is None:
+        cur = conn.execute(
+            "INSERT INTO layout_importacao (nome, linha_inicial, colunas_json, criado_em, atualizado_em) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (nome, layout.linha_inicial, colunas, agora, agora),
+        )
+        _registrar_log(conn, "criar", "layout_importacao", cur.lastrowid, nome)
+        conn.commit()
+        return cur.lastrowid
+
+    conn.execute(
+        "UPDATE layout_importacao SET nome=?, linha_inicial=?, colunas_json=?, atualizado_em=? WHERE id=?",
+        (nome, layout.linha_inicial, colunas, agora, layout.id),
+    )
+    _registrar_log(conn, "atualizar", "layout_importacao", layout.id, nome)
+    conn.commit()
+    return layout.id
+
+
+def excluir_layout_importacao(conn: sqlite3.Connection, layout_id: int) -> None:
+    linha = conn.execute("SELECT nome FROM layout_importacao WHERE id=?", (layout_id,)).fetchone()
+    if linha is None:
+        return
+    conn.execute("DELETE FROM layout_importacao WHERE id=?", (layout_id,))
+    _registrar_log(conn, "excluir", "layout_importacao", layout_id, linha["nome"])
     conn.commit()

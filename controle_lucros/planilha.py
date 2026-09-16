@@ -384,6 +384,22 @@ def _ler_csv(caminho: Path) -> list[list[str]]:
         return list(csv.reader(arquivo, delimiter=delimitador))
 
 
+def ler_linhas_brutas(caminho: Path, descartar_vazias: bool = True) -> list[list]:
+    """Linhas do .xlsx ou .csv, sem interpretar nada. É o ponto de entrada
+    comum da importação por cabeçalho e da importação por layout de colunas.
+
+    `descartar_vazias` existe porque as duas contam linha de jeito diferente:
+    lendo pelo cabeçalho, linha em branco é lixo e sair da frente ajuda; lendo
+    por layout, a posição É a informação — a pessoa disse "os dados começam na
+    linha 5", e sumir com uma linha vazia antes dela faria a leitura começar no
+    lugar errado."""
+    caminho = Path(caminho)
+    linhas = _ler_csv(caminho) if caminho.suffix.lower() == ".csv" else _ler_xlsx(caminho)
+    if not descartar_vazias:
+        return linhas
+    return [linha for linha in linhas if any(c not in (None, "") for c in linha)]
+
+
 def _ler_xlsx(caminho: Path) -> list[list]:
     workbook = openpyxl.load_workbook(caminho, data_only=True)
     aba = workbook.active
@@ -486,10 +502,7 @@ def importar_cadastro(caminho: Path) -> list[dict]:
     identificadas pelo cabeçalho, na ordem de COLUNAS_CADASTRO ou não — e
     retorna uma lista de dicts com os campos crus (ainda não validados nem
     casados contra o banco; isso é responsabilidade de quem chama)."""
-    caminho = Path(caminho)
-    linhas_brutas = _ler_csv(caminho) if caminho.suffix.lower() == ".csv" else _ler_xlsx(caminho)
-    linhas_brutas = [linha for linha in linhas_brutas if any(c not in (None, "") for c in linha)]
-
+    linhas_brutas = ler_linhas_brutas(caminho)
     if not linhas_brutas:
         return []
 
@@ -529,16 +542,32 @@ def importar_cadastro(caminho: Path) -> list[dict]:
     # uma empresa e pronto. Diferente de ter a coluna e deixá-la em branco, que
     # continua sendo linha incompleta e é ignorada mais abaixo — a coluna
     # ausente é uma decisão do modelo, a coluna vazia é quase sempre descuido.
-    so_empresas = idx["socio_nome"] is None and idx["socio_cpf"] is None
+    return montar_linhas_cadastro(linhas_brutas[1:], idx, numero_primeira_linha=2)
+
+
+def montar_linhas_cadastro(
+    linhas_dados: list[list], idx: dict[str, int | None], numero_primeira_linha: int = 2
+) -> list[dict]:
+    """Converte linhas cruas em linhas de cadastro, dado o índice de cada campo.
+
+    Separado da leitura de propósito: o que muda entre importar pelo cabeçalho
+    e importar por layout de colunas é só COMO se descobre o índice de cada
+    campo — daí pra frente (número com vírgula, data em vários formatos, linha
+    incompleta ignorada, mensagem de erro com o número da linha) é idêntico, e
+    duplicar isso seria manter duas regras de conversão em sincronia.
+
+    `numero_primeira_linha` é o número que a primeira linha tem na planilha,
+    pra mensagem de erro apontar a linha que a pessoa vê na tela."""
+    so_empresas = idx.get("socio_nome") is None and idx.get("socio_cpf") is None
 
     def texto(linha: list, chave: str) -> str:
-        i = idx[chave]
+        i = idx.get(chave)
         if i is None or i >= len(linha) or linha[i] is None:
             return ""
         return str(linha[i]).strip()
 
     def numero_opcional(linha: list, chave: str, numero_linha: int, rotulo: str) -> float:
-        i = idx[chave]
+        i = idx.get(chave)
         if i is None or i >= len(linha) or linha[i] in (None, ""):
             return 0.0
         try:
@@ -547,7 +576,7 @@ def importar_cadastro(caminho: Path) -> list[dict]:
             raise ValueError(f'Linha {numero_linha}: {rotulo} inválido "{linha[i]}".') from None
 
     resultado = []
-    for numero_linha, linha in enumerate(linhas_brutas[1:], start=2):
+    for numero_linha, linha in enumerate(linhas_dados, start=numero_primeira_linha):
         empresa_nome = normalizar_nome(texto(linha, "empresa_nome"))
         socio_nome = normalizar_nome(texto(linha, "socio_nome"))
         if not empresa_nome or (not socio_nome and not so_empresas):
@@ -564,7 +593,7 @@ def importar_cadastro(caminho: Path) -> list[dict]:
         except ValueError:
             raise
 
-        i_data = idx["data_entrada"]
+        i_data = idx.get("data_entrada")
         data_bruta = linha[i_data] if i_data is not None and i_data < len(linha) else None
         if so_empresas:
             data_entrada = ""
@@ -574,14 +603,14 @@ def importar_cadastro(caminho: Path) -> list[dict]:
             except ValueError:
                 raise ValueError(f'Linha {numero_linha}: data de entrada inválida "{data_bruta}".') from None
 
-        i_saida = idx["data_saida"]
+        i_saida = idx.get("data_saida")
         saida_bruta = linha[i_saida] if i_saida is not None and i_saida < len(linha) else None
         try:
             data_saida = _para_data_opcional(saida_bruta)
         except ValueError:
             raise ValueError(f'Linha {numero_linha}: data de saída inválida "{saida_bruta}".') from None
 
-        i_ano = idx["ano_base"]
+        i_ano = idx.get("ano_base")
         ano_bruto = linha[i_ano] if i_ano is not None and i_ano < len(linha) else None
         ano_base = None
         if ano_bruto not in (None, ""):

@@ -137,22 +137,38 @@ na tela de Sócios, e vice-versa — não são dois cadastros separados.</p>
 """
 
 _IMPORTACAO = """
-<h2>Importação em massa</h2>
+<h2>Importação e exportação</h2>
 <p>Cadastra empresas, sócios, vínculos e (opcionalmente) distribuição de uma
 vez, a partir de uma planilha. <b>Uma linha por (empresa, sócio)</b> — a mesma
 empresa aparece repetida em várias linhas, uma para cada sócio dela.</p>
+<p>Há também o caminho sem preencher nada: <b>importar o relatório "Cadastro
+de Sócios"</b> emitido por outro sistema contábil, em PDF ou em planilha (veja
+no fim desta página).</p>
+
+<h3>Tudo gira em torno do "formato"</h3>
+<p>A primeira coisa da tela é o <b>Formato</b>, e ele vale para os dois lados:
+exporta no mesmo desenho em que importa. São dois tipos:</p>
+<ul>
+<li><b>Modelos do sistema</b> — as planilhas exportadas daqui. As colunas são
+reconhecidas pelo <b>nome no cabeçalho</b>, então podem estar em qualquer
+ordem.</li>
+<li><b>Layouts seus</b> — para planilha de qualquer outra origem. Você diz, por
+<b>letra de coluna</b>, onde está cada informação, e o sistema lê por posição,
+ignorando o cabeçalho que o arquivo tiver.</li>
+</ul>
 
 <h3>O caminho recomendado</h3>
 <ol>
-<li>Escolher o <b>modelo</b> (veja abaixo).</li>
-<li><b>Exportar modelo</b> — planilha em branco com as colunas daquele modelo.</li>
+<li>Escolher o <b>formato</b> (veja abaixo).</li>
+<li><b>Exportar planilha em branco</b> — só com as colunas daquele formato.</li>
 <li>Abrir a aba <b>Exemplo</b> da planilha, ver como se organiza, e preencher a
 aba <b>Cadastro</b>.</li>
 <li><b>Importar planilha</b> e revisar o que o sistema não conseguiu resolver
 sozinho.</li>
 </ol>
 <p>O botão <b>Exportar cadastro atual</b> traz o que já está no sistema, no
-modelo escolhido — útil para conferir ou para corrigir em massa.</p>
+formato escolhido — útil para conferir, para corrigir em massa ou para mandar
+os dados para outro sistema.</p>
 
 <h3>Os três modelos</h3>
 <p>Todos são lidos do mesmo jeito: as colunas são reconhecidas pelo nome no
@@ -219,6 +235,116 @@ são ignorados). "João" e "Joao" não se encontram — cai na revisão.</p>
 com os espaços a mais retirados. Assim "Fulano  da Silva", "fulano da silva" e
 "FULANO DA SILVA", que numa planilha preenchida à mão aparecem misturados,
 ficam todos iguais no cadastro.</p>
+
+<h3>Layouts: importar planilha de qualquer origem</h3>
+<p>Quem já tem a planilha pronta — vinda de outro sistema contábil, do banco,
+de um relatório antigo — não precisa remontá-la no modelo daqui. Crie um
+<b>layout</b> descrevendo a planilha que você já tem.</p>
+<p>Clique em <b>Novo layout</b> (ou <b>Duplicar como layout</b>, que já vem
+preenchido a partir do formato selecionado) e informe, em cada campo, a
+<b>letra da coluna</b> onde aquela informação está — a mesma letra que aparece
+no topo da coluna no Excel. Campo deixado em branco é informação que aquela
+planilha não traz: ela simplesmente não é importada.</p>
+<ul>
+<li><b>Dados começam na linha</b> — o número da primeira linha com dados, como
+o Excel mostra na lateral. Planilha com uma linha de cabeçalho começa na 2;
+relatório com título e data em cima começa na 3, 4…</li>
+<li><b>Nome da empresa é obrigatório</b> (marcado com <b>*</b>). Sem ele não há
+a que ligar a linha.</li>
+<li>Se o layout traz qualquer dado de sócio, a coluna do <b>nome do sócio</b>
+também é obrigatória — sem ela toda linha seria descartada.</li>
+<li>A mesma letra não pode estar em dois campos.</li>
+</ul>
+<p><b>Conferir com uma planilha…</b> abre um arquivo e mostra as primeiras
+linhas já lidas pelo layout, <b>sem importar nada</b>. Use sempre: errar uma
+letra é fácil, e o estrago — o CNPJ gravado no lugar do capital social — só
+apareceria muito depois. Ao importar, a mesma prévia aparece como confirmação
+antes de qualquer coisa ser gravada.</p>
+<p><b>Salvar layout</b> guarda a configuração com um nome. Da próxima vez é só
+escolher o formato e apontar o arquivo. Alterações ainda não salvas já valem
+para a importação e a exportação daquele momento — o aviso ao lado dos botões
+diz em que pé está.</p>
+<p>Importar por layout faz <b>as mesmas verificações de sempre</b>: o CPF
+identifica o sócio, empresa que não existe é criada, sócio novo espera sua
+confirmação, e o que já está cadastrado não é duplicado — vínculo que já existe
+é contado como "já existia" e ignorado.</p>
+
+<h3>Importar o relatório de sócios</h3>
+<p>Quem vem de outro sistema contábil não precisa redigitar o quadro
+societário: o botão <b>Importar relatório de sócios</b> lê o relatório
+<b>Cadastro de Sócios</b> daquele sistema e traz, de cada empresa listada, os
+sócios com <b>CPF ou CNPJ, participação, data de entrada e data de saída</b>.</p>
+<p>Serve tanto o <b>PDF</b> quanto a <b>planilha</b> do mesmo relatório —
+<b>.xls</b> (o formato antigo do Excel, que é o que a maioria desses sistemas
+exporta), .xlsx ou .csv. O conteúdo é o mesmo e o resultado também; use o que
+for mais fácil de tirar do outro sistema. O arquivo é reconhecido pelo que tem
+dentro, não pela extensão, então um .xls que na verdade foi salvo como .xlsx
+também entra.</p>
+<p><b>Reimportar é seguro.</b> O relatório do mês seguinte traz o histórico
+inteiro de novo, e o sistema reconhece o que já cadastrou — inclusive os
+vínculos já encerrados. Só entra o que é novo.</p>
+<p>Dali pra frente é o mesmo caminho da planilha: a empresa é reconhecida ou
+criada, o sócio é reconhecido pelo CPF, e quem não bater vai para a tela de
+revisão. Antes de aplicar, uma confirmação mostra quantas empresas e quantos
+sócios foram lidos — se o número não fizer sentido, é sinal de que o PDF não é
+esse relatório.</p>
+<p><b>O que o relatório não traz:</b> CNPJ da empresa, capital social e
+quantidade de cotas não constam do documento. A empresa criada por aí nasce com
+esses campos em branco, para você completar depois no Cadastro.</p>
+<p><b>Sócio que já saiu</b> aparece no relatório com participação zerada — o
+percentual que ele tinha enquanto era sócio não está no documento. O vínculo é
+gravado com a data de saída correta e participação zero.</p>
+<p>Só funciona com PDF gerado por sistema, que tem o texto dentro do arquivo.
+Documento escaneado (imagem) não dá para ler, e o sistema avisa isso em vez de
+importar errado.</p>
+
+<h3>O que a leitura do relatório aceita</h3>
+<p>Cada sistema contábil emite esse relatório de um jeito, então a leitura não
+exige um layout exato: ela procura o <b>CPF/CNPJ</b> em cada linha e lê o resto
+em volta dele — vale igual para o PDF e para a planilha. Na prática, são
+aceitos:</p>
+<ul>
+<li>Cabeçalho da empresa com ou sem dois-pontos, em maiúsculas ou minúsculas,
+com hífen ou travessão, com ou sem "nº" — e com a <b>data do quadro societário
+numa linha separada</b>, como acontece quando o papel é estreito. Também vale
+<b>Cliente:</b> ou <b>Estabelecimento:</b> no lugar de "Empresa:", e o número e
+o nome em <b>colunas separadas</b> da planilha (sem o hífen entre eles).</li>
+<li>Empresa <b>sem número</b>, quando o sistema de origem não numera: o
+cabeçalho do escritório que emitiu o relatório tem a mesma forma, e o que
+separa os dois é que só a empresa de verdade vem seguida de sócios.</li>
+<li>Empresa identificada pelo <b>CNPJ</b> no cabeçalho — e nesse caso ele é
+aproveitado, e a empresa nasce com o CNPJ preenchido.</li>
+<li>Linha de sócio <b>com ou sem a coluna de código</b>.</li>
+<li>Percentual com vírgula ou ponto decimal, com ou sem o sinal <b>%</b>.</li>
+<li>CPF com ou sem pontuação; CNPJ comum ou no formato alfanumérico novo.</li>
+<li>Datas em <b>dd/mm/aaaa</b>, <b>dd-mm-aaaa</b>, <b>aaaa-mm-dd</b> ou com
+ano de dois dígitos.</li>
+<li>Colunas a mais na linha (qualificação, cargo, valor em reais) — elas são
+ignoradas, e o valor em R$ não é confundido com o percentual.</li>
+<li>Cabeçalho de página repetido e a mesma empresa aparecendo em várias
+páginas: as páginas são juntadas num quadro societário só.</li>
+<li><b>Colunas em outra ordem</b>: na planilha do mesmo relatório a
+participação vem antes das datas, e tanto faz.</li>
+<li>CPF que a planilha guardou como número e perdeu o zero da frente — ele é
+reposto quando o dígito verificador confirma.</li>
+</ul>
+<p>E o que <b>não</b> vira sócio: o cabeçalho e o rodapé com o CNPJ do
+escritório que emitiu o relatório, linhas de total, numeração de página e
+cabeçalho de coluna. Uma linha de sócio sempre tem nome, documento e data —
+é essa combinação que o sistema exige.</p>
+<p>Se alguma linha tiver cara de sócio e mesmo assim não for entendida, a
+confirmação <b>diz quantas são e mostra as primeiras</b>, antes de qualquer
+coisa ser gravada. É o caso, por exemplo, de uma linha <b>sem data de
+ingresso</b>: ela não é importada (a data seria inventada), mas aparece no
+aviso. Importar parte do quadro sem avisar seria pior do que não
+importar.</p>
+
+<h3>Revisão: cadastrar todos de uma vez</h3>
+<p>Importar o quadro inteiro de uma empresa nova joga <b>todos</b> os sócios na
+tela de revisão, porque nenhum deles existe ainda no cadastro. Para não virar
+dezenas de confirmações iguais, o botão <b>Cadastrar todos como novos
+sócios</b> resolve a lista de uma vez, com uma confirmação só. Quem você já
+resolveu à mão, apontando para um sócio existente, não é tocado.</p>
 """
 
 _SOCIOS = """
@@ -262,6 +388,26 @@ histórico e nos anos em que participou.</li>
 corrigir um vínculo cadastrado por engano (empresa errada, sócio errado). Para
 registrar uma saída de verdade, use <b>Encerrar vínculo</b>.</li>
 </ul>
+
+<h3>Mapa de vínculos</h3>
+<p>O botão <b>Mapa de vínculos</b>, no alto do painel da direita, desenha num
+diagrama o que a tabela mostra em linhas: o sócio no centro e, ao redor, as
+empresas em que ele participa, cada uma ligada por um traço com o
+<b>percentual</b>, a <b>data de entrada</b> e a de saída.</p>
+<ul>
+<li><b>Vínculo ativo</b> tem traço cheio; <b>encerrado</b> tem traço pontilhado
+e a caixa em vermelho — a diferença se enxerga mesmo impresso em preto e
+branco.</li>
+<li><b>Incluir vínculos encerrados</b> pode ser desmarcado para ver só onde o
+sócio participa hoje. Útil quando o histórico é longo.</li>
+<li>O percentual mostrado é o <b>% registrado</b> do vínculo, o mesmo da
+tabela ao lado — não o recalculado por cotas.</li>
+<li>Sócio com muitas empresas: o desenho mostra as de maior participação e o
+rodapé diz quantas ficaram de fora. A lista completa continua na tabela.</li>
+</ul>
+<p><b>Exportar PDF</b> gera uma página só, pronta para imprimir ou anexar.
+<b>Exportar SVG</b> gera imagem vetorial, que abre em editor de imagem e entra
+em slide ou laudo sem perder qualidade por mais que se amplie.</p>
 
 <h3>Informe de rendimentos</h3>
 <p>O botão à direita abre a emissão do comprovante anual do sócio selecionado.
@@ -448,6 +594,25 @@ aparece meses depois.</p>
 
 _DASHBOARD = """
 <h2>Dashboards</h2>
+<h3>Os dois alertas</h3>
+<p>Além dos totais, as telas de dashboard cruzam dados que já estavam no
+sistema mas ninguém via juntos:</p>
+<ul>
+<li><b>Distribuição sem pró-labore</b> (Visão geral) — sócio <b>pessoa
+física</b> que recebeu lucros e nenhum pró-labore no ano. É o cruzamento que a
+fiscalização faz para requalificar a distribuição como remuneração. A frase
+acima dos gráficos resume o período, e o gráfico mostra quem e quanto; quando
+são vários anos, o rótulo diz há quantos anos a situação se repete. Sócio
+pessoa jurídica não entra: holding não tem pró-labore.</li>
+<li><b>Desvio em relação à participação</b> (Análise por empresa) — quanto cada
+sócio recebeu <b>além ou aquém</b>, em reais, do que a participação dele daria.
+A classificação diz <i>se</i> houve desproporção; o desvio diz <b>quanto</b>,
+que é o número que cabe numa conversa com o cliente. Não há verde no gráfico de
+propósito: receber aquém é tão fora do eixo quanto receber além.</li>
+</ul>
+<p>O programa aponta o fato, não dá o veredito: se o pró-labore lançado é
+compatível com o trabalho do sócio, ou se a desproporção está amparada no
+contrato social, é análise de quem entende do caso.</p>
 <p>Duas visões de leitura, sem edição.</p>
 
 <h3>Visão geral</h3>
@@ -504,7 +669,7 @@ TOPICOS: tuple[Topico, ...] = (
     Topico("inicio", "Começando por aqui", _INICIO),
     Topico("empresas.cadastro", "Empresas · Cadastro", _EMPRESAS),
     Topico("empresas.alteracoes", "Empresas · Alterações contratuais", _ALTERACOES),
-    Topico("sistema.importar", "Importação em massa", _IMPORTACAO),
+    Topico("sistema.importar", "Importação e exportação", _IMPORTACAO),
     Topico("socios", "Sócios e vínculos", _SOCIOS),
     Topico("distribuicao", "Distribuição anual", _DISTRIBUICAO),
     Topico("distribuicao.trimestral", "Distribuição trimestral", _TRIMESTRAL),

@@ -48,13 +48,22 @@ def gerar_pdf(html: str, caminho: Path) -> Path:
     return caminho
 
 
-def gerar_pdfs(paginas: list[tuple[str, str]], pasta: Path) -> list[Path]:
+def gerar_pdfs(paginas: list[tuple[str, str]], pasta: Path, progresso=None) -> list[Path]:
     """Um arquivo por informe — cada um é o documento de uma fonte pagadora
     específica, então não faz sentido emendar tudo num PDF só. `paginas` é uma
-    lista de (nome_do_arquivo, html)."""
+    lista de (nome_do_arquivo, html).
+
+    `progresso` é opcional e recebe (feitos, total): um sócio de dez empresas
+    são dez PDFs, e nesse tempo a janela fica parada sem dizer nada."""
     pasta = Path(pasta)
     pasta.mkdir(parents=True, exist_ok=True)
-    return [gerar_pdf(html, _caminho_livre(pasta, nome)) for nome, html in paginas]
+    caminhos = []
+    total = len(paginas)
+    for feitos, (nome, html) in enumerate(paginas, start=1):
+        if progresso is not None:
+            progresso(feitos, total)
+        caminhos.append(gerar_pdf(html, _caminho_livre(pasta, nome)))
+    return caminhos
 
 
 def _caminho_livre(pasta: Path, nome: str) -> Path:

@@ -35,6 +35,7 @@ from .common import (
     documento_valido_ou_vazio,
     formatar_numero,
     formatar_valor_br,
+    TabelaLista,
 )
 from .selo import Selo
 from .theme import SEAL_RED
@@ -71,13 +72,11 @@ class _DialogoIncluirSocio(QDialog):
         self.busca.setClearButtonEnabled(True)
         self.busca.textChanged.connect(self._filtrar)
 
-        self.tabela = QTableWidget(0, len(self.COLUNAS))
+        self.tabela = TabelaLista(0, len(self.COLUNAS), coluna_flexivel=0)
         self.tabela.setHorizontalHeaderLabels(self.COLUNAS)
-        self.tabela.setAlternatingRowColors(True)
         self.tabela.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tabela.setSelectionMode(QAbstractItemView.SingleSelection)
         self.tabela.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.tabela.verticalHeader().setVisible(False)
         self.tabela.horizontalHeader().setStretchLastSection(True)
         self.tabela.itemSelectionChanged.connect(self._ao_selecionar)
         # Duplo clique escolhe e fecha: é o gesto que se espera de uma lista
@@ -154,7 +153,7 @@ class _DialogoIncluirSocio(QDialog):
             valores = [s.nome, s.cpf or "—", TIPOS_PESSOA_LABEL.get(s.tipo_pessoa, s.tipo_pessoa)]
             for col, valor in enumerate(valores):
                 self.tabela.setItem(row, col, QTableWidgetItem(valor))
-        self.tabela.resizeColumnsToContents()
+        self.tabela.ajustar_colunas()
 
         if self._socios:
             self.vazio.hide()
@@ -373,12 +372,10 @@ class AlteracaoCard(QWidget):
         secao_socios = QLabel("Sócios após esta alteração")
         secao_socios.setProperty("role", "secao")
 
-        self.tabela_socios = QTableWidget(0, 4)
+        self.tabela_socios = TabelaLista(0, 4, coluna_flexivel=0)
         self.tabela_socios.setHorizontalHeaderLabels(["Sócio", "% capital", "Cotas", "Situação"])
         self.tabela_socios.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.tabela_socios.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.tabela_socios.verticalHeader().setVisible(False)
-        self.tabela_socios.setAlternatingRowColors(True)
         self.tabela_socios.setMinimumHeight(140)
 
         self.btn_incluir_socio = QPushButton("Incluir sócio")
@@ -480,7 +477,7 @@ class AlteracaoCard(QWidget):
             self.tabela_socios.setItem(row, 1, QTableWidgetItem(formatar_valor_br(v.percentual_capital, 4)))
             self.tabela_socios.setItem(row, 2, QTableWidgetItem(formatar_valor_br(v.quantidade_cotas or 0, 0)))
             self.tabela_socios.setItem(row, 3, QTableWidgetItem(situacao))
-        self.tabela_socios.resizeColumnsToContents()
+        self.tabela_socios.ajustar_colunas()
 
     # -------------------------------------------------------------- ações --
     def _salvar(self) -> None:

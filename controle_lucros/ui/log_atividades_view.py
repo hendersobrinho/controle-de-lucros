@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import repositories as repo
+from .common import TabelaLista
 
 ACAO_LABEL = {
     "criar": "Criou",
@@ -78,12 +79,11 @@ class LogAtividadesView(QWidget):
         self.resumo = QLabel()
         self.resumo.setProperty("role", "subtitulo")
 
-        self.tabela = QTableWidget(0, 5)
+        self.tabela = TabelaLista(0, 5, coluna_flexivel=4,
+                                  mensagem_vazia="Nenhuma atividade no período.")
         self.tabela.setHorizontalHeaderLabels(["Data/hora", "Usuário", "Ação", "Onde", "Detalhes"])
-        self.tabela.setAlternatingRowColors(True)
         self.tabela.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tabela.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.tabela.verticalHeader().setVisible(False)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -139,4 +139,4 @@ class LogAtividadesView(QWidget):
             ]
             for col, valor in enumerate(valores):
                 self.tabela.setItem(row, col, QTableWidgetItem(valor))
-        self.tabela.resizeColumnsToContents()
+        self.tabela.ajustar_colunas()

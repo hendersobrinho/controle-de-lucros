@@ -138,9 +138,16 @@ def test_tudo_cabe_numa_linha_na_largura_padrao(conn, cenario):
 
 def test_nenhum_botao_trunca_na_largura_minima_da_janela(conn, cenario):
     """A régua é a janela no seu tamanho mínimo: se couber ali, cabe em
-    qualquer uso real. Foi assim que "Cancelar" virou "ancel" antes."""
-    from controle_lucros.ui.main_window import MainWindow
+    qualquer uso real. Foi assim que "Cancelar" virou "ancel" antes.
 
+    O estilo do programa é aplicado de propósito: é ele que dá padding aos
+    botões, então sem ele a medida sai menor do que a real. Antes, esta régua
+    só dizia a verdade quando outro teste tinha trocado de tema por acaso e
+    deixado o QSS instalado no QApplication."""
+    from controle_lucros.ui.main_window import MainWindow
+    from controle_lucros.ui.theme import build_stylesheet
+
+    QApplication.instance().setStyleSheet(build_stylesheet())
     repo.criar_usuario(conn, "Admin", "admin", "senha123", True)
     janela = MainWindow(conn, repo.listar_usuarios(conn)[0])
     janela.resize(janela.minimumSizeHint().width(), 720)
@@ -156,6 +163,7 @@ def test_nenhum_botao_trunca_na_largura_minima_da_janela(conn, cenario):
         "Novo": aba.btn_novo, "Salvar": aba.btn_salvar, "Cancelar": aba.btn_cancelar,
         "Excluir": aba.btn_excluir, "Associar": aba.btn_associar,
         "Ações do vínculo": aba.btn_acoes_vinculo, "Informe": aba.btn_informe,
+        "Mapa de vínculos": aba.btn_mapa,
     }
     truncados = [nome for nome, b in botoes.items() if b.width() < b.sizeHint().width()]
     assert truncados == [], f"rótulos cortados: {truncados}"

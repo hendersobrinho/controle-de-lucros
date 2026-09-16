@@ -8,6 +8,7 @@ registro em vez de criar um novo."""
 from __future__ import annotations
 
 from PySide6.QtCore import QLocale, Qt
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QAbstractSpinBox,
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -29,6 +31,155 @@ from PySide6.QtWidgets import (
 from . import theme
 
 LOCALE_BR = QLocale(QLocale.Portuguese, QLocale.Brazil)
+
+ALTURA_LINHA_TABELA = 34
+
+# Até onde a coluna flexível pode encolher para o resto caber na tela. Abaixo
+# disso ela para de dizer qualquer coisa, e aí a barra de rolagem é melhor.
+LARGURA_MINIMA_COLUNA_FLEXIVEL = 100
+
+
+def larguras_ajustadas(conteudo: list[int], disponivel: int, flexivel: int = 0) -> list[int]:
+    """Quanto cada coluna deve ocupar para a soma bater com a largura da tabela.
+
+    Sobrando espaço, tudo vai para a coluna flexível — é ela que se beneficia,
+    e o vão morto à direita desaparece. Faltando, é dela que sai, até um
+    mínimo; só se ainda faltar é que a barra de rolagem aparece.
+
+    Quem cede é sempre a mesma, e só ela, porque a largura que o Qt calcula é a
+    exata do conteúdo: tirar um pixel de uma coluna de data já corta o "2010-
+    01-05" no meio. Distribuir o aperto entre todas espalharia reticências pela
+    tabela inteira para ganhar os vinte pixels que faltavam — e a coluna de
+    nome, que é onde reticência não atrapalha (o nome inteiro está no
+    formulário ao lado), é justamente a flexível.
+
+    Função pura de propósito: é a regra que decide se a tabela vai parecer
+    inteira ou quebrada, e testá-la não deveria exigir abrir uma janela."""
+    if not conteudo:
+        return []
+    larguras = list(conteudo)
+    if not (0 <= flexivel < len(larguras)):
+        flexivel = 0
+
+    folga = disponivel - sum(larguras)
+    if folga >= 0:
+        larguras[flexivel] += folga
+        return larguras
+
+    # Encolher só compensa se for o bastante para tudo caber. Numa tabela larga
+    # demais (onze colunas de distribuição, por exemplo) a barra de rolagem vai
+    # aparecer de qualquer jeito, e aí espremer o nome do sócio junto seria
+    # perder de graça: fica a largura cheia, e quem precisa rola.
+    piso = min(larguras[flexivel], LARGURA_MINIMA_COLUNA_FLEXIVEL)
+    if -folga <= larguras[flexivel] - piso:
+        larguras[flexivel] += folga
+    return larguras
+
+
+class TabelaLista(QTableWidget):
+    """Tabela com cara de lista: sem os trilhos verticais da grade e com a
+    largura toda ocupada.
+
+    A grade quadriculada do Qt desenha linhas verticais que descem só até o
+    último registro e param no ar, e o resto do espaço fica sendo um retângulo
+    vazio ao lado de meia tabela — a tela parece cortada no meio. Sem os
+    trilhos, cada registro vira uma linha de lista separada da seguinte, e
+    onde a lista acaba é simplesmente onde ela acaba.
+
+    A sobra horizontal também tem dono: em vez de deixar um vão morto à
+    direita (ou uma barra de rolagem com a tela inteira vazia ao lado), o
+    espaço que sobra vai para uma coluna escolhida — a do nome, quase sempre,
+    que é a que se beneficia."""
+
+    def __init__(self, linhas: int = 0, colunas: int = 0, parent=None, coluna_flexivel: int = 0,
+                 mensagem_vazia: str = "Nada por aqui ainda."):
+        super().__init__(linhas, colunas, parent)
+        self.coluna_flexivel = coluna_flexivel
+        self.mensagem_vazia = mensagem_vazia
+        self._larguras_do_conteudo: list[int] = []
+
+        self.setShowGrid(False)
+        self.setAlternatingRowColors(True)
+        self.setCornerButtonEnabled(False)
+        self.setWordWrap(False)
+        self.verticalHeader().setVisible(False)
+        self.verticalHeader().setDefaultSectionSize(ALTURA_LINHA_TABELA)
+        self.horizontalHeader().setHighlightSections(False)
+
+    def ajustar_colunas(self) -> None:
+        """Ajusta as colunas ao conteúdo e entrega a sobra à coluna flexível.
+        Chamar depois de preencher a tabela."""
+        self.resizeColumnsToContents()
+        # O Qt mede só o conteúdo das células; com a tabela vazia (ou com
+        # valores curtos sob um título comprido) isso deixa o próprio cabeçalho
+        # cortado, tipo "r da particip".
+        cabecalho = self.horizontalHeader()
+        self._larguras_do_conteudo = [
+            max(self.columnWidth(i), cabecalho.sectionSizeHint(i)) for i in range(self.columnCount())
+        ]
+        self._distribuir_sobra()
+        self._explicar_o_que_ficou_cortado()
+
+    def _larguras_base(self) -> list[int]:
+        """As larguras de partida. Antes do primeiro preenchimento não há
+        conteúdo medido, e aí vale o cabeçalho — sem isso a tabela vazia abre
+        com as colunas de 100px do Qt, que somam mais do que a tela e trazem
+        barra de rolagem para não mostrar nada."""
+        if len(self._larguras_do_conteudo) == self.columnCount():
+            return list(self._larguras_do_conteudo)
+        cabecalho = self.horizontalHeader()
+        return [cabecalho.sectionSizeHint(i) for i in range(self.columnCount())]
+
+    def showEvent(self, evento) -> None:
+        super().showEvent(evento)
+        self._distribuir_sobra()
+
+    def _explicar_o_que_ficou_cortado(self) -> None:
+        """Célula que não coube inteira ganha o texto completo como dica.
+
+        A coluna flexível é a que encolhe quando falta espaço, então é nela que
+        aparece reticência — e "ENDOGAST..." sem jeito de ver o resto seria
+        trocar um incômodo por outro."""
+        indice = self.coluna_flexivel
+        if not (0 <= indice < self.columnCount()):
+            return
+        metrica = QFontMetrics(self.font())
+        largura = self.columnWidth(indice) - 20  # desconta o padding do estilo
+        for linha in range(self.rowCount()):
+            item = self.item(linha, indice)
+            if item is None:
+                continue
+            texto = item.text()
+            item.setToolTip(texto if metrica.horizontalAdvance(texto) > largura else "")
+
+    def paintEvent(self, evento) -> None:
+        super().paintEvent(evento)
+        if self.rowCount():
+            return
+        # Tabela vazia sem nada escrito parece tela que não carregou. Uma linha
+        # no meio do espaço diz que o espaço está vazio de propósito.
+        pintor = QPainter(self.viewport())
+        pintor.setPen(QColor(theme.INK_MUTED()))
+        pintor.drawText(self.viewport().rect(), Qt.AlignCenter, self.mensagem_vazia)
+        pintor.end()
+
+    def resizeEvent(self, evento) -> None:
+        super().resizeEvent(evento)
+        # Redistribui ao redimensionar a janela: sem isto, a coluna flexível
+        # guardaria a largura de quando a tabela foi preenchida e o vão morto
+        # voltaria assim que alguém arrastasse a borda da janela.
+        self._distribuir_sobra()
+
+    def _distribuir_sobra(self) -> None:
+        """Aplica larguras_ajustadas às colunas de verdade."""
+        if not self.columnCount():
+            return
+        larguras = larguras_ajustadas(
+            self._larguras_base(), self.viewport().width(), self.coluna_flexivel
+        )
+        for indice, largura in enumerate(larguras):
+            if self.columnWidth(indice) != largura:
+                self.setColumnWidth(indice, largura)
 
 
 def preencher_combo(combo: QComboBox, itens, texto_attr: str = "nome") -> None:
@@ -176,46 +327,131 @@ def cnpj_valido_ou_vazio(campo: QLineEdit) -> str:
 
 
 class CartaoEstatistica(QFrame):
-    """Cartão pequeno com título, valor em destaque e uma linha de contexto
-    opcional — usado nas telas de dashboard para métricas rápidas."""
+    """Cartão de indicador: rótulo em cima, número em destaque, uma linha de
+    contexto embaixo.
 
-    def __init__(self, titulo: str, parent=None):
+    A altura do rótulo é fixa em duas linhas de propósito. Ele varia de
+    "Empresas no período" a "Distribuído desproporcionalmente", e com altura
+    livre o número de cada cartão parava numa altura diferente do vizinho —
+    uma fileira de números desalinhados é o que mais entrega uma tela montada
+    às pressas. Fixando o rótulo, todos os números ficam na mesma linha.
+
+    O contexto é de uma linha só, cortado com reticências e com o texto
+    inteiro na dica. Antes era livre, e o cartão "Sem distribuição" — que
+    lista as empresas — virava uma parede de nomes que esticava o cartão e
+    empurrava a fileira toda."""
+
+    LINHAS_DO_ROTULO = 2
+    LARGURA_MINIMA = 150
+    TAMANHO_DO_VALOR = 21
+    TAMANHO_MINIMO_DO_VALOR = 13
+
+    def __init__(self, titulo: str, parent=None, descricao: str = ""):
         super().__init__(parent)
         self.setProperty("role", "card")
+        # Rótulo curto no cartão, frase inteira na dica: num cartão estreito,
+        # "Distribuído desproporcionalmente" não cabe e sai cortado no meio da
+        # palavra, que é pior do que a versão curta.
+        self.setToolTip(descricao or titulo)
+        # Largura idêntica entre os cartões da fileira: com o tamanho vindo do
+        # conteúdo, o cartão de texto mais longo ficava o dobro do vizinho e a
+        # fileira saía irregular. "Ignored" faz o layout dividir a linha em
+        # partes iguais, e o mínimo evita que virem tiras num monitor estreito.
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.setMinimumWidth(self.LARGURA_MINIMA)
 
-        self._rotulo_titulo = QLabel(titulo)
-        self._rotulo_titulo.setProperty("role", "subtitulo")
+        self._rotulo_titulo = QLabel(titulo.upper())
         self._rotulo_titulo.setWordWrap(True)
+        self._rotulo_titulo.setAlignment(Qt.AlignLeft | Qt.AlignTop)
 
         self._rotulo_valor = QLabel("—")
         self._rotulo_valor.setProperty("role", "titulo")
-        self._rotulo_valor.setWordWrap(True)
+        self._rotulo_valor.setWordWrap(False)
+        self._cor_do_valor: str | None = None
 
         self._rotulo_contexto = QLabel("")
-        self._rotulo_contexto.setWordWrap(True)
+        self._rotulo_contexto.setWordWrap(False)
+        self._contexto_inteiro = ""
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(2)
+        layout.setContentsMargins(18, 14, 18, 14)
+        layout.setSpacing(6)
         layout.addWidget(self._rotulo_titulo)
         layout.addWidget(self._rotulo_valor)
         layout.addWidget(self._rotulo_contexto)
+        layout.addStretch()
 
         self._aplicar_cores()
         theme.estado().mudou.connect(self._aplicar_cores)
 
     def _aplicar_cores(self) -> None:
+        self._rotulo_titulo.setStyleSheet(
+            f"color: {theme.INK_MUTED()}; font-size: 11px; font-weight: 600;"
+            " letter-spacing: 0.6px;"
+        )
         self._rotulo_contexto.setStyleSheet(f"color: {theme.INK_MUTED()}; font-size: 11px;")
+        altura = QFontMetrics(self._rotulo_titulo.font()).height() * self.LINHAS_DO_ROTULO
+        self._rotulo_titulo.setFixedHeight(altura)
 
     def definir(self, valor: str, contexto: str = "", cor: str | None = None) -> None:
         self._rotulo_valor.setText(valor)
-        self._rotulo_valor.setStyleSheet(f"color: {cor};" if cor else "")
-        self._rotulo_contexto.setText(contexto)
-        self._rotulo_contexto.setVisible(bool(contexto))
+        self._cor_do_valor = cor
+        self._ajustar_valor()
+        self._contexto_inteiro = contexto
+        # Ocupa o lugar mesmo vazio: sem isso, um cartão sem contexto fica mais
+        # baixo que os vizinhos e a fileira perde a linha de base.
+        self._rotulo_contexto.setVisible(True)
+        self._ajustar_contexto()
+
+    def resizeEvent(self, evento) -> None:
+        super().resizeEvent(evento)
+        self._ajustar_valor()
+        self._ajustar_contexto()
+
+    def _ajustar_valor(self) -> None:
+        """Encolhe o número até ele caber inteiro no cartão.
+
+        "R$ 900.000,00" não cabe na largura de um sexto da tela e saía cortado
+        em "R$ 900.000," — que não é só feio, é um número diferente. Diminuir
+        o corpo é melhor do que cortar: o valor continua exato, só menor."""
+        largura = max(0, self._rotulo_valor.width())
+        texto = self._rotulo_valor.text()
+        tamanho = self.TAMANHO_DO_VALOR
+        if largura and texto:
+            fonte = QFont(self._rotulo_valor.font())
+            while tamanho > self.TAMANHO_MINIMO_DO_VALOR:
+                fonte.setPixelSize(tamanho)
+                if QFontMetrics(fonte).horizontalAdvance(texto) <= largura:
+                    break
+                tamanho -= 1
+        cor = f"color: {self._cor_do_valor};" if self._cor_do_valor else ""
+        self._rotulo_valor.setStyleSheet(f"{cor} font-size: {tamanho}px; font-weight: 600;")
+
+    def _ajustar_contexto(self) -> None:
+        largura = max(0, self._rotulo_contexto.width())
+        if not self._contexto_inteiro:
+            self._rotulo_contexto.setText(" ")
+            self._rotulo_contexto.setToolTip("")
+            return
+        metrica = QFontMetrics(self._rotulo_contexto.font())
+        self._rotulo_contexto.setText(
+            metrica.elidedText(self._contexto_inteiro, Qt.ElideRight, largura) if largura
+            else self._contexto_inteiro
+        )
+        self._rotulo_contexto.setToolTip(
+            self._contexto_inteiro
+            if metrica.horizontalAdvance(self._contexto_inteiro) > largura
+            else ""
+        )
 
 
 class CrudTab(QWidget):
     colunas: list[tuple[str, str]] = []
+    # Qual coluna recebe o espaço que sobra na largura da tabela. O padrão é a
+    # primeira; quem tem um código curto na frente (o nº da empresa) aponta
+    # para a coluna do nome, que é a que ganha em ficar larga.
+    coluna_flexivel = 0
+    mensagem_tabela_vazia = "Nada por aqui ainda."
 
     def __init__(self, conn, parent=None):
         super().__init__(parent)
@@ -228,13 +464,15 @@ class CrudTab(QWidget):
         self.busca.setPlaceholderText(self.placeholder_busca())
         self.busca.textChanged.connect(lambda _texto: self.atualizar())
 
-        self.tabela = QTableWidget(0, len(self.colunas))
+        self.tabela = TabelaLista(
+            0, len(self.colunas),
+            coluna_flexivel=self.coluna_flexivel,
+            mensagem_vazia=self.mensagem_tabela_vazia,
+        )
         self.tabela.setHorizontalHeaderLabels([c[0] for c in self.colunas])
-        self.tabela.setAlternatingRowColors(True)
         self.tabela.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tabela.setSelectionMode(QAbstractItemView.SingleSelection)
         self.tabela.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.tabela.verticalHeader().setVisible(False)
         self.tabela.itemSelectionChanged.connect(self._ao_selecionar)
 
         self.form_layout = QFormLayout()
@@ -350,7 +588,7 @@ class CrudTab(QWidget):
                 item = QTableWidgetItem("" if valor is None else str(valor))
                 item.setData(Qt.UserRole, registro.id)
                 self.tabela.setItem(row, col, item)
-        self.tabela.resizeColumnsToContents()
+        self.tabela.ajustar_colunas()
 
     def _definir_modo(self, modo: str, descricao: str = "") -> None:
         self._modo = modo

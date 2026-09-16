@@ -36,7 +36,7 @@ from .. import repositories as repo
 from ..models import TRIMESTRES, TRIMESTRES_LABEL
 from ..planilha import exportar_modelo_distribuicao, importar_distribuicao
 from .importacao_distribuicao import DialogoRevisaoImportacao, associar_linhas
-from .common import formatar_numero, formatar_valor_br, preencher_combo
+from .common import formatar_numero, formatar_valor_br, preencher_combo, TabelaLista
 from .theme import ENTROU_BG, ENTROU_FG, SAIU_BG, SAIU_FG
 from .theme import estado as tema_estado
 
@@ -122,13 +122,12 @@ class DistribuicaoTrimestralView(QWidget):
         self.aviso_trancado.setWordWrap(True)
         self.aviso_trancado.hide()
 
-        self.tabela = QTableWidget(0, len(COLUNAS))
+        self.tabela = TabelaLista(0, len(COLUNAS), coluna_flexivel=0,
+                                  mensagem_vazia="Escolha uma empresa, o ano e o trimestre.")
         self.tabela.setHorizontalHeaderLabels(COLUNAS)
-        self.tabela.setAlternatingRowColors(True)
         self.tabela.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tabela.setSelectionMode(QAbstractItemView.SingleSelection)
         self.tabela.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.tabela.verticalHeader().setVisible(False)
 
         self.btn_editar = QPushButton("Lançar trimestre")
         self.btn_editar.setProperty("role", "primario")
@@ -327,7 +326,7 @@ class DistribuicaoTrimestralView(QWidget):
                     item.setBackground(QColor(cor_fundo))
                     item.setForeground(QColor(cor_texto))
                 self.tabela.setItem(row, col, item)
-        self.tabela.resizeColumnsToContents()
+        self.tabela.ajustar_colunas()
         self._atualizar_disponibilidade_botoes()
 
     def _atualizar_disponibilidade_botoes(self) -> None:

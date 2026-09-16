@@ -24,11 +24,75 @@ O botão **Cancelar** aparece sempre que o formulário está aberto: descarta o
 que foi digitado e volta ao estado bloqueado, sem alterar nada do que já
 estava salvo.
 
-## Modelos de planilha
+### A tela de entrada
 
-A importação em massa (**Sistema · Importação em massa**) tem três modelos, e
-o combo **Modelo** vale tanto para exportar a planilha em branco quanto para
-exportar o cadastro atual:
+É a primeira coisa que se vê do programa todo dia, e por isso tem uma coluna
+só, centrada: marca, um **Seja bem-vindo**, os campos e o botão de entrar,
+tudo dentro do mesmo cartão usado no resto do sistema. O primeiro acesso
+(quando ainda não há usuário) usa o mesmo desenho, com o texto explicando que
+a conta criada ali será a administradora.
+
+### A tipografia
+
+Uma família só, sem serifa, com a **Segoe UI** à frente da lista: no Windows,
+onde o programa roda instalado, ela é a fonte do próprio sistema — a mais
+comum que existe por lá, e a que faz o programa parecer parte do ambiente. As
+seguintes (Inter, Noto Sans, Cantarell) cobrem Linux e macOS sem depender de
+fonte empacotada junto. Os títulos usavam serifa (Constantia/Cambria), o que
+dava ao programa um ar de documento antigo; a mistura das duas famílias era o
+que mais pesava. O corpo subiu de 13 para 14px.
+
+### Os botões e a espera
+
+Os botões têm três níveis, e é o contorno que os separa: o **primário** (tinta
+cheia) é a próxima ação esperada, o secundário tem contorno fino — antes era
+contorno grosso em tinta cheia, o que fazia toda barra de ações parecer uma
+fileira de botões primários competindo entre si —, e o de **perigo** (excluir,
+encerrar) é o único vermelho. Cantos mais arredondados, mais respiro interno e
+foco visível pelo teclado, que o retângulo pontilhado do Qt não dava.
+
+Operação demorada agora avisa ([ocupado.py](controle_lucros/ui/ocupado.py)). O
+trabalho roda na mesma linha de execução que desenha a tela, então durante
+alguns segundos a janela não responde — sem sinal nenhum, a leitura é de
+programa travado, e a reação natural é clicar de novo. Há duas formas: quando
+dá para contar os passos (gravar a importação linha a linha, emitir um informe
+por empresa), a barra anda de verdade com "84 de 160"; quando é uma chamada só
+(ler o PDF, gravar a planilha), fica a janelinha dizendo o que está
+acontecendo, com o cursor de espera.
+
+A contagem vem de baixo: `aplicar_importacao_cadastro` e `gerar_pdfs` aceitam
+um callback opcional `progresso(feitos, total)`. Assim o repositório não
+precisa saber que existe uma tela, e continua chamável sem callback nenhum — é
+como os testes o usam.
+
+### As tabelas
+
+Todas as listas do sistema usam a `TabelaLista`
+([common.py](controle_lucros/ui/common.py)), que troca a grade quadriculada do
+Qt por linhas de lista. A grade desenha trilhos verticais que descem até o
+último registro e param no ar: com quatro empresas numa tela alta, a tabela
+parece cortada no meio. Sem os trilhos, cada registro é uma linha separada da
+seguinte, e onde a lista acaba é só onde ela acaba.
+
+A largura também tem dono. Sobrando espaço, ele vai para uma coluna escolhida
+por tela (o nome da empresa, o sócio, os detalhes do log) e o vão morto à
+direita desaparece; faltando, é dessa mesma coluna que sai — até um mínimo, e
+só quando isso realmente evita a barra de rolagem. Quem cede é sempre uma só
+porque a largura que o Qt calcula é a exata do conteúdo, e tirar um pixel de
+uma coluna de data já corta o `2010-01-05` no meio. A regra é uma função pura,
+`larguras_ajustadas`, testada sem abrir janela. Texto que não coube inteiro
+ganha o conteúdo completo como dica, e tabela vazia diz que está vazia em vez
+de parecer tela que não carregou.
+
+## Formatos de planilha
+
+A tela **Sistema · Importação e exportação** gira em torno de um conceito só, o
+**formato**, e ele vale para os dois lados: exporta no mesmo desenho em que
+importa. São dois tipos — os *modelos do sistema*, lidos pelo nome no
+cabeçalho, e os *layouts* configurados pelo usuário, lidos pela posição da
+coluna (adiante).
+
+Os três modelos do sistema:
 
 | Modelo | Colunas | Para quê |
 |---|---|---|
@@ -46,6 +110,132 @@ para cada sócio, que o mesmo sócio se repete em empresas diferentes sem
 duplicar cadastro, e que sócio pode ser pessoa jurídica. O exemplo fica em aba
 separada de propósito: junto dos dados, quem esquecesse de apagar importaria
 empresas fictícias.
+
+## Layouts de coluna: importar planilha de qualquer origem
+
+Planilha que já existe — vinda de outro sistema contábil, do banco, de um
+relatório antigo — não precisa ser remontada no modelo daqui. Um **layout**
+descreve a planilha que o usuário já tem: para cada campo do cadastro, a
+**letra da coluna** onde ele está (`A`, `B`, `AC`…) e a linha em que os dados
+começam. Campo sem letra é informação que aquela origem não traz.
+
+Salvo com um nome, o layout vira o formato daquela origem: configura-se uma vez
+e depois é só apontar o arquivo. Na tela, **Novo layout** começa do zero e
+**Duplicar como layout** já vem preenchido a partir do formato selecionado.
+
+**Conferir com uma planilha…** abre um arquivo e mostra as primeiras linhas já
+lidas pelo layout, sem importar nada — a mesma prévia aparece como confirmação
+antes de qualquer importação. É o que separa configurar as letras no escuro de
+conferir antes de gravar, porque uma letra errada só apareceria muito depois.
+
+A validação recusa o que falharia em silêncio: nome da empresa é obrigatório,
+layout com dados de sócio exige a coluna do nome do sócio (sem ela toda linha
+seria descartada), e a mesma letra não pode estar em dois campos. Daí em
+diante o caminho é o de sempre — CPF identifica o sócio, empresa nova é criada,
+sócio novo espera confirmação, e vínculo que já existe é ignorado.
+
+## Importar o relatório de sócios (PDF ou planilha)
+
+Na mesma tela, o botão **Importar relatório de sócios** lê o relatório *Cadastro
+de Sócios* emitido por outro sistema contábil e traz, de cada empresa listada, os
+sócios com CPF/CNPJ, participação e datas de entrada e saída — quem está
+migrando de sistema alimenta o cadastro sem redigitar o quadro societário.
+
+Daí em diante é o mesmo caminho da planilha: empresa reconhecida ou criada,
+sócio reconhecido pelo CPF, e o que não bater vai para a revisão — onde
+**Cadastrar todos como novos sócios** resolve o quadro inteiro de uma empresa
+nova com uma confirmação só, em vez de uma por pessoa.
+
+O relatório não traz CNPJ da empresa, capital social nem quantidade de cotas:
+empresa criada por aí nasce com esses campos em branco, e a tela avisa isso
+antes de aplicar. A leitura usa o QtPdf, que já vem no PySide6 — nenhuma
+dependência nova; só PDF com camada de texto (gerado por sistema, não
+escaneado).
+
+A leitura não casa o layout inteiro com uma expressão regular, porque cada
+sistema imprime esse relatório de um jeito e recusar o arquivo é o pior
+resultado possível — a pessoa não tem como saber o que desagradou. Em vez
+disso, [relatorio_socios.py](controle_lucros/relatorio_socios.py) **ancora no
+CPF/CNPJ**, o único campo de formato inconfundível, e lê o resto em relação a
+ele: antes vêm código e nome, depois as datas e o percentual, em qualquer ordem
+e com colunas extras no meio. São aceitos cabeçalho com ou sem dois-pontos,
+travessão no lugar do hífen, data do quadro em linha separada, linha sem coluna
+de código, percentual com `%`, CPF sem pontuação, datas em quatro formatos e o
+cabeçalho da empresa repetido a cada página (as páginas viram um quadro só).
+No cabeçalho, também `Cliente:`/`Estabelecimento:`, número e nome em colunas
+separadas, empresa sem número (quando o arquivo não tem nenhuma numerada) e
+empresa identificada por CNPJ — que nesse caso é aproveitado.
+
+O outro lado é igualmente testado: o cabeçalho e o rodapé com o CNPJ do
+escritório emissor, linhas de total e cabeçalhos de coluna **não** viram
+sócios — uma linha de sócio precisa ter nome, documento e data. E o que tinha
+cara de sócio mas não foi entendido é contado e mostrado na confirmação, para
+que nunca se importe parte do quadro em silêncio.
+
+O mesmo relatório costuma sair também em planilha, e ela é aceita: **.xls** (o
+BIFF do Excel 97-2003, que é o que esses sistemas exportam), .xlsx e .csv. Como
+nenhuma biblioteca instalada lê .xls — e a usual, `xlrd`, recusa o arquivo real
+que motivou o recurso, por causa de registros fora de ordem que o exportador
+grava —, [leitor_xls.py](controle_lucros/leitor_xls.py) faz essa leitura com a
+biblioteca padrão do Python: abre o container OLE, percorre os registros BIFF
+sem confiar na estrutura declarada e recolhe as células onde estiverem,
+convertendo data (que no Excel é número com formato de data) e texto
+compartilhado. Continua sem dependência nova.
+
+Lida a planilha, cada linha vira uma linha de texto e segue pelo **mesmo**
+leitor do PDF — manter duas listas de regras de layout garantiria que uma
+ficasse para trás. Como a leitura se ancora no CPF/CNPJ, as colunas podem estar
+em outra ordem, e estão: na planilha a participação vem antes das datas. O
+arquivo real foi conferido dos dois jeitos e produz exatamente o mesmo quadro
+societário.
+
+**Reimportar é seguro:** o relatório do mês seguinte traz o histórico inteiro
+de novo, e o importador reconhece o que já existe — inclusive os vínculos já
+encerrados, que antes eram recriados a cada importação.
+
+## Mapa de vínculos do sócio
+
+Na aba **Sócios**, o botão **Mapa de vínculos** (no alto do painel de vínculos)
+abre um diagrama do que a tabela mostra em linhas: o sócio no centro e as
+empresas ao redor, ligadas por um traço com o percentual e as datas. Vínculo
+encerrado sai com traço pontilhado e caixa em vermelho, de modo que a diferença
+sobrevive à impressão em preto e branco.
+
+O desenho é exportável em **PDF** (uma página, pronta para anexar) e em **SVG**
+(vetorial, para slide ou laudo). A geometria vive em
+[mapa_vinculos.py](controle_lucros/mapa_vinculos.py), sem Qt — é lá que se testa
+que caixa não fica por cima de caixa —, e uma única função de pintura serve à
+tela, ao PDF e ao SVG, para que o arquivo exportado nunca divirja do que se viu
+antes de exportar. Tudo com QtSvg/QPdfWriter, que já vêm no PySide6: nenhuma
+dependência nova.
+
+## O que os dashboards apontam
+
+Os gráficos respondiam "quanto" e "como ficou dividido" — descrição, não
+diagnóstico. Duas leituras novas ([analise.py](controle_lucros/analise.py),
+módulo puro, sem banco e sem Qt) usam dados que já estavam gravados lado a lado
+e nunca eram cruzados:
+
+- **Distribuição sem pró-labore** — sócio pessoa física que recebeu lucros e
+  nenhum pró-labore no ano, somado por (sócio, empresa) e com os anos em que a
+  situação se repetiu. Pessoa jurídica é excluída: holding sócia não tem
+  pró-labore, e listá-la encheria o painel de casos que não são caso — o aviso
+  que grita sempre deixa de ser lido.
+- **Desvio em relação à participação** — quanto cada sócio recebeu além ou
+  aquém, em reais, do que a participação daria. O esperado sai do total
+  distribuído *daquele ano*, porque é ele que a participação divide; misturar
+  anos daria um esperado que nunca existiu. O gráfico é de barras divergentes e
+  não usa verde: receber aquém é tão fora do eixo quanto receber além.
+
+As duas substituíram as pizzas que havia — a de proporcional × desproporcional
+repetia em desenho os dois cartões logo acima, e a de classificações dizia
+quantos sócios estavam fora do eixo sem dizer por quanto.
+
+O programa aponta o fato e não dá o veredito: se o pró-labore é compatível com
+o trabalho, ou se a desproporção está amparada no contrato social, é análise de
+quem entende do caso. E fica registrado o que **não** dá para fazer: a leitura
+mais forte seria distribuição acima do lucro apurado, mas o sistema não guarda
+resultado do exercício — precisaria de um campo novo por empresa e por ano.
 
 ## Distribuição trimestral
 

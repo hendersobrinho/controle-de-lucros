@@ -29,7 +29,7 @@ TITULOS = {
     "distribuicao.trimestral": "Distribuição trimestral",
     "dashboard.geral": "Dashboard  ·  Visão geral",
     "dashboard.empresa": "Dashboard  ·  Análise por empresa",
-    "sistema.importar": "Sistema  ·  Importação em massa",
+    "sistema.importar": "Sistema  ·  Importação e exportação",
     "sistema.log": "Log de atividades",
     "sistema.usuarios": "Usuários",
     "sistema.backup": "Backup",

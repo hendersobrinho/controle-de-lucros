@@ -8,6 +8,7 @@ from __future__ import annotations
 import datetime as dt
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -34,11 +35,6 @@ from PySide6.QtWidgets import (
 from .. import repositories as repo
 from ..models import TIPOS_PESSOA_LABEL, Socio, VinculoSocietario
 from .common import (
-    MODO_CANCELADO,
-    MODO_EDICAO,
-    MODO_NOVO,
-    MODO_SALVO,
-    MODO_VAZIO,
     aplicar_modo_formulario,
     configurar_campo_cnpj,
     configurar_campo_cpf,
@@ -46,9 +42,16 @@ from .common import (
     documento_valido_ou_vazio,
     formatar_numero,
     formatar_valor_br,
+    MODO_CANCELADO,
+    MODO_EDICAO,
+    MODO_NOVO,
+    MODO_SALVO,
+    MODO_VAZIO,
+    TabelaLista,
 )
+from .diagrama_vinculos import DialogoMapaVinculos
 from .informe_rendimentos_view import InformeRendimentosDialog
-from .theme import SAIU_BG, SAIU_FG
+from .theme import SAIU_BG, SAIU_FG, SEAL_GREEN
 from .theme import estado as tema_estado
 
 
@@ -258,6 +261,7 @@ class _DialogoEditarVinculo(QDialog):
 
 
 class SociosTab(QWidget):
+    COLUNA_SITUACAO = 7
     COLUNAS_VINCULOS = [
         "Empresa",
         "% registrado",
@@ -317,13 +321,12 @@ class SociosTab(QWidget):
         self.busca.textChanged.connect(lambda _texto: self.atualizar())
         col.addWidget(self.busca)
 
-        self.tabela = QTableWidget(0, 3)
+        self.tabela = TabelaLista(0, 3, coluna_flexivel=0,
+                                  mensagem_vazia="Nenhum sócio cadastrado ainda.")
         self.tabela.setHorizontalHeaderLabels(["Nome", "CPF/CNPJ", "Tipo"])
-        self.tabela.setAlternatingRowColors(True)
         self.tabela.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tabela.setSelectionMode(QAbstractItemView.SingleSelection)
         self.tabela.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.tabela.verticalHeader().setVisible(False)
         self.tabela.itemSelectionChanged.connect(self._ao_selecionar_socio)
         col.addWidget(self.tabela, 1)
 
@@ -410,17 +413,33 @@ class SociosTab(QWidget):
         self.subtitulo_vinculos = QLabel("Selecione um sócio para ver e gerenciar suas empresas.")
         self.subtitulo_vinculos.setProperty("role", "subtitulo")
 
-        col.addWidget(self.titulo_vinculos)
+        # O mapa fica no cabeçalho, não na barra de baixo: ele não age sobre
+        # nada, é outra forma de ver o que este painel já mostra — e a barra de
+        # ações, com mais um botão, truncava os rótulos na janela no mínimo.
+        self.btn_mapa = QPushButton("Mapa de vínculos")
+        self.btn_mapa.setToolTip(
+            "Abre um diagrama com as empresas em que este sócio participa — dá pra exportar "
+            "em PDF ou SVG para anexar a processo, contrato ou apresentação."
+        )
+        self.btn_mapa.clicked.connect(self._abrir_mapa_vinculos)
+
+        linha_titulo = QHBoxLayout()
+        linha_titulo.addWidget(self.titulo_vinculos)
+        linha_titulo.addStretch()
+        linha_titulo.addWidget(self.btn_mapa)
+
+        col.addLayout(linha_titulo)
         col.addWidget(self.subtitulo_vinculos)
         col.addWidget(_hairline())
 
-        self.tabela_vinculos = QTableWidget(0, len(self.COLUNAS_VINCULOS))
+        self.tabela_vinculos = TabelaLista(
+            0, len(self.COLUNAS_VINCULOS), coluna_flexivel=0,
+            mensagem_vazia="Selecione um sócio para ver as empresas dele.",
+        )
         self.tabela_vinculos.setHorizontalHeaderLabels(self.COLUNAS_VINCULOS)
-        self.tabela_vinculos.setAlternatingRowColors(True)
         self.tabela_vinculos.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tabela_vinculos.setSelectionMode(QAbstractItemView.SingleSelection)
         self.tabela_vinculos.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.tabela_vinculos.verticalHeader().setVisible(False)
         self.tabela_vinculos.itemSelectionChanged.connect(self._atualizar_disponibilidade_botoes)
         col.addWidget(self.tabela_vinculos, 1)
 
@@ -475,7 +494,7 @@ class SociosTab(QWidget):
             self.tabela.setItem(row, 0, QTableWidgetItem(s.nome))
             self.tabela.setItem(row, 1, QTableWidgetItem(s.cpf or ""))
             self.tabela.setItem(row, 2, QTableWidgetItem(TIPOS_PESSOA_LABEL.get(s.tipo_pessoa, s.tipo_pessoa)))
-        self.tabela.resizeColumnsToContents()
+        self.tabela.ajustar_colunas()
         self._atualizar_painel_vinculos()
 
     def _ajustar_mascara_documento(self, *_args) -> None:
@@ -687,13 +706,23 @@ class SociosTab(QWidget):
             for col, valor in enumerate(valores):
                 item = QTableWidgetItem(valor)
                 item.setData(Qt.UserRole, v.id)
+                if col == self.COLUNA_SITUACAO:
+                    # A situação é a única coluna que é um julgamento, não um
+                    # dado: em verde e vermelho ela se lê antes de ser lida.
+                    item.setForeground(QColor(SEAL_GREEN() if ativo else SAIU_FG()))
+                    if not ativo:
+                        item.setBackground(QColor(SAIU_BG()))
+                    fonte = item.font()
+                    fonte.setBold(True)
+                    item.setFont(fonte)
                 self.tabela_vinculos.setItem(row, col, item)
-        self.tabela_vinculos.resizeColumnsToContents()
+        self.tabela_vinculos.ajustar_colunas()
         self._atualizar_disponibilidade_botoes()
 
     def _atualizar_disponibilidade_botoes(self) -> None:
         tem_socio = self._socio_atual_id is not None
         self.btn_associar.setEnabled(tem_socio)
+        self.btn_mapa.setEnabled(tem_socio)
         self.btn_informe.setEnabled(tem_socio)
         tem_vinculo = self._vinculo_selecionado() is not None
         vinculo_ativo_selecionado = self._vinculo_ativo_selecionado() is not None
@@ -798,6 +827,32 @@ class SociosTab(QWidget):
         if socio is None:
             return
         InformeRendimentosDialog(self.conn, socio, self).exec()
+
+    def _abrir_mapa_vinculos(self) -> None:
+        """Mostra num desenho o que a tabela ao lado mostra em linhas.
+
+        A tabela responde "quais empresas"; o mapa mostra a forma — onde a
+        participação é grande, onde é simbólica, de onde a pessoa já saiu. É o
+        que se leva para uma reunião ou se anexa a um processo, e por isso sai
+        em PDF e em SVG."""
+        socio = next((s for s in self._socios if s.id == self._socio_atual_id), None)
+        if socio is None:
+            return
+        empresas = {e.id: e for e in repo.listar_empresas(self.conn)}
+        vinculos = [
+            {
+                "empresa_nome": empresas[v.empresa_id].nome if v.empresa_id in empresas else "?",
+                # O percentual registrado no vínculo, o mesmo da coluna
+                # "% registrado" da tabela — não o recalculado por cotas, que
+                # muda com o capital da empresa e faria o desenho discordar
+                # do que está ao lado dele na tela.
+                "percentual": v.percentual_capital,
+                "data_entrada": v.data_entrada,
+                "data_saida": v.data_saida,
+            }
+            for v in repo.listar_vinculos_socio(self.conn, socio.id)
+        ]
+        DialogoMapaVinculos(socio.nome, socio.cpf or "", vinculos, self).exec()
 
     def _excluir_vinculo(self) -> None:
         """Apaga o vínculo de vez — diferente de "Encerrar", que só marca a

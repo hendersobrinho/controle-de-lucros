@@ -32,7 +32,7 @@ from .. import repositories as repo
 from ..models import TIPOS_MOVIMENTACAO, TIPOS_MOVIMENTACAO_LABEL, Movimentacao
 from ..planilha import exportar_modelo_distribuicao, importar_distribuicao
 from .importacao_distribuicao import DialogoRevisaoImportacao, associar_linhas
-from .common import formatar_numero, formatar_valor_br, preencher_combo
+from .common import formatar_numero, formatar_valor_br, preencher_combo, TabelaLista
 from .theme import ENTROU_BG, ENTROU_FG, SAIU_BG, SAIU_FG, SEAL_GREEN
 from .theme import estado as tema_estado
 
@@ -121,11 +121,10 @@ class _DialogoMovimentacoes(QDialog):
         self.setWindowTitle(f"Movimentações — {socio_nome} ({ano_base})")
         self.setMinimumWidth(480)
 
-        self.tabela = QTableWidget(0, 3)
+        self.tabela = TabelaLista(0, 3, coluna_flexivel=0)
         self.tabela.setHorizontalHeaderLabels(["Tipo", "Data", "Valor"])
         self.tabela.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.tabela.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.tabela.verticalHeader().setVisible(False)
 
         self.tipo = QComboBox()
         for tipo in TIPOS_MOVIMENTACAO:
@@ -178,7 +177,7 @@ class _DialogoMovimentacoes(QDialog):
             self.tabela.setItem(row, 0, QTableWidgetItem(TIPOS_MOVIMENTACAO_LABEL.get(m.tipo, m.tipo)))
             self.tabela.setItem(row, 1, QTableWidgetItem(m.data))
             self.tabela.setItem(row, 2, QTableWidgetItem(f"R$ {formatar_valor_br(m.valor)}"))
-        self.tabela.resizeColumnsToContents()
+        self.tabela.ajustar_colunas()
 
     def _adicionar(self) -> None:
         if self.valor.value() <= 0:
@@ -259,13 +258,12 @@ class DistribuicaoAnualView(QWidget):
         self.resumo = QLabel()
         self.resumo.setProperty("role", "subtitulo")
 
-        self.tabela = QTableWidget(0, len(COLUNAS))
+        self.tabela = TabelaLista(0, len(COLUNAS), coluna_flexivel=0,
+                                  mensagem_vazia="Escolha uma empresa e um ano.")
         self.tabela.setHorizontalHeaderLabels(COLUNAS)
-        self.tabela.setAlternatingRowColors(True)
         self.tabela.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tabela.setSelectionMode(QAbstractItemView.SingleSelection)
         self.tabela.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.tabela.verticalHeader().setVisible(False)
         self.tabela.itemSelectionChanged.connect(self._atualizar_disponibilidade_botoes)
 
         self._editando = False
@@ -497,7 +495,7 @@ class DistribuicaoAnualView(QWidget):
                     item.setBackground(QColor(cor_fundo))
                     item.setForeground(QColor(cor_texto))
                 self.tabela.setItem(row, col, item)
-        self.tabela.resizeColumnsToContents()
+        self.tabela.ajustar_colunas()
         self.tabela.resizeRowsToContents()
         self._atualizar_disponibilidade_botoes()
 

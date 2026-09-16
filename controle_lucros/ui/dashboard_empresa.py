@@ -23,7 +23,8 @@ from .. import repositories as repo
 from ..planilha import exportar_relatorio_excel
 from .classificacao import CLASSE_PDF, LABEL, cor_classificacao
 from .common import formatar_valor_br, preencher_combo
-from .graficos import grafico_capital_vs_distribuido, grafico_pizza_classificacoes, nova_chart_view
+from ..analise import desvio_por_socio
+from .graficos import grafico_capital_vs_distribuido, grafico_desvio_por_socio, nova_chart_view
 from .relatorio_pdf import exportar_relatorio_pdf
 from .theme import estado as tema_estado
 
@@ -75,11 +76,11 @@ class DashboardEmpresaView(QWidget):
         self.resumo.setProperty("role", "secao")
 
         self.grafico = nova_chart_view()
-        self.grafico_classificacoes = nova_chart_view()
+        self.grafico_desvio = nova_chart_view()
         graficos = QHBoxLayout()
         graficos.setSpacing(12)
         graficos.addWidget(self.grafico, 2)
-        graficos.addWidget(self.grafico_classificacoes, 1)
+        graficos.addWidget(self.grafico_desvio, 1)
 
         legenda = QHBoxLayout()
         self._legenda_labels: list[tuple[str, QLabel]] = []
@@ -156,7 +157,7 @@ class DashboardEmpresaView(QWidget):
             self._linhas = []
             self.resumo.setText("Cadastre uma empresa primeiro.")
             grafico_capital_vs_distribuido(self.grafico, [])
-            grafico_pizza_classificacoes(self.grafico_classificacoes, [])
+            grafico_desvio_por_socio(self.grafico_desvio, [])
             self._atualizar_botoes()
             return
 
@@ -164,7 +165,9 @@ class DashboardEmpresaView(QWidget):
             self.conn, empresa_id, self.ano_de.value(), self.ano_ate.value(), self.tolerancia.value()
         )
         grafico_capital_vs_distribuido(self.grafico, self._linhas)
-        grafico_pizza_classificacoes(self.grafico_classificacoes, self._linhas)
+        # Quanto cada sócio saiu do eixo, em reais — a pizza de classificações
+        # dizia quantos estavam fora sem dizer por quanto.
+        grafico_desvio_por_socio(self.grafico_desvio, desvio_por_socio(self._linhas))
 
         total = sum(l["valor_distribuido"] for l in self._linhas)
         proporcional = sum(l["valor_distribuido"] for l in self._linhas if l["classificacao"] == "proporcional")

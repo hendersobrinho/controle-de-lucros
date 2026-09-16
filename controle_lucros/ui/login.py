@@ -3,18 +3,90 @@ banco está vazio) e o login normal do dia a dia."""
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QFrame,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPushButton,
     QVBoxLayout,
 )
 
 from .. import repositories as repo
 from ..models import Usuario
 from . import theme
+from .icones import pasta_assets
+
+LARGURA_ENTRADA = 420
+
+
+def _marca(tamanho: int = 72) -> QLabel:
+    """A marca do programa no topo da tela de entrada. Se o arquivo não estiver
+    lá (execução a partir do código sem os ícones gerados), o rótulo fica vazio
+    e o resto da tela continua de pé."""
+    rotulo = QLabel()
+    rotulo.setAlignment(Qt.AlignCenter)
+    caminho = pasta_assets() / "logo.png"
+    if caminho.exists():
+        imagem = QPixmap(str(caminho)).scaled(
+            tamanho, tamanho, Qt.KeepAspectRatio, Qt.SmoothTransformation
+        )
+        rotulo.setPixmap(imagem)
+    return rotulo
+
+
+def _centralizado(texto: str, papel: str) -> QLabel:
+    rotulo = QLabel(texto)
+    rotulo.setProperty("role", papel)
+    rotulo.setAlignment(Qt.AlignCenter)
+    rotulo.setWordWrap(True)
+    return rotulo
+
+
+def _campo(texto_de_apoio: str, senha: bool = False) -> QLineEdit:
+    campo = QLineEdit()
+    campo.setPlaceholderText(texto_de_apoio)
+    campo.setMinimumHeight(38)
+    campo.setAlignment(Qt.AlignCenter)
+    if senha:
+        campo.setEchoMode(QLineEdit.Password)
+    return campo
+
+
+def _botao_discreto(texto: str) -> QPushButton:
+    """Ação secundária da tela de entrada. Sem moldura, porque ela compete com
+    o "Entrar" — que é o que a pessoa vem fazer aqui todo dia."""
+    botao = QPushButton(texto)
+    botao.setFlat(True)
+    botao.setCursor(Qt.PointingHandCursor)
+    botao.setStyleSheet(
+        f"QPushButton {{ border: none; background: transparent; color: {theme.INK_MUTED()};"
+        f" font-size: 13px; padding: 6px 10px; }}"
+        f"QPushButton:hover {{ color: {theme.INK()}; text-decoration: underline; }}"
+    )
+    return botao
+
+
+def _cartao(layout_interno: QVBoxLayout) -> QFrame:
+    """O mesmo cartão das outras telas, aqui segurando a coluna de entrada —
+    a tela fica com um centro, em vez de campos soltos sobre o fundo."""
+    cartao = QFrame()
+    cartao.setProperty("role", "card")
+    cartao.setLayout(layout_interno)
+    return cartao
+
+
+def _rotulo_de_erro() -> QLabel:
+    erro = QLabel("")
+    erro.setAlignment(Qt.AlignCenter)
+    erro.setWordWrap(True)
+    erro.setStyleSheet(f"color: {theme.SEAL_RED()}; font-size: 12px;")
+    erro.hide()
+    return erro
 
 
 class DialogoPrimeiroUsuario(QDialog):
@@ -24,46 +96,56 @@ class DialogoPrimeiroUsuario(QDialog):
     def __init__(self, conn, parent=None):
         super().__init__(parent)
         self.conn = conn
-        self.setWindowTitle("Bem-vindo — crie o primeiro usuário")
-        self.setMinimumWidth(380)
+        self.setWindowTitle("Bem-vindo")
+        self.setFixedWidth(LARGURA_ENTRADA)
         self.setModal(True)
 
-        titulo = QLabel("Nenhum usuário cadastrado ainda")
-        titulo.setProperty("role", "titulo")
-        subtitulo = QLabel("Crie a primeira conta — ela será a administradora do sistema.")
-        subtitulo.setProperty("role", "subtitulo")
-        subtitulo.setWordWrap(True)
+        self.nome = _campo("seu nome completo")
+        self.login = _campo("um login para entrar")
+        self.senha = _campo("uma senha", senha=True)
+        self.confirmar = _campo("repita a senha", senha=True)
+        self.confirmar.returnPressed.connect(self._criar)
+        self.erro = _rotulo_de_erro()
 
-        self.nome = QLineEdit()
-        self.login = QLineEdit()
-        self.senha = QLineEdit()
-        self.senha.setEchoMode(QLineEdit.Password)
-        self.confirmar = QLineEdit()
-        self.confirmar.setEchoMode(QLineEdit.Password)
+        criar = QPushButton("Criar conta e entrar")
+        criar.setProperty("role", "primario")
+        criar.setMinimumHeight(40)
+        criar.clicked.connect(self._criar)
 
-        form = QFormLayout()
-        form.addRow("Nome", self.nome)
-        form.addRow("Login", self.login)
-        form.addRow("Senha", self.senha)
-        form.addRow("Confirmar senha", self.confirmar)
+        sair = _botao_discreto("Sair")
+        sair.clicked.connect(self.reject)
 
-        self.erro = QLabel("")
-        self.erro.setStyleSheet(f"color: {theme.SEAL_RED()}; font-size: 11px;")
-        self.erro.setWordWrap(True)
-        self.erro.hide()
-
-        botoes = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        botoes.button(QDialogButtonBox.Ok).setText("Criar conta")
-        botoes.accepted.connect(self._criar)
-        botoes.rejected.connect(self.reject)
+        miolo = QVBoxLayout()
+        miolo.setContentsMargins(38, 32, 38, 30)
+        miolo.setSpacing(0)
+        miolo.addWidget(_marca())
+        miolo.addSpacing(16)
+        miolo.addWidget(_centralizado("Seja bem-vindo", "titulo"))
+        miolo.addSpacing(4)
+        miolo.addWidget(_centralizado(
+            "Este é o primeiro acesso ao <b>Controle de Distribuição de Lucros</b>. "
+            "Crie sua conta — ela será a administradora do sistema.", "subtitulo"))
+        miolo.addSpacing(22)
+        for campo in (self.nome, self.login, self.senha, self.confirmar):
+            miolo.addWidget(campo)
+            miolo.addSpacing(10)
+        miolo.addWidget(self.erro)
+        miolo.addSpacing(6)
+        miolo.addWidget(criar)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(titulo)
-        layout.addWidget(subtitulo)
-        layout.addSpacing(8)
-        layout.addLayout(form)
-        layout.addWidget(self.erro)
-        layout.addWidget(botoes)
+        layout.setContentsMargins(26, 26, 26, 18)
+        layout.setSpacing(0)
+        layout.addWidget(_cartao(miolo))
+        layout.addSpacing(6)
+
+        rodape = QHBoxLayout()
+        rodape.addStretch()
+        rodape.addWidget(sair)
+        rodape.addStretch()
+        layout.addLayout(rodape)
+
+        self.nome.setFocus()
 
     def _criar(self) -> None:
         nome = self.nome.text().strip()
@@ -95,41 +177,54 @@ class DialogoLogin(QDialog):
         self.conn = conn
         self.usuario_autenticado: Usuario | None = None
         self.setWindowTitle("Entrar")
-        self.setMinimumWidth(340)
+        self.setFixedWidth(LARGURA_ENTRADA)
         self.setModal(True)
 
-        titulo = QLabel("Controle de Distribuição de Lucros")
-        titulo.setProperty("role", "titulo")
-        subtitulo = QLabel("Entre com seu usuário e senha.")
-        subtitulo.setProperty("role", "subtitulo")
-
-        self.login = QLineEdit()
-        self.login.setPlaceholderText("login")
-        self.senha = QLineEdit()
-        self.senha.setPlaceholderText("senha")
-        self.senha.setEchoMode(QLineEdit.Password)
+        self.login = _campo("login")
+        self.login.returnPressed.connect(lambda: self.senha.setFocus())
+        self.senha = _campo("senha", senha=True)
         self.senha.returnPressed.connect(self._entrar)
+        self.erro = _rotulo_de_erro()
 
-        form = QFormLayout()
-        form.addRow("Login", self.login)
-        form.addRow("Senha", self.senha)
+        entrar = QPushButton("Entrar")
+        entrar.setProperty("role", "primario")
+        entrar.setMinimumHeight(40)
+        entrar.clicked.connect(self._entrar)
 
-        self.erro = QLabel("")
-        self.erro.setStyleSheet(f"color: {theme.SEAL_RED()}; font-size: 11px;")
-        self.erro.hide()
+        sair = _botao_discreto("Sair")
+        sair.clicked.connect(self.reject)
 
-        botoes = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        botoes.button(QDialogButtonBox.Ok).setText("Entrar")
-        botoes.accepted.connect(self._entrar)
-        botoes.rejected.connect(self.reject)
+        # Tudo numa coluna centrada, em vez do formulário com rótulo à
+        # esquerda: são dois campos, e a tela de entrada é a primeira coisa
+        # que se vê do programa todo dia.
+        miolo = QVBoxLayout()
+        miolo.setContentsMargins(38, 34, 38, 30)
+        miolo.setSpacing(0)
+        miolo.addWidget(_marca())
+        miolo.addSpacing(16)
+        miolo.addWidget(_centralizado("Seja bem-vindo", "titulo"))
+        miolo.addSpacing(4)
+        miolo.addWidget(_centralizado("Controle de Distribuição de Lucros", "subtitulo"))
+        miolo.addSpacing(26)
+        miolo.addWidget(self.login)
+        miolo.addSpacing(10)
+        miolo.addWidget(self.senha)
+        miolo.addSpacing(10)
+        miolo.addWidget(self.erro)
+        miolo.addSpacing(6)
+        miolo.addWidget(entrar)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(titulo)
-        layout.addWidget(subtitulo)
-        layout.addSpacing(8)
-        layout.addLayout(form)
-        layout.addWidget(self.erro)
-        layout.addWidget(botoes)
+        layout.setContentsMargins(26, 26, 26, 18)
+        layout.setSpacing(0)
+        layout.addWidget(_cartao(miolo))
+        layout.addSpacing(6)
+
+        rodape = QHBoxLayout()
+        rodape.addStretch()
+        rodape.addWidget(sair)
+        rodape.addStretch()
+        layout.addLayout(rodape)
 
         self.login.setFocus()
 
