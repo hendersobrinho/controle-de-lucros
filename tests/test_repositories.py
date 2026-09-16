@@ -1376,3 +1376,89 @@ def test_importacao_avisa_participacao_que_nao_pode_ser_atualizada(conn):
     assert aplicado["participacoes_atualizadas"] == 0
     (vinculo,) = repo.listar_vinculos_empresa(conn, empresa_id)
     assert vinculo.percentual_capital == 84.55
+
+
+def test_encerra_apenas_quem_nao_esta_no_quadro_do_relatorio(conn):
+    """Opção "o relatório é o quadro completo": quem continua ativo aqui e
+    não está no arquivo recebe saída na data da alteração."""
+    empresa_id = _nova_empresa(conn)
+    fica = repo.salvar_socio(conn, Socio(id=None, nome="Fulano de Tal", cpf="111.111.111-11"))
+    sai = repo.salvar_socio(conn, Socio(id=None, nome="Beltrano Ausente", cpf="222.222.222-22"))
+    for socio_id in (fica, sai):
+        repo.salvar_vinculo(
+            conn,
+            VinculoSocietario(
+                id=None, empresa_id=empresa_id, socio_id=socio_id,
+                percentual_capital=50.0, quantidade_cotas=500,
+                data_entrada="2023-01-01", data_saida=None,
+            ),
+        )
+    alteracao_id = repo.salvar_alteracao(
+        conn,
+        AlteracaoContratual(
+            id=None, empresa_id=empresa_id, numero=1, data="2025-06-01",
+            nome_empresa="ACME LTDA", capital_social=10000, quantidade_cotas=1000, descricao="",
+        ),
+    )
+
+    encerrados = repo.encerrar_vinculos_fora_da_lista(
+        conn, empresa_id, {"11111111111"}, "2025-06-01", alteracao_id
+    )
+
+    assert encerrados == ["Beltrano Ausente"]
+    por_socio = {v.socio_id: v for v in repo.listar_vinculos_empresa(conn, empresa_id)}
+    assert por_socio[fica].data_saida is None
+    assert por_socio[sai].data_saida == "2025-06-01"
+    assert por_socio[sai].alteracao_saida_id == alteracao_id
+
+
+def test_socio_sem_documento_nunca_recebe_baixa_por_ausencia(conn):
+    """Sem CPF não dá pra afirmar que ele não está no arquivo, e supor levaria
+    a encerrar vínculo de sócio ativo."""
+    empresa_id = _nova_empresa(conn)
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="Sem Documento", cpf=""))
+    repo.salvar_vinculo(
+        conn,
+        VinculoSocietario(
+            id=None, empresa_id=empresa_id, socio_id=socio_id,
+            percentual_capital=100.0, quantidade_cotas=1000,
+            data_entrada="2023-01-01", data_saida=None,
+        ),
+    )
+
+    assert repo.vinculos_ativos_fora_da_lista(conn, empresa_id, {"11111111111"}, "2025-06-01") == []
+    assert repo.encerrar_vinculos_fora_da_lista(
+        conn, empresa_id, {"11111111111"}, "2025-06-01", None
+    ) == []
+    (vinculo,) = repo.listar_vinculos_empresa(conn, empresa_id)
+    assert vinculo.data_saida is None
+
+
+def test_baixa_por_ausencia_olha_o_quadro_na_data_da_alteracao(conn):
+    """A baixa é datada na alteração, então quem só entrou depois dela não
+    entra na conta: naquela data ele ainda não era sócio, e não há vínculo a
+    encerrar."""
+    empresa_id = _nova_empresa(conn)
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="Entrou Depois", cpf="222.222.222-22"))
+    repo.salvar_vinculo(
+        conn,
+        VinculoSocietario(
+            id=None, empresa_id=empresa_id, socio_id=socio_id,
+            percentual_capital=100.0, quantidade_cotas=1000,
+            data_entrada="2026-01-01", data_saida=None,
+        ),
+    )
+
+    # Alteração anterior à entrada dele: nada a encerrar.
+    assert repo.encerrar_vinculos_fora_da_lista(
+        conn, empresa_id, {"11111111111"}, "2025-06-01", None
+    ) == []
+    (vinculo,) = repo.listar_vinculos_empresa(conn, empresa_id)
+    assert vinculo.data_saida is None
+
+    # Alteração posterior: aí sim ele está no quadro e recebe a saída.
+    assert repo.encerrar_vinculos_fora_da_lista(
+        conn, empresa_id, {"11111111111"}, "2026-06-01", None
+    ) == ["Entrou Depois"]
+    (vinculo,) = repo.listar_vinculos_empresa(conn, empresa_id)
+    assert vinculo.data_saida == "2026-06-01"

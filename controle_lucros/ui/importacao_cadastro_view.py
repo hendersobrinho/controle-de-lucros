@@ -7,6 +7,7 @@ e nunca criado sem confirmação — o mesmo sócio costuma aparecer em várias
 empresas, e duplicar cadastro dele bagunçaria o histórico em todas elas."""
 from __future__ import annotations
 
+import datetime as dt
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -992,13 +993,24 @@ class ImportacaoCadastroView(QWidget):
         # arquivo (ou com empresa que ainda vai ser criada) não há o que
         # escolher: cada uma ganha a sua alteração automática.
         alteracao_id = None
+        dar_baixa = False
+        documentos = {
+            repo.normalizar_documento(l["socio_cpf"]) for l in linhas_importadas if l.get("socio_cpf")
+        }
         empresa_unica = self._empresa_cadastrada_unica(empresas)
         if empresa_unica is not None:
+            data_provavel = empresas[0].data_quadro or dt.date.today().isoformat()
             destino = DialogoDestinoAlteracao(
                 self.conn,
                 empresa_unica.id,
                 f'Li {resumo_do_relatorio(empresas)} para "{empresa_unica.nome}".',
                 data_sugerida=empresas[0].data_quadro,
+                ausentes=[
+                    socio.nome
+                    for _v, socio in repo.vinculos_ativos_fora_da_lista(
+                        self.conn, empresa_unica.id, documentos, data_provavel
+                    )
+                ],
                 parent=self,
             )
             if destino.exec() != QDialog.Accepted:
@@ -1008,6 +1020,7 @@ class ImportacaoCadastroView(QWidget):
             except ValueError as exc:
                 QMessageBox.warning(self, "Não foi possível abrir a alteração", str(exc))
                 return
+            dar_baixa = destino.dar_baixa_ausentes.isChecked()
 
         self._aplicar_linhas(
             linhas_importadas,
@@ -1016,6 +1029,23 @@ class ImportacaoCadastroView(QWidget):
             criar_alteracao_por_empresa=alteracao_id is None,
             atualizar_participacao=True,
         )
+
+        if dar_baixa and alteracao_id is not None:
+            alteracao = repo.buscar_alteracao(self.conn, alteracao_id)
+            try:
+                baixas = repo.encerrar_vinculos_fora_da_lista(
+                    self.conn, empresa_unica.id, documentos, alteracao.data, alteracao_id
+                )
+            except ValueError as exc:
+                QMessageBox.warning(self, "Erro ao dar baixa nos ausentes", str(exc))
+                return
+            if baixas:
+                QMessageBox.information(
+                    self,
+                    "Saídas registradas",
+                    f"{len(baixas)} sócio(s) não apareciam no relatório e receberam "
+                    f"saída em {alteracao.data}:\n\n" + ", ".join(baixas),
+                )
 
     def _empresa_cadastrada_unica(self, empresas: list):
         """A empresa do cadastro quando o relatório traz uma só e ela já

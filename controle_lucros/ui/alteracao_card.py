@@ -58,24 +58,37 @@ _FILTRO_RELATORIO_SOCIOS = (
 )
 
 
+def _documentos_do_relatorio(linhas: list[dict]) -> set[str]:
+    return {repo.normalizar_documento(l["socio_cpf"]) for l in linhas if l.get("socio_cpf")}
+
+
+def _resumo_das_baixas(encerrados: list[str]) -> str:
+    """Quem a opção "o relatório é o quadro completo" encerrou — nominalmente,
+    porque é a parte da importação que tira sócio da sociedade."""
+    if not encerrados:
+        return ""
+    lista = ", ".join(encerrados[:6])
+    if len(encerrados) > 6:
+        lista += f" (e mais {len(encerrados) - 6})"
+    return f"\n\n{len(encerrados)} saída(s) por ausência no relatório: {lista}."
+
+
 def _aviso_fora_do_relatorio(conn, empresa_id: int, linhas: list[dict], data_corte: str) -> str:
     """O relatório é o quadro societário vigente: sócio que continua ativo
     aqui e não aparece nele é saída que ninguém registrou, e é o que faz a
     soma das participações passar de 100%.
 
-    Só avisa — dar baixa em alguém por ausência num arquivo seria apagar
-    vínculo com base no que o arquivo NÃO diz, e relatório parcial existe."""
-    do_relatorio = {repo.normalizar_documento(l["socio_cpf"]) for l in linhas if l.get("socio_cpf")}
-    nomes = {s.id: s for s in repo.listar_socios(conn)}
+    Roda depois de tudo gravado, inclusive das baixas: é o retrato do que
+    ficou, não do que entrou. Usa a mesma definição de ausente da opção de
+    dar baixa (repo.vinculos_ativos_fora_da_lista), pra o aviso nunca
+    discordar da caixa que a pessoa acabou de marcar (ou não)."""
+    ausentes = repo.vinculos_ativos_fora_da_lista(
+        conn, empresa_id, _documentos_do_relatorio(linhas), data_corte
+    )
     ativos = [
         v
         for v in repo.listar_vinculos_empresa(conn, empresa_id)
         if v.data_entrada <= data_corte and (v.data_saida is None or v.data_saida > data_corte)
-    ]
-
-    ausentes = [
-        v for v in ativos
-        if repo.normalizar_documento(nomes[v.socio_id].cpf if v.socio_id in nomes else "") not in do_relatorio
     ]
     soma = round(sum(v.percentual_capital or 0.0 for v in ativos), 4)
 
@@ -84,12 +97,13 @@ def _aviso_fora_do_relatorio(conn, empresa_id: int, linhas: list[dict], data_cor
 
     partes = []
     if ausentes:
-        lista = ", ".join(nomes[v.socio_id].nome for v in ausentes[:5] if v.socio_id in nomes)
+        lista = ", ".join(socio.nome for _v, socio in ausentes[:5])
         if len(ausentes) > 5:
             lista += f" (e mais {len(ausentes) - 5})"
         partes.append(
             f"{len(ausentes)} sócio(s) continuam ativos aqui e não aparecem no relatório: {lista}. "
-            "Se eles saíram, registre a saída — a importação não dá baixa em ninguém por ausência."
+            "Se eles saíram, marque a opção de dar baixa na próxima importação ou registre a "
+            "saída pela aba de Sócios."
         )
     if abs(soma - 100.0) >= 0.01:
         partes.append(f"A soma das participações ficou em {soma}%.")
@@ -810,6 +824,18 @@ class AlteracaoCard(QWidget):
         # A tela de destino é a confirmação: ela diz o que foi lido e pergunta
         # em qual alteração isso entra — nova ou já aberta. Cancelar ali não
         # grava nada.
+        documentos = _documentos_do_relatorio(linhas_importadas)
+        data_provavel = (
+            self.alteracao.data if self.alteracao
+            else (empresas_da_alteracao[0].data_quadro or dt.date.today().isoformat())
+        )
+        ausentes = [
+            socio.nome
+            for _v, socio in repo.vinculos_ativos_fora_da_lista(
+                self.conn, self.empresa_id, documentos, data_provavel
+            )
+        ]
+
         destino = DialogoDestinoAlteracao(
             self.conn,
             self.empresa_id,
@@ -817,6 +843,7 @@ class AlteracaoCard(QWidget):
             f"{aviso_outras}{alerta}",
             data_sugerida=empresas_da_alteracao[0].data_quadro,
             alteracao_atual_id=self.alteracao.id if self.alteracao else None,
+            ausentes=ausentes,
             parent=self,
         )
         if destino.exec() != QDialog.Accepted:
@@ -880,6 +907,15 @@ class AlteracaoCard(QWidget):
         # a importação, pra o carrossel recarregar já em cima dela.
         self.alteracao = repo.buscar_alteracao(self.conn, alteracao_id)
 
+        baixas = []
+        if destino.dar_baixa_ausentes.isChecked() and self.alteracao is not None:
+            try:
+                baixas = repo.encerrar_vinculos_fora_da_lista(
+                    self.conn, self.empresa_id, documentos, self.alteracao.data, alteracao_id
+                )
+            except ValueError as exc:
+                QMessageBox.warning(self, "Erro ao dar baixa nos ausentes", str(exc))
+
         alteracao_nova = (
             f"\n\nLançado na alteração contratual Nº {self.alteracao.numero}."
             if self.alteracao
@@ -890,6 +926,7 @@ class AlteracaoCard(QWidget):
             f"{aplicado['participacoes_atualizadas']} participação(ões) atualizada(s) · "
             f"{aplicado['vinculos_encerrados']} saída(s) registrada(s) · "
             f"{aplicado['vinculos_ja_existentes']} sem mudança."
+            f"{_resumo_das_baixas(baixas)}"
             f"{_aviso_nao_atualizadas(aplicado)}"
             f"{_aviso_fora_do_relatorio(self.conn, self.empresa_id, linhas_importadas, self.alteracao.data)}"
             f"{alteracao_nova}"

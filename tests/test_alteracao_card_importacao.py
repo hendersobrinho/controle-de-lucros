@@ -14,7 +14,7 @@ import pytest
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 
 from controle_lucros import db, repositories as repo
-from controle_lucros.models import AlteracaoContratual, Empresa, Socio
+from controle_lucros.models import AlteracaoContratual, Empresa, Socio, VinculoSocietario
 from controle_lucros.ui import alteracao_card as mod
 from controle_lucros.ui import importacao_cadastro_view as vista_importacao
 from controle_lucros.ui.alteracao_card import AlteracaoCard
@@ -210,3 +210,59 @@ def test_botao_fica_desabilitado_so_com_a_alteracao_fechada(conn):
         conn, cenario["empresa_a"], repo.buscar_alteracao(conn, cenario["alteracao"].id), lambda _c: None
     )
     assert not fechada.btn_importar_relatorio.isEnabled()
+
+
+def _cenario_com_ausente(conn):
+    """Quadro do sistema com um sócio a mais do que o relatório traz — a
+    situação real de saída que nunca foi registrada."""
+    cenario = _cenario(conn)
+    ausente = repo.salvar_socio(conn, Socio(None, "QUEM JA SAIU", "999.999.999-99"))
+    repo.salvar_vinculo(
+        conn,
+        VinculoSocietario(
+            id=None, empresa_id=cenario["empresa_a"], socio_id=ausente,
+            percentual_capital=20.0, quantidade_cotas=200,
+            data_entrada="2024-01-01", data_saida=None,
+        ),
+    )
+    cenario["ausente"] = ausente
+    return cenario
+
+
+def test_tela_de_destino_lista_quem_nao_esta_no_relatorio(conn, monkeypatch, tmp_path):
+    cenario = _cenario_com_ausente(conn)
+    _perguntas, telas = _preparar_mocks(monkeypatch, tmp_path)
+
+    card = AlteracaoCard(conn, cenario["empresa_a"], cenario["alteracao"], lambda _c: None)
+    card._importar_relatorio_socios()
+
+    (destino,) = telas
+    assert destino.ausentes == ["QUEM JA SAIU"]
+    # Nasce desmarcada: relatório parcial não pode dar baixa em ninguém.
+    assert not destino.dar_baixa_ausentes.isChecked()
+    vinculo = next(
+        v for v in repo.listar_vinculos_empresa(conn, cenario["empresa_a"])
+        if v.socio_id == cenario["ausente"]
+    )
+    assert vinculo.data_saida is None
+
+
+def test_marcar_a_opcao_da_baixa_em_quem_nao_esta_no_relatorio(conn, monkeypatch, tmp_path):
+    cenario = _cenario_com_ausente(conn)
+    _perguntas, telas = _preparar_mocks(monkeypatch, tmp_path)
+
+    def marcar_e_aceitar(self):
+        telas.append(self)
+        self.dar_baixa_ausentes.setChecked(True)
+        return QDialog.Accepted
+    monkeypatch.setattr(mod.DialogoDestinoAlteracao, "exec", marcar_e_aceitar)
+
+    card = AlteracaoCard(conn, cenario["empresa_a"], cenario["alteracao"], lambda _c: None)
+    card._importar_relatorio_socios()
+
+    vinculo = next(
+        v for v in repo.listar_vinculos_empresa(conn, cenario["empresa_a"])
+        if v.socio_id == cenario["ausente"]
+    )
+    assert vinculo.data_saida == cenario["alteracao"].data
+    assert vinculo.alteracao_saida_id == cenario["alteracao"].id

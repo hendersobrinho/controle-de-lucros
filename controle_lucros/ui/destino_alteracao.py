@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QRadioButton,
+    QSizePolicy,
     QVBoxLayout,
 )
 
@@ -33,6 +34,22 @@ from ..models import AlteracaoContratual
 from .common import formatar_numero
 
 DESCRICAO_PADRAO = "Importação do relatório de sócios"
+
+
+def _paragrafo(texto: str) -> QLabel:
+    """Rótulo que quebra linha e cuja altura é levada a sério pelo layout.
+
+    Só setWordWrap não basta: o sizeHint do QLabel continua sendo o de uma
+    linha, o layout reserva essa altura e o texto que sobra fica cortado por
+    cima dos botões. Pedir heightForWidth é o que faz a altura acompanhar a
+    largura de verdade."""
+    rotulo = QLabel(texto)
+    rotulo.setWordWrap(True)
+    politica = rotulo.sizePolicy()
+    politica.setVerticalPolicy(QSizePolicy.Minimum)
+    politica.setHeightForWidth(True)
+    rotulo.setSizePolicy(politica)
+    return rotulo
 
 
 class DialogoDestinoAlteracao(QDialog):
@@ -49,6 +66,7 @@ class DialogoDestinoAlteracao(QDialog):
         resumo_leitura: str,
         data_sugerida: str | None = None,
         alteracao_atual_id: int | None = None,
+        ausentes: list[str] | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -60,12 +78,11 @@ class DialogoDestinoAlteracao(QDialog):
 
         self._abertas = [a for a in repo.listar_alteracoes(conn, empresa_id) if not a.fechada]
 
-        explicacao = QLabel(
+        explicacao = _paragrafo(
             f"{resumo_leitura}\n\nMovimentar sócio é alteração contratual: escolha em qual "
             "delas esta importação entra. Todos os vínculos criados ou encerrados por ela "
             "ficam amarrados à alteração escolhida."
         )
-        explicacao.setWordWrap(True)
         explicacao.setProperty("role", "subtitulo")
 
         self.opcao_nova = QRadioButton("Cadastrar uma alteração contratual nova")
@@ -76,11 +93,10 @@ class DialogoDestinoAlteracao(QDialog):
 
         estado = repo.estado_atual_empresa(conn, empresa_id)
         numero = repo.proximo_numero_alteracao(conn, empresa_id)
-        self.rotulo_nova = QLabel(
+        self.rotulo_nova = _paragrafo(
             f"Vai nascer como a alteração Nº {numero} de {estado['nome']} — o número é o próximo "
             "da empresa, e a data vem do quadro societário do relatório."
         )
-        self.rotulo_nova.setWordWrap(True)
         self.rotulo_nova.setProperty("role", "subtitulo")
 
         self.data = QDateEdit(calendarPopup=True)
@@ -117,6 +133,29 @@ class DialogoDestinoAlteracao(QDialog):
         self.form_capital.addRow("Capital social", self.capital)
         self.form_capital.addRow("Quantidade de cotas", self.cotas)
 
+        # Dar baixa em quem não aparece no arquivo só vale se o arquivo for o
+        # quadro completo — relatório de uma página só, ou filtrado, apagaria
+        # sócio ativo. Por isso a opção é explícita e nasce desmarcada, com os
+        # nomes à vista antes de qualquer coisa ser gravada.
+        self.ausentes = list(ausentes or [])
+        # Rótulo curto: QCheckBox não quebra linha, e o texto comprido
+        # empurrava a largura do diálogo até cortar a explicação do topo.
+        self.dar_baixa_ausentes = QCheckBox(
+            f"Dar baixa em quem não aparece no relatório ({len(self.ausentes)})"
+        )
+        lista_ausentes = ", ".join(self.ausentes[:4])
+        if len(self.ausentes) > 4:
+            lista_ausentes += f" (e mais {len(self.ausentes) - 4})"
+        self.rotulo_ausentes = _paragrafo(
+            "Marque só se este relatório for o quadro societário completo. Continuam ativos "
+            f"no sistema e não estão nele: {lista_ausentes}. A saída seria registrada na data "
+            "desta alteração."
+        )
+        self.rotulo_ausentes.setProperty("role", "subtitulo")
+        if not self.ausentes:
+            self.dar_baixa_ausentes.hide()
+            self.rotulo_ausentes.hide()
+
         self.existentes = QComboBox()
         for a in self._abertas:
             rotulo = f"Nº {a.numero} — {_data_br(a.data)}"
@@ -144,6 +183,9 @@ class DialogoDestinoAlteracao(QDialog):
         layout.addSpacing(6)
         layout.addWidget(self.opcao_existente)
         layout.addWidget(self.existentes)
+        layout.addSpacing(6)
+        layout.addWidget(self.dar_baixa_ausentes)
+        layout.addWidget(self.rotulo_ausentes)
         layout.addSpacing(6)
         layout.addWidget(self.botoes)
 

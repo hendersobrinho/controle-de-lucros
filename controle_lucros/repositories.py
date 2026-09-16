@@ -550,6 +550,48 @@ def encerrar_vinculo_registrando_alteracao(
     encerrar_vinculo(conn, vinculo.id, data_saida, alteracao_id)
 
 
+def vinculos_ativos_fora_da_lista(
+    conn: sqlite3.Connection, empresa_id: int, documentos: set[str], data_corte: str
+) -> list[tuple[VinculoSocietario, Socio]]:
+    """Sócios ativos na empresa naquela data cujo documento não está em
+    `documentos` — o quadro que o relatório traz.
+
+    Sócio sem CPF/CNPJ cadastrado fica de fora da lista de propósito: não há
+    como afirmar que ele não está no arquivo, e dar baixa por suposição é
+    justamente o que não se pode fazer com histórico societário."""
+    por_id = {s.id: s for s in listar_socios(conn)}
+    fora = []
+    for v in listar_vinculos_empresa(conn, empresa_id):
+        if not (v.data_entrada <= data_corte and (v.data_saida is None or v.data_saida > data_corte)):
+            continue
+        socio = por_id.get(v.socio_id)
+        documento = normalizar_documento(socio.cpf if socio else "")
+        if socio is not None and documento and documento not in documentos:
+            fora.append((v, socio))
+    return fora
+
+
+def encerrar_vinculos_fora_da_lista(
+    conn: sqlite3.Connection,
+    empresa_id: int,
+    documentos: set[str],
+    data_saida: str,
+    alteracao_id: int | None,
+) -> list[str]:
+    """Dá baixa em quem continua ativo aqui e não está no quadro do relatório,
+    devolvendo os nomes encerrados.
+
+    Só faz sentido quando o arquivo é o quadro societário completo — por isso
+    é opção explícita de quem importa, e nunca o comportamento padrão. Quem
+    entrou depois de `data_saida` não aparece: para aquela data ele ainda não
+    era sócio, e não há vínculo a encerrar."""
+    encerrados = []
+    for vinculo, socio in vinculos_ativos_fora_da_lista(conn, empresa_id, documentos, data_saida):
+        encerrar_vinculo(conn, vinculo.id, data_saida, alteracao_id)
+        encerrados.append(socio.nome)
+    return encerrados
+
+
 def _participacao_mudou(vinculo: VinculoSocietario, linha: dict) -> bool:
     """Quatro casas é a precisão com que a participação é mostrada e guardada;
     comparar além disso faria toda importação "mudar" tudo por ruído de float."""
