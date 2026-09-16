@@ -100,7 +100,7 @@ def test_dialogo_pode_esconder_os_encerrados():
 
     mapa = dialogo.mapa()
     assert mapa.encerrados == 0
-    assert [e.nome for e in mapa.empresas] == ["ENDOGASTRO CLINICA MEDICA LTDA", "PADARIA MODELO LTDA"]
+    assert [e.nome for e in mapa.nos] == ["ENDOGASTRO CLINICA MEDICA LTDA", "PADARIA MODELO LTDA"]
 
 
 def test_dialogo_exporta_nos_dois_formatos(tmp_path, monkeypatch):
@@ -168,3 +168,96 @@ def test_botao_da_aba_abre_o_mapa_do_socio_selecionado(conn, monkeypatch):
 def test_sem_socio_selecionado_o_botao_fica_travado(conn):
     aba = SociosTab(conn)
     assert not aba.btn_mapa.isEnabled()
+
+
+# ------------------------------------------------- o mapa visto da empresa --
+
+
+def test_com_a_empresa_no_centro_as_caixas_sao_os_socios(conn):
+    """A mesma relação lida da outra ponta: o nome de cada caixa passa a vir
+    de socio_nome, e o rótulo do hub muda junto."""
+    from controle_lucros.mapa_vinculos import PAPEL_EMPRESA
+
+    mapa = montar_mapa(
+        "ENDOGASTRO LTDA", "02.294.442/0001-13",
+        [
+            {"socio_nome": "ANDRE FRANZOTTI", "percentual": 46.94,
+             "data_entrada": "2007-03-23", "data_saida": None},
+            {"socio_nome": "LUIZA DIAS TORRES", "percentual": 0.0,
+             "data_entrada": "2023-03-02", "data_saida": "2026-05-20"},
+        ],
+        papel=PAPEL_EMPRESA,
+    )
+
+    assert [n.nome for n in mapa.nos] == ["ANDRE FRANZOTTI", "LUIZA DIAS TORRES"]
+    assert mapa.centro_nome == "ENDOGASTRO LTDA"
+    assert mapa.centro_papel == PAPEL_EMPRESA
+    assert not mapa.centro_e_socio
+    assert mapa.ativos == 1 and mapa.encerrados == 1
+
+
+def test_a_geometria_nao_muda_com_o_papel_do_centro(conn):
+    """Só troca de onde sai o nome da caixa: o desenho é o mesmo, e é o que
+    permite uma função de pintura só para os dois sentidos."""
+    from controle_lucros.mapa_vinculos import PAPEL_EMPRESA
+
+    do_socio = montar_mapa("X", "", [
+        {"empresa_nome": "A LTDA", "percentual": 60.0, "data_entrada": "2020-01-01", "data_saida": None},
+        {"empresa_nome": "B LTDA", "percentual": 40.0, "data_entrada": "2020-01-01", "data_saida": None},
+    ])
+    da_empresa = montar_mapa("X", "", [
+        {"socio_nome": "A LTDA", "percentual": 60.0, "data_entrada": "2020-01-01", "data_saida": None},
+        {"socio_nome": "B LTDA", "percentual": 40.0, "data_entrada": "2020-01-01", "data_saida": None},
+    ], papel=PAPEL_EMPRESA)
+
+    assert (do_socio.largura, do_socio.altura) == (da_empresa.largura, da_empresa.altura)
+    assert [n.caixa for n in do_socio.nos] == [n.caixa for n in da_empresa.nos]
+
+
+def test_botao_da_aba_empresas_abre_o_quadro_societario(conn, monkeypatch):
+    from controle_lucros.mapa_vinculos import PAPEL_EMPRESA
+    from controle_lucros.ui.empresas_tab import EmpresasTab
+
+    empresa_id = repo.salvar_empresa(conn, Empresa(
+        id=None, numero_chamada="91", nome="ENDOGASTRO LTDA", cnpj="02.294.442/0001-13",
+        capital_social=1000, quantidade_cotas=1000))
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="ANDRE FRANZOTTI", cpf="076.925.727-55"))
+    repo.salvar_vinculo(conn, VinculoSocietario(
+        id=None, empresa_id=empresa_id, socio_id=socio_id, percentual_capital=46.94,
+        quantidade_cotas=469, data_entrada="2007-03-23", data_saida=None))
+
+    aba = EmpresasTab(conn)
+    assert not aba.btn_quadro.isEnabled()  # sem empresa escolhida não há quadro
+
+    aba.tabela.selectRow(0)
+    assert aba.btn_quadro.isEnabled()
+
+    abertos = []
+    monkeypatch.setattr(
+        "controle_lucros.ui.empresas_tab.DialogoMapaVinculos",
+        lambda nome, documento, vinculos, papel, parent=None: abertos.append(
+            (nome, documento, vinculos, papel)
+        ) or type("Falso", (), {"exec": lambda self: 0})(),
+    )
+    aba._abrir_quadro_societario()
+
+    (nome, documento, vinculos, papel) = abertos[0]
+    assert nome == "ENDOGASTRO LTDA"
+    assert documento == "02.294.442/0001-13"
+    assert papel == PAPEL_EMPRESA
+    assert vinculos == [{"socio_nome": "ANDRE FRANZOTTI", "percentual": 46.94,
+                         "data_entrada": "2007-03-23", "data_saida": None}]
+
+
+def test_a_janela_do_mapa_abre_do_tamanho_do_desenho(conn):
+    """Abria no mínimo e obrigava a arrastar a borda pra ver o que já estava
+    pronto. O teto é a tela — o desenho de quem tem muitos vínculos é mais
+    alto que qualquer monitor."""
+    dialogo = DialogoMapaVinculos("ANDRE FRANZOTTI", "076.925.727-55", VINCULOS)
+    mapa = dialogo.mapa()
+    tela = dialogo.screen().availableGeometry()
+
+    largura_desejada = min(mapa.largura + 28, tela.width() * 0.95)
+    assert dialogo.width() >= min(int(largura_desejada), dialogo.minimumWidth())
+    assert dialogo.width() <= tela.width()
+    assert dialogo.height() <= tela.height()

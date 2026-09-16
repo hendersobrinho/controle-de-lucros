@@ -511,9 +511,17 @@ class CrudTab(QWidget):
         form_container.addLayout(botoes)
         form_container.addStretch()
 
+        # A linha da busca fica acessível às subclasses porque é onde entra
+        # ação que olha o registro selecionado sem editá-lo (abrir um mapa,
+        # por exemplo): ela pertence à tabela, não ao formulário, e na barra
+        # de baixo brigaria por espaço com Novo/Salvar/Cancelar/Excluir.
+        self.linha_busca = QHBoxLayout()
+        self.linha_busca.setSpacing(8)
+        self.linha_busca.addWidget(self.busca, 1)
+
         coluna_tabela = QVBoxLayout()
         coluna_tabela.setSpacing(8)
-        coluna_tabela.addWidget(self.busca)
+        coluna_tabela.addLayout(self.linha_busca)
         coluna_tabela.addWidget(self.tabela)
 
         layout = QHBoxLayout(self)

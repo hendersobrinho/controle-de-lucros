@@ -41,8 +41,8 @@ def test_ativos_vem_antes_dos_encerrados_e_por_participacao():
 def _por_ordem_de_leitura(mapa):
     """As caixas na ordem em que foram distribuídas: esquerda e direita
     alternadas, de cima pra baixo."""
-    esquerda = sorted((e for e in mapa.empresas if e.lado == "esquerda"), key=lambda e: e.caixa.y)
-    direita = sorted((e for e in mapa.empresas if e.lado == "direita"), key=lambda e: e.caixa.y)
+    esquerda = sorted((e for e in mapa.nos if e.lado == "esquerda"), key=lambda e: e.caixa.y)
+    direita = sorted((e for e in mapa.nos if e.lado == "direita"), key=lambda e: e.caixa.y)
     ordenados = []
     for i in range(max(len(esquerda), len(direita))):
         if i < len(esquerda):
@@ -56,16 +56,16 @@ def test_participacoes_maiores_sobem_nas_duas_colunas():
     """Alternar os lados mantém as maiores no topo das duas colunas, em vez de
     encher um lado inteiro antes de começar o outro."""
     mapa = _mapa(*[_vinculo(f"EMPRESA {i}", 100 - i) for i in range(6)])
-    topo_esquerda = min((e for e in mapa.empresas if e.lado == "esquerda"), key=lambda e: e.caixa.y)
-    topo_direita = min((e for e in mapa.empresas if e.lado == "direita"), key=lambda e: e.caixa.y)
+    topo_esquerda = min((e for e in mapa.nos if e.lado == "esquerda"), key=lambda e: e.caixa.y)
+    topo_direita = min((e for e in mapa.nos if e.lado == "direita"), key=lambda e: e.caixa.y)
     assert topo_esquerda.nome == "EMPRESA 0"
     assert topo_direita.nome == "EMPRESA 1"
 
 
 def test_lados_ficam_equilibrados():
     mapa = _mapa(*[_vinculo(f"EMPRESA {i}") for i in range(7)])
-    esquerda = [e for e in mapa.empresas if e.lado == "esquerda"]
-    direita = [e for e in mapa.empresas if e.lado == "direita"]
+    esquerda = [e for e in mapa.nos if e.lado == "esquerda"]
+    direita = [e for e in mapa.nos if e.lado == "direita"]
     assert abs(len(esquerda) - len(direita)) <= 1
 
 
@@ -74,7 +74,7 @@ def test_lados_ficam_equilibrados():
 def test_caixas_nunca_se_sobrepoem(quantidade):
     mapa = _mapa(*[_vinculo(f"EMPRESA {i} LTDA") for i in range(quantidade)])
     for lado in ("esquerda", "direita"):
-        coluna = sorted((e for e in mapa.empresas if e.lado == lado), key=lambda e: e.caixa.y)
+        coluna = sorted((e for e in mapa.nos if e.lado == lado), key=lambda e: e.caixa.y)
         for anterior, seguinte in zip(coluna, coluna[1:]):
             assert seguinte.caixa.y >= anterior.caixa.y + CAIXA_ALTURA + ESPACO_VERTICAL - 0.01
 
@@ -82,7 +82,7 @@ def test_caixas_nunca_se_sobrepoem(quantidade):
 @pytest.mark.parametrize("quantidade", [1, 3, 9, 24])
 def test_tudo_cabe_dentro_da_tela_do_desenho(quantidade):
     mapa = _mapa(*[_vinculo(f"EMPRESA {i} LTDA") for i in range(quantidade)])
-    for empresa in mapa.empresas:
+    for empresa in mapa.nos:
         assert empresa.caixa.x >= MARGEM - 0.01
         assert empresa.caixa.direita <= mapa.largura - MARGEM + 0.01
         assert empresa.caixa.y > 0
@@ -93,7 +93,7 @@ def test_caixas_nunca_encostam_no_hub():
     """O vão entre a caixa e o hub é onde a etiqueta do percentual fica. Se
     encostar, a etiqueta cobre o nome da empresa."""
     mapa = _mapa(*[_vinculo(f"EMPRESA {i} LTDA") for i in range(8)])
-    for empresa in mapa.empresas:
+    for empresa in mapa.nos:
         if empresa.lado == "esquerda":
             assert mapa.hub.x - empresa.caixa.direita >= VAO_LATERAL - 0.01
         else:
@@ -102,8 +102,8 @@ def test_caixas_nunca_encostam_no_hub():
 
 def test_hub_fica_centralizado_na_altura_das_colunas():
     mapa = _mapa(*[_vinculo(f"EMPRESA {i}") for i in range(6)])
-    topos = [e.caixa.y for e in mapa.empresas]
-    bases = [e.caixa.y + CAIXA_ALTURA for e in mapa.empresas]
+    topos = [e.caixa.y for e in mapa.nos]
+    bases = [e.caixa.y + CAIXA_ALTURA for e in mapa.nos]
     centro_das_caixas = (min(topos) + max(bases)) / 2
     assert abs(mapa.hub.centro_y - centro_das_caixas) < 1
 
@@ -117,7 +117,7 @@ def test_desenho_cresce_com_o_numero_de_empresas():
 
 def test_sem_vinculos_ainda_desenha_o_socio():
     mapa = _mapa()
-    assert mapa.empresas == ()
+    assert mapa.nos == ()
     assert mapa.hub.altura > 0
     assert mapa.resumo() == "Sem vínculos societários registrados."
 
@@ -125,11 +125,11 @@ def test_sem_vinculos_ainda_desenha_o_socio():
 # ------------------------------------------------------------------ limite --
 def test_muitos_vinculos_cortam_pelos_menores_e_avisam():
     mapa = _mapa(*[_vinculo(f"EMPRESA {i}", percentual=100 - i) for i in range(30)], maximo=10)
-    assert len(mapa.empresas) == 10
-    assert mapa.empresas_omitidas == 20
+    assert len(mapa.nos) == 10
+    assert mapa.nos_omitidos == 20
     assert "não cabem no desenho" in mapa.resumo()
     # Os que sobraram são os de maior participação, não os dez primeiros da lista.
-    assert min(e.percentual for e in mapa.empresas) == 91
+    assert min(e.percentual for e in mapa.nos) == 91
 
 
 # -------------------------------------------------------------- conteúdo --
@@ -137,14 +137,14 @@ def test_periodo_do_vinculo_sai_em_data_brasileira():
     ativo, encerrado = _mapa(
         _vinculo("ATIVA LTDA", 60.0, entrada="2007-03-23"),
         _vinculo("FECHADA LTDA", 40.0, entrada="2010-01-05", saida="2023-12-31"),
-    ).empresas
+    ).nos
     assert ativo.periodo == "desde 23/03/2007"
     assert encerrado.periodo == "05/01/2010 — 31/12/2023"
 
 
 def test_data_estranha_nao_derruba_o_desenho():
     """Um mapa com uma data torta ainda serve; um mapa que não abre, não."""
-    (empresa,) = _mapa(_vinculo("ESTRANHA LTDA", entrada="sem data")).empresas
+    (empresa,) = _mapa(_vinculo("ESTRANHA LTDA", entrada="sem data")).nos
     assert "sem data" in empresa.periodo
 
 

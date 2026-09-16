@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QDoubleSpinBox, QFormLayout, QLineEdit
+from PySide6.QtWidgets import QDoubleSpinBox, QFormLayout, QLineEdit, QPushButton
 
 from .. import repositories as repo
+from ..mapa_vinculos import PAPEL_EMPRESA
 from ..models import Empresa
 from .common import CrudTab, cnpj_valido_ou_vazio, configurar_campo_cnpj, formatar_numero, formatar_valor_br
+from .diagrama_vinculos import DialogoMapaVinculos
 
 
 class EmpresasTab(CrudTab):
@@ -19,6 +21,55 @@ class EmpresasTab(CrudTab):
         ("Capital social", "capital_social"),
         ("Cotas", "quantidade_cotas"),
     ]
+
+    def __init__(self, conn, parent=None):
+        super().__init__(conn, parent)
+
+        # O outro lado do mapa da aba Sócios: lá o sócio está no meio e as
+        # empresas em volta; aqui a empresa está no meio e os sócios em volta.
+        # Mesmo desenho, mesma exportação — muda só quem é o centro.
+        self.btn_quadro = QPushButton("Quadro societário")
+        self.btn_quadro.setToolTip(
+            "Abre um diagrama com os sócios ligados a esta empresa e a participação de cada "
+            "um — dá pra exportar em PDF ou SVG para anexar a processo ou apresentação."
+        )
+        self.btn_quadro.clicked.connect(self._abrir_quadro_societario)
+        self.linha_busca.addWidget(self.btn_quadro)
+        self._definir_modo(self._modo, self._descricao_modo)
+
+    def _definir_modo(self, modo: str, descricao: str = "") -> None:
+        """Sem empresa escolhida não há quadro pra desenhar. Este é o ponto
+        por onde toda mudança de estado passa — selecionar, criar, cancelar,
+        excluir —, então o botão acompanha os quatro de uma vez.
+
+        O hasattr não é defesa: a base chama _definir_modo uma vez dentro do
+        próprio __init__, antes de este botão existir."""
+        super()._definir_modo(modo, descricao)
+        if hasattr(self, "btn_quadro"):
+            self.btn_quadro.setEnabled(self._registro_atual_id is not None)
+
+    def _abrir_quadro_societario(self) -> None:
+        """O quadro societário desenhado: quem está na empresa, com quanto, e
+        quem já saiu. A tabela de sócios responde "quem"; o desenho mostra o
+        peso de cada um de relance, que é o que se leva pra reunião."""
+        empresa = next((e for e in self._registros if e.id == self._registro_atual_id), None)
+        if empresa is None:
+            return
+        socios = {s.id: s for s in repo.listar_socios(self.conn)}
+        vinculos = [
+            {
+                "socio_nome": socios[v.socio_id].nome if v.socio_id in socios else "?",
+                # O percentual registrado no vínculo, igual ao que a aba
+                # Sócios usa no mapa do outro lado — não o recalculado por
+                # cotas, que muda com o capital e faria os dois desenhos
+                # discordarem sobre a mesma participação.
+                "percentual": v.percentual_capital,
+                "data_entrada": v.data_entrada,
+                "data_saida": v.data_saida,
+            }
+            for v in repo.listar_vinculos_empresa(self.conn, empresa.id)
+        ]
+        DialogoMapaVinculos(empresa.nome, empresa.cnpj or "", vinculos, PAPEL_EMPRESA, self).exec()
 
     def montar_formulario(self, form_layout: QFormLayout) -> None:
         self.numero_chamada = QLineEdit()

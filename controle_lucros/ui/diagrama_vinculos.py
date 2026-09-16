@@ -18,6 +18,7 @@ from pathlib import Path
 from PySide6.QtCore import QMarginsF, QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import (
     QBrush,
+    QGuiApplication,
     QColor,
     QFont,
     QFontMetricsF,
@@ -41,12 +42,21 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..mapa_vinculos import MapaVinculos, montar_mapa, nome_de_arquivo
+from ..mapa_vinculos import PAPEL_SOCIO, MapaVinculos, No, montar_mapa, nome_de_arquivo
 from . import theme
 from .common import formatar_valor_br
 
 RAIO_CAIXA = 8
 RAIO_COTOVELO = 10
+
+# Altura reservada pra barra de ações embaixo do desenho, no cálculo do
+# tamanho inicial da janela.
+ALTURA_DAS_ACOES = 52
+
+# Abaixo disto a janela não serve nem pra ver um pedaço do mapa. Vale como
+# piso só enquanto couber na tela — ver _ajustar_tamanhos.
+LARGURA_MINIMA = 900
+ALTURA_MINIMA = 560
 
 
 def _paleta_da_tela() -> dict:
@@ -91,33 +101,37 @@ def desenhar(painter: QPainter, mapa: MapaVinculos, paleta: dict) -> None:
     _desenhar_cabecalho(painter, mapa, tinta, suave)
     # Os traços primeiro: assim eles passam por baixo das caixas, e a ponta do
     # traço não aparece cortando o texto do nome da empresa.
-    for empresa in mapa.empresas:
-        _desenhar_ligacao(painter, mapa, empresa, latao, saiu_tinta, papel_alto, suave, fio)
+    for no in mapa.nos:
+        _desenhar_ligacao(painter, mapa, no, latao, saiu_tinta, papel_alto, suave, fio)
     _desenhar_hub(painter, mapa, papel_alto, latao, tinta, suave)
-    for empresa in mapa.empresas:
-        _desenhar_empresa(painter, empresa, papel_alto, fio, tinta, suave, saiu_fundo, saiu_tinta)
+    for no in mapa.nos:
+        _desenhar_no(painter, no, papel_alto, fio, tinta, suave, saiu_fundo, saiu_tinta)
     _desenhar_rodape(painter, mapa, suave)
 
 
 def _desenhar_cabecalho(painter: QPainter, mapa: MapaVinculos, tinta: QColor, suave: QColor) -> None:
     painter.setPen(QPen(tinta))
     painter.setFont(_fonte(20, negrito=True))
-    painter.drawText(QRectF(28, 18, mapa.largura - 56, 26), Qt.AlignLeft | Qt.AlignVCenter,
-                     "Mapa de vínculos societários")
+    titulo = (
+        "Mapa de vínculos societários" if mapa.centro_e_socio
+        else "Quadro societário da empresa"
+    )
+    painter.drawText(QRectF(28, 18, mapa.largura - 56, 26), Qt.AlignLeft | Qt.AlignVCenter, titulo)
 
     painter.setPen(QPen(suave))
     painter.setFont(_fonte(12))
-    documento = f" · CPF/CNPJ {mapa.socio_documento}" if mapa.socio_documento else ""
+    documento = f" · CPF/CNPJ {mapa.centro_documento}" if mapa.centro_documento else ""
     painter.drawText(QRectF(28, 44, mapa.largura - 56, 20), Qt.AlignLeft | Qt.AlignVCenter,
-                     f"{mapa.socio_nome}{documento} — {mapa.resumo()}")
+                     f"{mapa.centro_nome}{documento} — {mapa.resumo()}")
 
 
 def _desenhar_rodape(painter: QPainter, mapa: MapaVinculos, suave: QColor) -> None:
     linhas = []
-    if mapa.empresas_omitidas:
+    if mapa.nos_omitidos:
+        onde = "na aba Sócios" if mapa.centro_e_socio else "na alteração contratual vigente"
         linhas.append(
-            f"{mapa.empresas_omitidas} vínculo(s) de menor participação ficaram fora do desenho — "
-            "a lista completa está na aba Sócios."
+            f"{mapa.nos_omitidos} vínculo(s) de menor participação ficaram fora do desenho — "
+            f"a lista completa está {onde}."
         )
     if mapa.gerado_em:
         linhas.append(f"Gerado em {mapa.gerado_em}")
@@ -146,7 +160,7 @@ def _desenhar_hub(painter: QPainter, mapa: MapaVinculos, fundo: QColor, borda: Q
     painter.drawText(
         QRectF(caixa.x + 14, caixa.y + 16, caixa.largura - 28, 22),
         Qt.AlignCenter,
-        _texto_que_cabe(mapa.socio_nome, fonte_nome, caixa.largura - 28),
+        _texto_que_cabe(mapa.centro_nome, fonte_nome, caixa.largura - 28),
     )
 
     painter.setFont(_fonte(11))
@@ -154,17 +168,17 @@ def _desenhar_hub(painter: QPainter, mapa: MapaVinculos, fundo: QColor, borda: Q
     painter.drawText(
         QRectF(caixa.x + 14, caixa.y + 40, caixa.largura - 28, 18),
         Qt.AlignCenter,
-        mapa.socio_documento or "sem CPF/CNPJ cadastrado",
+        mapa.centro_documento or "sem CPF/CNPJ cadastrado",
     )
     painter.setFont(_fonte(10))
     painter.drawText(
         QRectF(caixa.x + 14, caixa.y + 58, caixa.largura - 28, 16),
         Qt.AlignCenter,
-        "sócio",
+        mapa.centro_papel,
     )
 
 
-def _desenhar_ligacao(painter: QPainter, mapa: MapaVinculos, empresa, latao: QColor,
+def _desenhar_ligacao(painter: QPainter, mapa: MapaVinculos, no: No, latao: QColor,
                       saiu: QColor, fundo_etiqueta: QColor, suave: QColor, fio: QColor) -> None:
     """Liga a caixa ao hub com um cotovelo: um trecho reto na altura da caixa,
     uma curva, e a descida até o hub.
@@ -173,8 +187,8 @@ def _desenhar_ligacao(painter: QPainter, mapa: MapaVinculos, empresa, latao: QCo
     mesma altura (a do hub) — e a etiqueta do percentual de um sócio com muitas
     empresas ficava empilhada uma por cima da outra. No cotovelo, o trecho reto
     fica na altura da própria caixa, e cada etiqueta tem a linha só pra ela."""
-    hub, caixa = mapa.hub, empresa.caixa
-    if empresa.lado == "esquerda":
+    hub, caixa = mapa.hub, no.caixa
+    if no.lado == "esquerda":
         saida = QPointF(caixa.direita, caixa.centro_y)
         chegada = QPointF(hub.x, hub.centro_y)
     else:
@@ -185,9 +199,9 @@ def _desenhar_ligacao(painter: QPainter, mapa: MapaVinculos, empresa, latao: QCo
     caminho = _caminho_cotovelo(saida, chegada, dobra)
     sentido = 1 if chegada.x() > saida.x() else -1
 
-    cor = latao if empresa.ativo else saiu
+    cor = latao if no.ativo else saiu
     caneta = QPen(cor, 1.6)
-    if not empresa.ativo:
+    if not no.ativo:
         # Vínculo encerrado com traço pontilhado: a diferença se enxerga mesmo
         # impresso em preto e branco, onde a cor some.
         caneta.setStyle(Qt.DashLine)
@@ -199,7 +213,7 @@ def _desenhar_ligacao(painter: QPainter, mapa: MapaVinculos, empresa, latao: QCo
     # a dobra, e centrar ali deixa a etiqueta sobre a linha, longe da caixa e
     # longe do canto arredondado.
     centro = QPointF((saida.x() + dobra - sentido * RAIO_COTOVELO) / 2, saida.y())
-    _desenhar_etiqueta_percentual(painter, empresa, centro, fundo_etiqueta, fio, cor)
+    _desenhar_etiqueta_percentual(painter, no, centro, fundo_etiqueta, fio, cor)
 
 
 def _caminho_cotovelo(saida: QPointF, chegada: QPointF, dobra: float,
@@ -224,11 +238,11 @@ def _caminho_cotovelo(saida: QPointF, chegada: QPointF, dobra: float,
     return caminho
 
 
-def _desenhar_etiqueta_percentual(painter: QPainter, empresa, centro: QPointF,
+def _desenhar_etiqueta_percentual(painter: QPainter, no: No, centro: QPointF,
                                   fundo: QColor, fio: QColor, cor_texto: QColor) -> None:
     """A participação em cima da linha, numa pastilha com fundo, pra ficar
     legível mesmo quando passa por cima do traço."""
-    texto = f"{formatar_valor_br(empresa.percentual, 2)}%"
+    texto = f"{formatar_valor_br(no.percentual, 2)}%"
     fonte = _fonte(10, negrito=True)
     largura = QFontMetricsF(fonte).horizontalAdvance(texto) + 12
     altura = 18
@@ -242,31 +256,31 @@ def _desenhar_etiqueta_percentual(painter: QPainter, empresa, centro: QPointF,
     painter.drawText(retangulo, Qt.AlignCenter, texto)
 
 
-def _desenhar_empresa(painter: QPainter, empresa, fundo: QColor, fio: QColor, tinta: QColor,
+def _desenhar_no(painter: QPainter, no: No, fundo: QColor, fio: QColor, tinta: QColor,
                       suave: QColor, saiu_fundo: QColor, saiu_tinta: QColor) -> None:
-    caixa = empresa.caixa
+    caixa = no.caixa
     retangulo = QRectF(caixa.x, caixa.y, caixa.largura, caixa.altura)
 
-    painter.setBrush(QBrush(fundo if empresa.ativo else saiu_fundo))
-    painter.setPen(QPen(fio if empresa.ativo else saiu_tinta, 1))
+    painter.setBrush(QBrush(fundo if no.ativo else saiu_fundo))
+    painter.setPen(QPen(fio if no.ativo else saiu_tinta, 1))
     painter.drawRoundedRect(retangulo, RAIO_CAIXA, RAIO_CAIXA)
 
     fonte_nome = _fonte(13, negrito=True)
     painter.setFont(fonte_nome)
-    painter.setPen(QPen(tinta if empresa.ativo else saiu_tinta))
+    painter.setPen(QPen(tinta if no.ativo else saiu_tinta))
     painter.drawText(
         QRectF(caixa.x + 12, caixa.y + 9, caixa.largura - 24, 20),
         Qt.AlignLeft | Qt.AlignVCenter,
-        _texto_que_cabe(empresa.nome, fonte_nome, caixa.largura - 24),
+        _texto_que_cabe(no.nome, fonte_nome, caixa.largura - 24),
     )
 
     painter.setFont(_fonte(11))
-    painter.setPen(QPen(suave if empresa.ativo else saiu_tinta))
-    situacao = "" if empresa.ativo else "encerrado · "
+    painter.setPen(QPen(suave if no.ativo else saiu_tinta))
+    situacao = "" if no.ativo else "encerrado · "
     painter.drawText(
         QRectF(caixa.x + 12, caixa.y + 30, caixa.largura - 24, 18),
         Qt.AlignLeft | Qt.AlignVCenter,
-        f"{situacao}{empresa.periodo}",
+        f"{situacao}{no.periodo}",
     )
 
 
@@ -318,7 +332,7 @@ def exportar_svg(caminho: Path, mapa: MapaVinculos) -> Path:
     gerador.setFileName(str(caminho))
     gerador.setSize(QSize(int(mapa.largura), int(mapa.altura)))
     gerador.setViewBox(QRectF(0, 0, mapa.largura, mapa.altura))
-    gerador.setTitle(f"Mapa de vínculos — {mapa.socio_nome}")
+    gerador.setTitle(f"Mapa de vínculos — {mapa.centro_nome}")
     gerador.setDescription(mapa.resumo())
 
     painter = QPainter(gerador)
@@ -348,7 +362,7 @@ def exportar_pdf(caminho: Path, mapa: MapaVinculos) -> Path:
     escritor.setPageSize(QPageSize(QPageSize.A4))
     escritor.setPageOrientation(orientacao_da_pagina(mapa))
     escritor.setPageMargins(QMarginsF(10, 10, 10, 10), QPageLayout.Millimeter)
-    escritor.setTitle(f"Mapa de vínculos — {mapa.socio_nome}")
+    escritor.setTitle(f"Mapa de vínculos — {mapa.centro_nome}")
 
     painter = QPainter(escritor)
     escala = min(escritor.width() / mapa.largura, escritor.height() / mapa.altura)
@@ -369,14 +383,22 @@ class DialogoMapaVinculos(QDialog):
     assim esta tela não depende do repositório e dá pra abri-la com dados de
     teste."""
 
-    def __init__(self, socio_nome: str, socio_documento: str, vinculos: list[dict], parent=None):
+    def __init__(
+        self,
+        centro_nome: str,
+        centro_documento: str,
+        vinculos: list[dict],
+        papel: str = PAPEL_SOCIO,
+        parent=None,
+    ):
         super().__init__(parent)
-        self._socio_nome = socio_nome
-        self._socio_documento = socio_documento
+        self._centro_nome = centro_nome
+        self._centro_documento = centro_documento
         self._vinculos = list(vinculos)
+        self._papel = papel
 
-        self.setWindowTitle(f"Mapa de vínculos — {socio_nome}")
-        self.setMinimumSize(1000, 620)
+        titulo = "Mapa de vínculos" if papel == PAPEL_SOCIO else "Quadro societário"
+        self.setWindowTitle(f"{titulo} — {centro_nome}")
 
         self.incluir_encerrados = QCheckBox("Incluir vínculos encerrados")
         self.incluir_encerrados.setChecked(True)
@@ -424,16 +446,50 @@ class DialogoMapaVinculos(QDialog):
         coluna.addWidget(area, 1)
         coluna.addLayout(acoes)
 
+        self._ajustar_tamanhos()
+
+    def _ajustar_tamanhos(self) -> None:
+        """Abre já do tamanho do desenho, limitado ao que a tela comporta.
+
+        Antes abria no mínimo e o mapa nascia menor do que é: todo uso começava
+        arrastando a borda da janela pra enxergar o que já estava pronto. O
+        desenho tem largura fixa (LARGURA_PADRAO) e altura que cresce com o
+        número de caixas, então é ele quem manda no tamanho.
+
+        A tela é o teto dos dois — do tamanho inicial e também do mínimo. Um
+        mínimo maior que a tela é pior do que mínimo nenhum: a janela passa da
+        borda e não tem como encolher."""
+        mapa = self._montar()
+        moldura = 2 * 14  # as margens do layout
+        largura_maxima, altura_maxima = self._limites_da_tela()
+
+        self.setMinimumSize(
+            int(min(LARGURA_MINIMA, largura_maxima)),
+            int(min(ALTURA_MINIMA, altura_maxima)),
+        )
+        self.resize(
+            int(min(mapa.largura + moldura, largura_maxima)),
+            int(min(mapa.altura + moldura + ALTURA_DAS_ACOES, altura_maxima)),
+        )
+
+    def _limites_da_tela(self) -> tuple[float, float]:
+        tela = self.screen() or QGuiApplication.primaryScreen()
+        if tela is None:
+            return float("inf"), float("inf")
+        disponivel = tela.availableGeometry()
+        return disponivel.width() * 0.95, disponivel.height() * 0.92
+
     # ---------------------------------------------------------------- dados --
     def _montar(self) -> MapaVinculos:
         vinculos = self._vinculos
         if not self.incluir_encerrados.isChecked():
             vinculos = [v for v in vinculos if not v.get("data_saida")]
         return montar_mapa(
-            self._socio_nome,
-            self._socio_documento,
+            self._centro_nome,
+            self._centro_documento,
             vinculos,
             gerado_em=dt.datetime.now().strftime("%d/%m/%Y às %H:%M"),
+            papel=self._papel,
         )
 
     def _remontar(self, *_args) -> None:
@@ -450,7 +506,7 @@ class DialogoMapaVinculos(QDialog):
         self._exportar("svg", "Imagem vetorial (*.svg)", exportar_svg)
 
     def _exportar(self, extensao: str, filtro: str, funcao) -> None:
-        sugestao = nome_de_arquivo(self._socio_nome, extensao)
+        sugestao = nome_de_arquivo(self._centro_nome, extensao)
         caminho, _ = QFileDialog.getSaveFileName(self, f"Exportar mapa em {extensao.upper()}", sugestao, filtro)
         if not caminho:
             return
