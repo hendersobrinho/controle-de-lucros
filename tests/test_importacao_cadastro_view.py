@@ -347,3 +347,51 @@ def test_relatorio_em_xlsx_tambem_e_aceito(conn, monkeypatch, tmp_path):
     (empresa,) = repo.listar_empresas(conn)
     assert empresa.nome == "ENDOGASTRO CLINICA MEDICA LTDA"
     assert [s.nome for s in repo.listar_socios(conn)] == ["ANDRE FRANZOTTI CARDOSO"]
+
+
+def test_empresa_ja_cadastrada_pergunta_onde_lancar_a_movimentacao(conn, monkeypatch, tmp_path):
+    """Relatório de uma empresa só que já está no cadastro: dá pra perguntar
+    em qual alteração contratual a movimentação entra, em vez de abrir uma
+    automática sem avisar. Com várias empresas no arquivo não há o que
+    escolher, e o caminho automático continua."""
+    from controle_lucros.models import Empresa
+
+    empresa_id = repo.salvar_empresa(
+        conn, Empresa(None, "91", "ENDOGASTRO CLINICA MEDICA LTDA", "", 10000, 1000)
+    )
+    repo.salvar_socio(conn, Socio(None, "ANDRE FRANZOTTI CARDOSO", "076.925.727-55"))
+
+    arquivo = tmp_path / "relatorio.pdf"
+    arquivo.write_bytes(b"%PDF-falso")
+    monkeypatch.setattr(
+        vista, "extrair_texto",
+        lambda caminho: (
+            "Empresa: 91 - ENDOGASTRO CLINICA MEDICA LTDA Data do quadro societário: 20/05/2026\n"
+            "75 ANDRE FRANZOTTI CARDOSO 076.925.727-55 23/03/2007 46,94\n"
+        ),
+    )
+    monkeypatch.setattr(
+        vista.QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(arquivo), ""))
+    )
+    monkeypatch.setattr(vista.QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))
+    monkeypatch.setattr(vista.QMessageBox, "information", staticmethod(lambda *a, **k: None))
+
+    telas = []
+    monkeypatch.setattr(
+        vista.DialogoDestinoAlteracao, "exec",
+        lambda self: (telas.append(self), vista.QDialog.Accepted)[1],
+    )
+
+    view = vista.ImportacaoCadastroView(conn)
+    view._importar_relatorio()
+
+    (destino,) = telas
+    assert destino.empresa_id == empresa_id
+    # Sem alteração aberta ainda, a escolha cai em cadastrar uma nova, já com
+    # a data do quadro societário do relatório.
+    assert destino.opcao_nova.isChecked()
+    assert destino.data.date().toString("yyyy-MM-dd") == "2026-05-20"
+
+    (alteracao,) = repo.listar_alteracoes(conn, empresa_id)
+    (vinculo,) = repo.listar_vinculos_empresa(conn, empresa_id)
+    assert vinculo.alteracao_entrada_id == alteracao.id

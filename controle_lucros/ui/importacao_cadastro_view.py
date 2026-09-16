@@ -57,6 +57,7 @@ from ..relatorio_socios import (
     resumo as resumo_do_relatorio,
 )
 from .common import TabelaLista
+from .destino_alteracao import DialogoDestinoAlteracao
 from .ocupado import Progresso, ocupado
 from .layout_editor import EditorLayout
 from .leitor_pdf import PdfIlegivel, extrair_texto
@@ -985,12 +986,64 @@ class ImportacaoCadastroView(QWidget):
         if confirmar != QMessageBox.Yes:
             return
 
+        # Relatório de uma empresa só que já está no cadastro é o caso em que
+        # dá pra perguntar onde a movimentação entra — e é o caso comum, o
+        # relatório tirado de uma empresa específica. Com várias empresas no
+        # arquivo (ou com empresa que ainda vai ser criada) não há o que
+        # escolher: cada uma ganha a sua alteração automática.
+        alteracao_id = None
+        empresa_unica = self._empresa_cadastrada_unica(empresas)
+        if empresa_unica is not None:
+            destino = DialogoDestinoAlteracao(
+                self.conn,
+                empresa_unica.id,
+                f'Li {resumo_do_relatorio(empresas)} para "{empresa_unica.nome}".',
+                data_sugerida=empresas[0].data_quadro,
+                parent=self,
+            )
+            if destino.exec() != QDialog.Accepted:
+                return
+            try:
+                alteracao_id = destino.resolver()
+            except ValueError as exc:
+                QMessageBox.warning(self, "Não foi possível abrir a alteração", str(exc))
+                return
+
         self._aplicar_linhas(
-            linhas_importadas, "Importar relatório de sócios", criar_alteracao_por_empresa=True
+            linhas_importadas,
+            "Importar relatório de sócios",
+            alteracao_id=alteracao_id,
+            criar_alteracao_por_empresa=alteracao_id is None,
         )
 
+    def _empresa_cadastrada_unica(self, empresas: list):
+        """A empresa do cadastro quando o relatório traz uma só e ela já
+        existe aqui — senão None, e o caminho segue sem escolha de destino."""
+        if len(empresas) != 1:
+            return None
+        do_relatorio = empresas[0]
+        for empresa in repo.listar_empresas(self.conn):
+            numero_bate = (
+                do_relatorio.numero
+                and empresa.numero_chamada
+                and do_relatorio.numero.strip() == empresa.numero_chamada.strip()
+            )
+            cnpj_bate = (
+                do_relatorio.cnpj
+                and empresa.cnpj
+                and repo.normalizar_documento(do_relatorio.cnpj) == repo.normalizar_documento(empresa.cnpj)
+            )
+            if numero_bate or cnpj_bate or do_relatorio.nome.strip().lower() == empresa.nome.strip().lower():
+                return empresa
+        return None
+
     def _aplicar_linhas(
-        self, linhas_importadas: list[dict], titulo: str, *, criar_alteracao_por_empresa: bool = False
+        self,
+        linhas_importadas: list[dict],
+        titulo: str,
+        *,
+        alteracao_id: int | None = None,
+        criar_alteracao_por_empresa: bool = False,
     ) -> None:
         """Casa as linhas contra o cadastro, resolve pendências com a pessoa e
         aplica. É o mesmo caminho para planilha, layout e relatório em PDF — o
@@ -1042,6 +1095,7 @@ class ImportacaoCadastroView(QWidget):
                     progresso=lambda feitas, total: barra.passo(
                         feitas, total, f"Gravando linha {feitas} de {total}…"
                     ),
+                    alteracao_id=alteracao_id,
                     criar_alteracao_por_empresa=criar_alteracao_por_empresa,
                 )
         except ValueError as exc:

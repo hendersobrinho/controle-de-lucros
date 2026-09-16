@@ -41,6 +41,7 @@ from .common import (
     formatar_valor_br,
     TabelaLista,
 )
+from .destino_alteracao import DialogoDestinoAlteracao
 from .importacao_cadastro_view import DialogoRevisaoCadastro, ler_relatorio_arquivo
 from .leitor_pdf import PdfIlegivel
 from .ocupado import Progresso, ocupado
@@ -483,7 +484,11 @@ class AlteracaoCard(QWidget):
         self.btn_salvar.setEnabled(editavel)
         self.btn_incluir_socio.setEnabled(editavel and self.alteracao is not None)
         self.btn_saida_socio.setEnabled(editavel and self.alteracao is not None)
-        self.btn_importar_relatorio.setEnabled(editavel and self.alteracao is not None)
+        # Diferente dos dois acima, importar vale no rascunho: a tela de
+        # destino cadastra a alteração nova na hora, e era justamente aí que
+        # o botão morto travava quem clicou em "Nova alteração contratual"
+        # pra importar o quadro societário dentro dela.
+        self.btn_importar_relatorio.setEnabled(editavel)
 
         self.btn_cancelar.setVisible(self.alteracao is None)
         self.btn_excluir.setVisible(self.alteracao is not None)
@@ -661,9 +666,10 @@ class AlteracaoCard(QWidget):
 
         O relatório pode trazer várias empresas no mesmo arquivo; só as
         linhas da empresa desta alteração entram, o resto é ignorado (com
-        aviso de quantas linhas ficaram de fora)."""
-        if self.alteracao is None:
-            return
+        aviso de quantas linhas ficaram de fora).
+
+        Vale também no rascunho (alteração ainda não salva): a tela de
+        destino cadastra a alteração nova antes de gravar a movimentação."""
         caminho, _ = QFileDialog.getOpenFileName(
             self, "Importar relatório de sócios", "", _FILTRO_RELATORIO_SOCIOS
         )
@@ -686,18 +692,34 @@ class AlteracaoCard(QWidget):
         empresas_da_alteracao = [e for e in leitura.empresas if _empresa_do_relatorio_bate(empresa, e)]
         ignoradas_outra_empresa = len(leitura.empresas) - len(empresas_da_alteracao)
 
-        if not empresas_da_alteracao:
-            aviso_outras = (
-                f"\n\n{len(leitura.empresas)} outra(s) empresa(s) do arquivo foram ignoradas — esta "
-                "importação só entra no quadro societário desta empresa."
-                if leitura.empresas
-                else ""
+        # Nome e nº da empresa no relatório do outro sistema raramente são os
+        # mesmos do cadastro daqui ("91 - ENDOGASTRO CLINICA MEDICA LTDA" x
+        # "Endogastro"). Quando o arquivo tem uma empresa só, não faz sentido
+        # recusar: a pessoa escolheu a empresa ao abrir este card, e o arquivo
+        # não tem ambiguidade nenhuma — basta perguntar se é ela mesma.
+        if not empresas_da_alteracao and len(leitura.empresas) == 1:
+            unica = leitura.empresas[0]
+            identificacao = f"{unica.numero} - {unica.nome}" if unica.numero else unica.nome
+            usar_assim_mesmo = QMessageBox.question(
+                self,
+                "Importar relatório de sócios",
+                f'O relatório é de "{identificacao}", que não bate com o cadastro desta '
+                f'alteração ("{empresa.nome}", nº {empresa.numero_chamada or "sem número"}).\n\n'
+                "Lançar o quadro societário deste relatório nesta empresa mesmo assim?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
             )
+            if usar_assim_mesmo != QMessageBox.Yes:
+                return
+            empresas_da_alteracao = [unica]
+            ignoradas_outra_empresa = 0
+
+        if not empresas_da_alteracao:
             QMessageBox.information(
                 self,
                 "Importar relatório de sócios",
-                f'O relatório não traz nenhuma linha de "{empresa.nome}". Confira se é o '
-                f"arquivo certo.{aviso_outras}",
+                f'Entre as {len(leitura.empresas)} empresas do relatório, nenhuma bate com '
+                f'"{empresa.nome}". Confira se é o arquivo certo.',
             )
             return
 
@@ -734,16 +756,26 @@ class AlteracaoCard(QWidget):
                 f"reconhecidas e ficarão de fora:\n{exemplos}"
             )
 
-        confirmar = QMessageBox.question(
-            self,
-            "Importar relatório de sócios",
-            f'Li {resumo_do_relatorio(empresas_da_alteracao)} para "{empresa.nome}", a lançar na '
-            f"alteração contratual Nº {self.alteracao.numero}.{aviso_outras}{alerta}\n\n"
-            "Seguir com a importação?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes,
+        # A tela de destino é a confirmação: ela diz o que foi lido e pergunta
+        # em qual alteração isso entra — nova ou já aberta. Cancelar ali não
+        # grava nada.
+        destino = DialogoDestinoAlteracao(
+            self.conn,
+            self.empresa_id,
+            f'Li {resumo_do_relatorio(empresas_da_alteracao)} para "{empresa.nome}".'
+            f"{aviso_outras}{alerta}",
+            data_sugerida=empresas_da_alteracao[0].data_quadro,
+            alteracao_atual_id=self.alteracao.id if self.alteracao else None,
+            parent=self,
         )
-        if confirmar != QMessageBox.Yes:
+        if destino.exec() != QDialog.Accepted:
+            return
+        try:
+            alteracao_id = destino.resolver()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Não foi possível abrir a alteração", str(exc))
+            return
+        if alteracao_id is None:
             return
 
         resultado = repo.preparar_importacao_cadastro(self.conn, linhas_importadas)
@@ -785,17 +817,28 @@ class AlteracaoCard(QWidget):
                     progresso=lambda feitas, total: barra.passo(
                         feitas, total, f"Gravando linha {feitas} de {total}…"
                     ),
-                    alteracao_id=self.alteracao.id,
+                    alteracao_id=alteracao_id,
                 )
         except ValueError as exc:
             QMessageBox.warning(self, "Erro ao importar", str(exc))
             return
 
+        # O card pode ter entrado aqui como rascunho, ou apontando pra outra
+        # alteração que não a escolhida no destino: passa a ser a que recebeu
+        # a importação, pra o carrossel recarregar já em cima dela.
+        self.alteracao = repo.buscar_alteracao(self.conn, alteracao_id)
+
+        alteracao_nova = (
+            f"\n\nLançado na alteração contratual Nº {self.alteracao.numero}."
+            if self.alteracao
+            else ""
+        )
         resumo_txt = (
             f"{aplicado['vinculos_criados']} vínculo(s) criado(s) · "
             f"{aplicado['vinculos_ja_existentes']} já existiam (ignorados) · "
             f"{aplicado['vinculos_encerrados']} vínculo(s) com saída registrada."
+            f"{alteracao_nova}"
         )
         QMessageBox.information(self, "Importação concluída", resumo_txt)
-        self._preencher_tabela_socios()
+        self._preencher()
         self._ao_mudar(self)
