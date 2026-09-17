@@ -12,6 +12,7 @@ from . import theme
 class Sidebar(QFrame):
     navegar = Signal(str)
     trocar_senha = Signal()
+    reportar_problema = Signal()
     sair = Signal()
 
     def __init__(self, parent=None):
@@ -86,8 +87,20 @@ class Sidebar(QFrame):
         # (marcável), só posicionado aqui.
         self._botao_sobre = self._item("Sobre", "sistema.sobre", sub=True)
 
+        # Fica no rodapé, ao lado do "Sobre", e não numa tela do menu: quem
+        # precisa dele está com um problema na mão e quer achá-lo de onde
+        # estiver, sem navegar. Não é item marcável — abre uma janela e volta.
+        self.btn_reportar = QPushButton("Reportar problema")
+        self.btn_reportar.setProperty("role", "navSub")
+        self.btn_reportar.setCursor(Qt.PointingHandCursor)
+        self.btn_reportar.setToolTip(
+            "Monta um relatório com as informações técnicas e abre seu e-mail pra enviar."
+        )
+        self.btn_reportar.clicked.connect(self.reportar_problema.emit)
+
         layout.addWidget(self._rotulo_usuario)
         layout.addWidget(self._botao_sobre)
+        layout.addWidget(self.btn_reportar)
         layout.addWidget(self.btn_tema)
         layout.addWidget(self.btn_trocar_senha)
         layout.addWidget(self.btn_sair)

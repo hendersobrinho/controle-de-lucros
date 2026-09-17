@@ -15,6 +15,7 @@ from .importacao_cadastro_view import ImportacaoCadastroView
 from .log_atividades_view import LogAtividadesView
 from .login import DialogoTrocarMinhaSenha
 from .manual import DialogoManual, topico_da_pagina
+from .reportar_erro import abrir_para_relato
 from .sidebar import Sidebar
 from .sobre_view import SobreView
 from .socios_tab import SociosTab
@@ -94,6 +95,7 @@ class MainWindow(QMainWindow):
         self.sidebar.definir_usuario(usuario.nome, usuario.admin)
         self.sidebar.navegar.connect(self._ir_para)
         self.sidebar.trocar_senha.connect(self._trocar_senha)
+        self.sidebar.reportar_problema.connect(self._reportar_problema)
         self.sidebar.sair.connect(self._sair)
         tema_estado().mudou.connect(self._retemar_pagina_atual)
 
@@ -134,6 +136,12 @@ class MainWindow(QMainWindow):
 
     def abrir_manual(self) -> None:
         DialogoManual(topico_da_pagina(self._pagina_atual), self).exec()
+
+    def _reportar_problema(self) -> None:
+        """Relato por iniciativa da pessoa: nem todo problema estoura em erro.
+        Vai junto a tela em que ela estava, que costuma ser a primeira
+        pergunta de quem recebe."""
+        abrir_para_relato(self.titulo_pagina.text(), self)
 
     def _trocar_senha(self) -> None:
         dialogo = DialogoTrocarMinhaSenha(self.conn, self.usuario, self)

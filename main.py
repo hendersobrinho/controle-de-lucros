@@ -1,13 +1,45 @@
+import atexit
+import faulthandler
 import sqlite3
 import sys
 
 from PySide6.QtWidgets import QApplication, QDialog
 
-from controle_lucros import backup, db, repositories as repo, sessao, traducao
+from controle_lucros import backup, db, relatorio_erro, repositories as repo, sessao, traducao
 from controle_lucros.ui.icones import icone_app
 from controle_lucros.ui.login import DialogoLogin, DialogoPrimeiroUsuario
 from controle_lucros.ui.main_window import MainWindow
+from controle_lucros.ui.reportar_erro import CapturaDeErros, abrir_para_fechamento
 from controle_lucros.ui.theme import build_stylesheet
+
+
+def _preparar_registro_de_falhas(pasta) -> str:
+    """Liga o registro de falhas e devolve o que sobrou da sessão anterior.
+
+    Falha de segmentação não levanta exceção: quando ela acontece não há
+    código Python rodando pra capturar nada. O faulthandler escreve a pilha
+    direto no arquivo, no momento do tombo, e a marca de sessão diz na
+    abertura seguinte que a anterior não terminou pelo caminho normal.
+
+    Nada aqui pode impedir o programa de abrir — é registro de problema, não
+    função do sistema."""
+    detalhes = ""
+    try:
+        if relatorio_erro.sessao_anterior_caiu(pasta):
+            detalhes = relatorio_erro.detalhes_do_fechamento(pasta)
+        relatorio_erro.limpar_falha(pasta)
+
+        # Mantido aberto pelo resto da execução de propósito: fechar o arquivo
+        # deixaria o faulthandler sem pra onde escrever justamente na hora do
+        # tombo, que é a única hora em que ele serve.
+        destino = open(relatorio_erro.caminho_falha(pasta), "w", encoding="utf-8")  # noqa: SIM115
+        faulthandler.enable(file=destino)
+
+        relatorio_erro.marcar_sessao_aberta(pasta)
+        atexit.register(relatorio_erro.encerrar_sessao, pasta)
+    except OSError:
+        pass
+    return detalhes
 
 
 def main() -> None:
@@ -25,10 +57,15 @@ def main() -> None:
     conn = db.connect()
     db.init_schema(conn)
 
+    fechamento_anterior = _preparar_registro_de_falhas(db.get_db_path().parent)
+
     app = QApplication(sys.argv)
     traducao.instalar(app)
     app.setWindowIcon(icone_app())
     app.setStyleSheet(build_stylesheet())
+
+    captura = CapturaDeErros()
+    captura.instalar()
 
     while True:
         if not repo.existe_algum_usuario(conn):
@@ -48,7 +85,16 @@ def main() -> None:
             pass
 
         janela = MainWindow(conn, usuario)
+        captura.janela_principal = janela
         janela.show()
+
+        # Depois da janela aberta, não antes: perguntar sobre o tombo da vez
+        # passada por cima da tela de login seria pedir explicação a quem
+        # ainda nem entrou. Uma vez por execução.
+        if fechamento_anterior:
+            abrir_para_fechamento(fechamento_anterior, parent=janela)
+            fechamento_anterior = ""
+
         app.exec()
 
         sessao.definir_usuario_atual(None)
