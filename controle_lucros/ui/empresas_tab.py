@@ -69,7 +69,9 @@ class EmpresasTab(CrudTab):
             }
             for v in repo.listar_vinculos_empresa(self.conn, empresa.id)
         ]
-        DialogoMapaVinculos(empresa.nome, empresa.cnpj or "", vinculos, PAPEL_EMPRESA, self).exec()
+        DialogoMapaVinculos(
+            empresa.nome, empresa.cnpj or "", vinculos, self, papel=PAPEL_EMPRESA
+        ).exec()
 
     def montar_formulario(self, form_layout: QFormLayout) -> None:
         self.numero_chamada = QLineEdit()

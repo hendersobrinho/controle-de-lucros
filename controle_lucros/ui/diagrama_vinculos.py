@@ -429,9 +429,16 @@ class DialogoMapaVinculos(QDialog):
         centro_nome: str,
         centro_documento: str,
         vinculos: list[dict],
-        papel: str = PAPEL_SOCIO,
         parent=None,
+        *,
+        papel: str = PAPEL_SOCIO,
     ):
+        # `papel` é só por nome, e depois de `parent`, porque já custou caro:
+        # colocado antes, um `DialogoMapaVinculos(nome, doc, vinculos, self)`
+        # — a chamada que a aba de Sócios sempre fez — passou a entregar o
+        # widget como papel. O mapa do sócio virava "quadro societário da
+        # empresa" e o desenho estourava ao tentar escrever um SociosTab
+        # dentro do hub.
         super().__init__(parent)
         self._centro_nome = centro_nome
         self._centro_documento = centro_documento

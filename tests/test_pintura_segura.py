@@ -169,3 +169,73 @@ def test_esticar_o_mapa_de_verdade_nao_derruba_nem_erra_o_desenho():
     assert concluido.returncode == 0, concluido.stderr
     assert "SOBREVIVEU" in concluido.stdout
     assert "FALHAS: []" in concluido.stdout
+
+
+def test_os_dois_mapas_pintam_do_jeito_que_as_abas_os_abrem():
+    """O defeito que chegou ao usuário: a aba de Sócios abria o diálogo com o
+    widget no lugar do papel, e o desenho estourava ao tentar escrever um
+    SociosTab dentro do hub — "o mapa do sócio ficou todo bugado".
+
+    Os testes das abas não pegaram porque trocavam a classe inteira por um
+    lambda: o construtor de verdade nunca rodava. Este aqui abre os dois
+    mapas exatamente como as abas abrem, e PINTA — que é onde o erro
+    aparecia."""
+    concluido = _rodar(
+        """
+        import sqlite3
+        from controle_lucros import db, repositories as repo
+        from controle_lucros.models import Empresa, Socio, VinculoSocietario
+        from controle_lucros.ui import diagrama_vinculos as dv
+        from controle_lucros.ui.empresas_tab import EmpresasTab
+        from controle_lucros.ui.socios_tab import SociosTab
+
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        db.init_schema(conn)
+        empresa_id = repo.salvar_empresa(conn, Empresa(
+            None, "91", "ENDOGASTRO LTDA", "", 1000, 1000))
+        socio_id = repo.salvar_socio(conn, Socio(None, "ANDRE FRANZOTTI", "076.925.727-55"))
+        repo.salvar_vinculo(conn, VinculoSocietario(
+            id=None, empresa_id=empresa_id, socio_id=socio_id, percentual_capital=46.94,
+            quantidade_cotas=469, data_entrada="2007-03-23", data_saida=None))
+
+        falhas = []
+        original = dv.desenhar
+        def espiao(painter, mapa, paleta):
+            try:
+                original(painter, mapa, paleta)
+            except Exception as erro:
+                falhas.append(f"{mapa.centro_papel}: {erro!r}")
+        dv.desenhar = espiao
+
+        abertos = []
+        dv.DialogoMapaVinculos.exec = lambda self: abertos.append(self) or 0
+
+        socios = SociosTab(conn)
+        socios.tabela.selectRow(0)
+        socios._abrir_mapa_vinculos()
+
+        empresas = EmpresasTab(conn)
+        empresas.tabela.selectRow(0)
+        empresas._abrir_quadro_societario()
+
+        papeis = []
+        for dialogo in abertos:
+            dialogo.show()
+            app.processEvents()
+            for largura in (700, 1400, 2100):
+                dialogo.resize(largura, 700)
+                app.processEvents()
+                dialogo.repaint()
+            papeis.append(dialogo.mapa().centro_papel)
+
+        print("PAPEIS:", papeis)
+        print("FALHAS:", falhas)
+        print("SOBREVIVEU")
+        """
+    )
+    assert concluido.returncode == 0, concluido.stderr
+    assert "SOBREVIVEU" in concluido.stdout
+    assert "FALHAS: []" in concluido.stdout
+    # Cada aba abre o mapa do seu lado: sócio na de Sócios, empresa na de Cadastro.
+    assert "PAPEIS: ['sócio', 'empresa']" in concluido.stdout

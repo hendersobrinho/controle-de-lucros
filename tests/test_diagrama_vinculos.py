@@ -150,19 +150,26 @@ def test_botao_da_aba_abre_o_mapa_do_socio_selecionado(conn, monkeypatch):
     aba.tabela.selectRow(0)
     assert aba.btn_mapa.isEnabled()
 
+    # Patch só do exec: o construtor de verdade precisa rodar. Trocar a
+    # classe inteira por um lambda escondeu uma regressão real — a aba
+    # passava o widget onde o construtor esperava o papel, e o teste seguiu
+    # verde porque o lambda aceitava qualquer coisa.
     abertos = []
     monkeypatch.setattr(
-        "controle_lucros.ui.socios_tab.DialogoMapaVinculos",
-        lambda nome, documento, vinculos, parent=None: abertos.append((nome, documento, vinculos))
-        or type("Falso", (), {"exec": lambda self: 0})(),
+        diagrama.DialogoMapaVinculos, "exec",
+        lambda self: abertos.append(self) or 0,
     )
     aba._abrir_mapa_vinculos()
 
-    (nome, documento, vinculos) = abertos[0]
-    assert nome == "ANDRE FRANZOTTI"
-    assert documento == "076.925.727-55"
-    assert vinculos == [{"empresa_nome": "ENDOGASTRO LTDA", "percentual": 46.94,
-                         "data_entrada": "2007-03-23", "data_saida": None}]
+    (dialogo,) = abertos
+    mapa = dialogo.mapa()
+    assert mapa.centro_nome == "ANDRE FRANZOTTI"
+    assert mapa.centro_documento == "076.925.727-55"
+    assert [n.nome for n in mapa.nos] == ["ENDOGASTRO LTDA"]
+    # O mapa do sócio é do SÓCIO: com o papel errado o título vira "quadro
+    # societário da empresa" e o desenho estoura.
+    assert mapa.centro_e_socio
+    assert dialogo.parent() is aba
 
 
 def test_sem_socio_selecionado_o_botao_fica_travado(conn):
@@ -234,19 +241,18 @@ def test_botao_da_aba_empresas_abre_o_quadro_societario(conn, monkeypatch):
 
     abertos = []
     monkeypatch.setattr(
-        "controle_lucros.ui.empresas_tab.DialogoMapaVinculos",
-        lambda nome, documento, vinculos, papel, parent=None: abertos.append(
-            (nome, documento, vinculos, papel)
-        ) or type("Falso", (), {"exec": lambda self: 0})(),
+        diagrama.DialogoMapaVinculos, "exec",
+        lambda self: abertos.append(self) or 0,
     )
     aba._abrir_quadro_societario()
 
-    (nome, documento, vinculos, papel) = abertos[0]
-    assert nome == "ENDOGASTRO LTDA"
-    assert documento == "02.294.442/0001-13"
-    assert papel == PAPEL_EMPRESA
-    assert vinculos == [{"socio_nome": "ANDRE FRANZOTTI", "percentual": 46.94,
-                         "data_entrada": "2007-03-23", "data_saida": None}]
+    (dialogo,) = abertos
+    mapa = dialogo.mapa()
+    assert mapa.centro_nome == "ENDOGASTRO LTDA"
+    assert mapa.centro_documento == "02.294.442/0001-13"
+    assert mapa.centro_papel == PAPEL_EMPRESA
+    assert [n.nome for n in mapa.nos] == ["ANDRE FRANZOTTI"]
+    assert dialogo.parent() is aba
 
 
 def test_a_janela_do_mapa_abre_do_tamanho_do_desenho(conn):
