@@ -7,6 +7,8 @@ indicando que digitar ali por cima de um registro selecionado ALTERA aquele
 registro em vez de criar um novo."""
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 from PySide6.QtCore import QLocale, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter
 from PySide6.QtWidgets import (
@@ -29,6 +31,28 @@ from PySide6.QtWidgets import (
 )
 
 from . import theme
+
+
+@contextmanager
+def pintura_segura(dispositivo):
+    """QPainter que termina sempre, mesmo se o desenho levantar exceção.
+
+    Erro dentro de um paintEvent não é só um erro: o PySide imprime o
+    traceback e devolve o controle ao Qt com o QPainter ainda ATIVO. O Qt
+    então bate em "QBackingStore::endPaint() called with active painter" e o
+    processo morre por falha de segmentação — pra quem está usando, o
+    programa simplesmente fecha sozinho, sem mensagem nenhuma.
+
+    Terminar o pintor num finally é o que transforma um desenho que falhou
+    numa tela feia, em vez de num programa fechado. Vale para todo paintEvent
+    daqui: o desenho é a única parte do sistema em que uma exceção derruba
+    tudo em vez de aparecer numa caixa de aviso."""
+    pintor = QPainter(dispositivo)
+    try:
+        yield pintor
+    finally:
+        if pintor.isActive():
+            pintor.end()
 
 LOCALE_BR = QLocale(QLocale.Portuguese, QLocale.Brazil)
 
@@ -158,10 +182,9 @@ class TabelaLista(QTableWidget):
             return
         # Tabela vazia sem nada escrito parece tela que não carregou. Uma linha
         # no meio do espaço diz que o espaço está vazio de propósito.
-        pintor = QPainter(self.viewport())
-        pintor.setPen(QColor(theme.INK_MUTED()))
-        pintor.drawText(self.viewport().rect(), Qt.AlignCenter, self.mensagem_vazia)
-        pintor.end()
+        with pintura_segura(self.viewport()) as pintor:
+            pintor.setPen(QColor(theme.INK_MUTED()))
+            pintor.drawText(self.viewport().rect(), Qt.AlignCenter, self.mensagem_vazia)
 
     def resizeEvent(self, evento) -> None:
         super().resizeEvent(evento)

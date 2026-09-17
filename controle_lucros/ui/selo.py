@@ -7,6 +7,7 @@ from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
+from .common import pintura_segura
 from .theme import BRASS, PAPER_RAISED, SEAL_RED
 from .theme import estado as tema_estado
 
@@ -25,31 +26,31 @@ class Selo(QWidget):
         self.update()
 
     def paintEvent(self, event) -> None:  # noqa: N802 (Qt override)
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
+        with pintura_segura(self) as painter:
+            painter.setRenderHint(QPainter.Antialiasing)
 
-        cor = QColor(SEAL_RED() if self._fechada else BRASS())
-        centro = self.rect().center()
-        raio = min(self.width(), self.height()) / 2 - 3
+            cor = QColor(SEAL_RED() if self._fechada else BRASS())
+            centro = self.rect().center()
+            raio = min(self.width(), self.height()) / 2 - 3
 
-        painter.setPen(QPen(cor, 2))
-        painter.setBrush(QColor(PAPER_RAISED()))
-        painter.drawEllipse(centro, raio, raio)
+            painter.setPen(QPen(cor, 2))
+            painter.setBrush(QColor(PAPER_RAISED()))
+            painter.drawEllipse(centro, raio, raio)
 
-        anel = raio - 6
-        painter.setPen(QPen(cor, 1))
-        painter.setBrush(Qt.NoBrush)
-        painter.drawEllipse(centro, anel, anel)
+            anel = raio - 6
+            painter.setPen(QPen(cor, 1))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawEllipse(centro, anel, anel)
 
-        self._desenhar_cadeado(painter, centro, cor)
+            self._desenhar_cadeado(painter, centro, cor)
 
-        painter.setPen(QPen(cor, 1))
-        fonte = QFont()
-        fonte.setPointSize(8)
-        fonte.setBold(True)
-        painter.setFont(fonte)
-        rotulo = QRectF(0, self.height() - 16, self.width(), 14)
-        painter.drawText(rotulo, Qt.AlignCenter, f"Nº {self._numero}")
+            painter.setPen(QPen(cor, 1))
+            fonte = QFont()
+            fonte.setPointSize(8)
+            fonte.setBold(True)
+            painter.setFont(fonte)
+            rotulo = QRectF(0, self.height() - 16, self.width(), 14)
+            painter.drawText(rotulo, Qt.AlignCenter, f"Nº {self._numero}")
 
     def _desenhar_cadeado(self, painter: QPainter, centro, cor: QColor) -> None:
         largura_corpo, altura_corpo = 16, 12

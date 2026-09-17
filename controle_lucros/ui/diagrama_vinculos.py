@@ -13,6 +13,7 @@ só, e cada destino apenas escala.
 from __future__ import annotations
 
 import datetime as dt
+import traceback
 from pathlib import Path
 
 from PySide6.QtCore import QMarginsF, QPointF, QRectF, QSize, Qt
@@ -44,7 +45,7 @@ from PySide6.QtWidgets import (
 
 from ..mapa_vinculos import PAPEL_SOCIO, MapaVinculos, No, montar_mapa, nome_de_arquivo
 from . import theme
-from .common import formatar_valor_br
+from .common import formatar_valor_br, pintura_segura
 
 RAIO_CAIXA = 8
 RAIO_COTOVELO = 10
@@ -307,8 +308,27 @@ class DiagramaVinculos(QWidget):
     ESCALA_MAXIMA = 1.6
 
     def paintEvent(self, evento) -> None:
-        painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor(_paleta_da_tela()["PAPER"]))
+        """Pinta o mapa, e nunca deixa uma falha de desenho fechar o programa.
+
+        Esta tela é redesenhada a cada pixel arrastado na borda da janela, o
+        que dá a um desenho que falha muitas chances de acontecer. E falhar
+        aqui é grave de um jeito que não é óbvio: exceção dentro de um
+        paintEvent devolve o controle ao Qt com o pintor ativo, e o processo
+        morre por falha de segmentação — o programa fecha sozinho, sem
+        mensagem, e quem está usando perde o que estava fazendo nas outras
+        telas.
+
+        Por isso o desenho é isolado: se ele quebrar, fica o aviso no lugar
+        do mapa, com o motivo à vista pra poder ser corrigido. Tela feia é um
+        problema pequeno; programa que fecha, não."""
+        with pintura_segura(self) as painter:
+            painter.fillRect(self.rect(), QColor(_paleta_da_tela()["PAPER"]))
+            try:
+                self._pintar_mapa(painter)
+            except Exception as erro:  # noqa: BLE001 — ver docstring
+                self._pintar_falha(painter, erro)
+
+    def _pintar_mapa(self, painter: QPainter) -> None:
         escala = min(self.width() / self._mapa.largura, self.height() / self._mapa.altura)
         escala = max(1.0, min(escala, self.ESCALA_MAXIMA))
         # Centralizado: encostado no canto, o mapa curto parecia um pedaço de
@@ -319,7 +339,27 @@ class DiagramaVinculos(QWidget):
         )
         painter.scale(escala, escala)
         desenhar(painter, self._mapa, _paleta_da_tela())
-        painter.end()
+
+    def _pintar_falha(self, painter: QPainter, erro: Exception) -> None:
+        """O aviso que ocupa o lugar do mapa quando o desenho não sai.
+
+        Mostra o erro na tela porque esta é a única pista que sobra: sem ela
+        o problema volta a ser "o mapa não apareceu", sem nada pra investigar.
+        O traceback vai junto pro stderr, pra quem estiver rodando pelo código."""
+        traceback.print_exc()
+        # O desenho pode ter parado no meio de uma transformação; sem desfazer,
+        # o aviso sairia deslocado ou fora da área visível.
+        painter.resetTransform()
+        painter.setPen(QPen(QColor(_paleta_da_tela()["INK_MUTED"])))
+        painter.setFont(_fonte(13))
+        painter.drawText(
+            self.rect().adjusted(24, 24, -24, -24),
+            Qt.AlignCenter | Qt.TextWordWrap,
+            "Não consegui desenhar o mapa nesta janela.\n\n"
+            f"{type(erro).__name__}: {erro}\n\n"
+            "A exportação em PDF e SVG usa o mesmo desenho e pode falhar igual. "
+            "Avise o suporte com esta mensagem.",
+        )
 
 
 def exportar_svg(caminho: Path, mapa: MapaVinculos) -> Path:
@@ -335,9 +375,11 @@ def exportar_svg(caminho: Path, mapa: MapaVinculos) -> Path:
     gerador.setTitle(f"Mapa de vínculos — {mapa.centro_nome}")
     gerador.setDescription(mapa.resumo())
 
-    painter = QPainter(gerador)
-    desenhar(painter, mapa, _paleta_para_arquivo())
-    painter.end()
+    # Mesma proteção do desenho na tela: desenho que falha no meio deixaria o
+    # pintor aberto sobre o gerador, e o arquivo sai truncado — ou pior, o
+    # processo morre antes de dizer o que houve.
+    with pintura_segura(gerador) as painter:
+        desenhar(painter, mapa, _paleta_para_arquivo())
     return caminho
 
 
@@ -364,15 +406,14 @@ def exportar_pdf(caminho: Path, mapa: MapaVinculos) -> Path:
     escritor.setPageMargins(QMarginsF(10, 10, 10, 10), QPageLayout.Millimeter)
     escritor.setTitle(f"Mapa de vínculos — {mapa.centro_nome}")
 
-    painter = QPainter(escritor)
-    escala = min(escritor.width() / mapa.largura, escritor.height() / mapa.altura)
-    painter.translate(
-        (escritor.width() - mapa.largura * escala) / 2,
-        (escritor.height() - mapa.altura * escala) / 2,
-    )
-    painter.scale(escala, escala)
-    desenhar(painter, mapa, _paleta_para_arquivo())
-    painter.end()
+    with pintura_segura(escritor) as painter:
+        escala = min(escritor.width() / mapa.largura, escritor.height() / mapa.altura)
+        painter.translate(
+            (escritor.width() - mapa.largura * escala) / 2,
+            (escritor.height() - mapa.altura * escala) / 2,
+        )
+        painter.scale(escala, escala)
+        desenhar(painter, mapa, _paleta_para_arquivo())
     return caminho
 
 
