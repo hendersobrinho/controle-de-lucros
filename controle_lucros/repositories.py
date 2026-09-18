@@ -10,6 +10,7 @@ from . import fiscal, sessao
 from .auth import gerar_hash_senha, senha_confere
 from .layout_importacao import LayoutImportacao, de_json, garantir_valido, limpar_colunas, para_json
 from .models import (
+    CAMPOS_COTAS_INFORME,
     CAMPOS_VALOR_INFORME,
     TIPOS_MOVIMENTACAO_LABEL,
     TRIMESTRES,
@@ -1779,13 +1780,75 @@ def buscar_informe(
     return InformeRendimento(**dict(row)) if row else None
 
 
+def variacao_cotas_socio(
+    conn: sqlite3.Connection, empresa_id: int, socio_id: int, ano_base: int
+) -> dict:
+    """Quantas cotas o sócio tinha nessa empresa em 31/12 do ano anterior e em
+    31/12 do ano-base, quanto vale cada cota, e a data em que ele saiu da
+    sociedade — se saiu naquele ano.
+
+    É o que o Quadro 7 do informe precisa pra dizer ao sócio o que lançar nas
+    fichas de Bens e Direitos e de Dívidas e Ônus Reais. Como mudança de
+    participação aqui fecha um vínculo e abre outro (ver
+    atualizar_cotas_vinculo), comparar as duas datas é o que revela a venda
+    ou a compra de cotas do ano, sem precisar percorrer alteração por
+    alteração.
+
+    A saída só é reconhecida quando o sócio terminou o ano fora da sociedade:
+    quem apenas reduziu participação em agosto também tem um vínculo fechado
+    naquela data, e chamar isso de saída faria o informe mandá-lo baixar uma
+    participação que ele ainda tem."""
+    inicio, fim = f"{ano_base - 1}-12-31", f"{ano_base}-12-31"
+
+    def cotas_em(data: str) -> float:
+        row = conn.execute(
+            """SELECT COALESCE(SUM(quantidade_cotas), 0) AS total FROM vinculo_societario
+               WHERE empresa_id=? AND socio_id=? AND date(data_entrada) <= date(?)
+                 AND (data_saida IS NULL OR date(data_saida) > date(?))""",
+            (empresa_id, socio_id, data, data),
+        ).fetchone()
+        return row["total"] or 0.0
+
+    cotas_inicio, cotas_fim = cotas_em(inicio), cotas_em(fim)
+
+    # Valor nominal da cota = capital social / total de cotas da EMPRESA. Vale
+    # o estado do fim do ano; só quando a empresa ainda não tinha cotas ali é
+    # que o do início serve de retaguarda.
+    estado = estado_empresa_no_periodo(conn, empresa_id, ano_base)
+    if estado["cotas_fim"]:
+        valor_nominal = estado["capital_fim"] / estado["cotas_fim"]
+    elif estado["cotas_inicio"]:
+        valor_nominal = estado["capital_inicio"] / estado["cotas_inicio"]
+    else:
+        valor_nominal = 0.0
+
+    data_saida = None
+    if not cotas_fim:
+        row = conn.execute(
+            """SELECT MAX(data_saida) AS data FROM vinculo_societario
+               WHERE empresa_id=? AND socio_id=? AND data_saida IS NOT NULL
+                 AND date(data_saida) BETWEEN date(?) AND date(?)""",
+            (empresa_id, socio_id, f"{ano_base}-01-01", fim),
+        ).fetchone()
+        data_saida = row["data"]
+
+    return {
+        "cotas_inicio": cotas_inicio,
+        "cotas_fim": cotas_fim,
+        "variacao": cotas_fim - cotas_inicio,
+        "valor_nominal": valor_nominal,
+        "data_saida": data_saida,
+    }
+
+
 def informe_sugerido(
     conn: sqlite3.Connection, empresa_id: int, ano_base: int, socio_id: int
 ) -> InformeRendimento:
     """Monta o informe a partir do que o sistema já sabe, sem gravar nada:
     pró-labore e IRRF da distribuição do ano viram as linhas 1 e 5 do Quadro
     3, o valor distribuído vira a linha 5 do Quadro 4, e o saldo de
-    empréstimo vira o Quadro 7.
+    empréstimo vira o Quadro 7 — junto com a saída da sociedade e a variação
+    de cotas do ano, que saem do histórico de vínculos.
 
     O que o sistema não controla (INSS, 13º, pensão alimentícia, diárias) sai
     zerado e é preenchido na tela. É aqui — e só aqui — que os REAL do banco
@@ -1794,6 +1857,7 @@ def informe_sugerido(
         "SELECT * FROM distribuicao_lucro WHERE empresa_id=? AND ano_base=? AND socio_id=?",
         (empresa_id, ano_base, socio_id),
     ).fetchone()
+    cotas = variacao_cotas_socio(conn, empresa_id, socio_id, ano_base)
     return InformeRendimento(
         id=None,
         empresa_id=empresa_id,
@@ -1807,6 +1871,10 @@ def informe_sugerido(
         emprestimo_saldo=fiscal.reais_para_centavos(
             saldo_emprestimo_em(conn, empresa_id, socio_id, ano_base)
         ),
+        saida_sociedade_data=cotas["data_saida"] or "",
+        cotas_inicio=cotas["cotas_inicio"],
+        cotas_fim=cotas["cotas_fim"],
+        cota_valor_nominal=fiscal.reais_para_centavos(cotas["valor_nominal"]),
     )
 
 
@@ -1829,11 +1897,13 @@ def salvar_informe(conn: sqlite3.Connection, informe: InformeRendimento) -> int:
     Não passa por _garantir_periodo_aberto: emitir informe é obrigação de
     abril, quando o período do ano anterior normalmente já está fechado."""
     negativos = [
-        campo for campo in CAMPOS_VALOR_INFORME + ("emprestimo_saldo",)
+        campo for campo in CAMPOS_VALOR_INFORME + ("emprestimo_saldo", "cota_valor_nominal")
         if int(getattr(informe, campo) or 0) < 0
     ]
     if negativos:
         raise ValueError("Os valores do informe não podem ser negativos.")
+    if (informe.cotas_inicio or 0) < 0 or (informe.cotas_fim or 0) < 0:
+        raise ValueError("A quantidade de cotas do informe não pode ser negativa.")
     if not (1996 <= informe.ano_base <= dt.date.today().year + 1):
         raise ValueError(
             f"Ano-calendário inválido: {informe.ano_base}. O informe existe pra anos a partir de 1996."
@@ -1843,6 +1913,7 @@ def salvar_informe(conn: sqlite3.Connection, informe: InformeRendimento) -> int:
         "codigo_beneficiario",
         "natureza_rendimento",
         "emprestimo_saldo",
+        *CAMPOS_COTAS_INFORME,
         "informacoes_complementares",
         "responsavel_nome",
     )

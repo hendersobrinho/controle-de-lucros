@@ -123,6 +123,11 @@ Salvo com um nome, o layout vira o formato daquela origem: configura-se uma vez
 e depois é só apontar o arquivo. Na tela, **Novo layout** começa do zero e
 **Duplicar como layout** já vem preenchido a partir do formato selecionado.
 
+A grade de letras fica recolhida fora dessas horas. Ela abre ao criar ou
+duplicar um layout e ao clicar em **Editar layout**; salvar recolhe de volta.
+O uso diário é escolher o formato e apontar o arquivo, e dezesseis caixinhas
+de letra permanentes na tela só atrapalhariam isso.
+
 **Conferir com uma planilha…** abre um arquivo e mostra as primeiras linhas já
 lidas pelo layout, sem importar nada — a mesma prévia aparece como confirmação
 antes de qualquer importação. É o que separa configurar as letras no escuro de
@@ -277,6 +282,15 @@ lucro distribuído no Quadro 4 e o saldo de empréstimo da empresa ao sócio no
 Quadro 7. O que ele não controla (INSS, 13º, pensão alimentícia, diárias) é
 digitado na tela, conferido contra a folha e fica guardado por sócio, empresa
 e ano — reemitir depois não exige digitar tudo de novo.
+
+O Quadro 7 também informa a **variação de cotas** do ano, que o sistema deduz
+do histórico de vínculos: quantas cotas o sócio tinha em 31/12 do ano anterior
+e em 31/12 do ano-base, o valor nominal de cada uma (capital social ÷ total de
+cotas da empresa) e, quando ele terminou o ano fora da sociedade, a data da
+saída. Sai impresso como alienação ou aquisição de cotas, com o saldo que
+ficou — é o que o sócio lança nas fichas de *Bens e Direitos* e de *Dívidas e
+Ônus Reais*. Reduzir participação sem sair não é lido como saída, e ano sem
+mudança de cotas não imprime nada disso.
 
 O botão **Visualizar** mostra o mesmo HTML que vai pro PDF, então conferir na
 tela é conferir o documento impresso.

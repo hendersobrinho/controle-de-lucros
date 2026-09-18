@@ -176,6 +176,10 @@ CREATE TABLE IF NOT EXISTS informe_rendimento (
     q5_irrf_decimo_terceiro INTEGER NOT NULL DEFAULT 0,
     q5_outros INTEGER NOT NULL DEFAULT 0,
     emprestimo_saldo INTEGER NOT NULL DEFAULT 0,
+    saida_sociedade_data TEXT NOT NULL DEFAULT '',
+    cotas_inicio REAL NOT NULL DEFAULT 0,
+    cotas_fim REAL NOT NULL DEFAULT 0,
+    cota_valor_nominal INTEGER NOT NULL DEFAULT 0,
     informacoes_complementares TEXT NOT NULL DEFAULT '',
     responsavel_nome TEXT NOT NULL DEFAULT '',
     atualizado_em TEXT NOT NULL,
@@ -318,6 +322,10 @@ COLUNAS_ADICIONADAS = [
     ("socio", "tipo_pessoa", "TEXT NOT NULL DEFAULT 'fisica' CHECK (tipo_pessoa IN ('fisica', 'juridica'))"),
     ("distribuicao_lucro", "pro_labore", "REAL NOT NULL DEFAULT 0"),
     ("distribuicao_lucro", "irrf", "REAL NOT NULL DEFAULT 0"),
+    ("informe_rendimento", "saida_sociedade_data", "TEXT NOT NULL DEFAULT ''"),
+    ("informe_rendimento", "cotas_inicio", "REAL NOT NULL DEFAULT 0"),
+    ("informe_rendimento", "cotas_fim", "REAL NOT NULL DEFAULT 0"),
+    ("informe_rendimento", "cota_valor_nominal", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 

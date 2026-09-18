@@ -13,6 +13,10 @@ Regras da própria IN que explicam o formato do código abaixo:
   2 e o IRRF na linha 5. Distribuição de lucro é isento (Quadro 4, linha 5).
   Empréstimo da empresa ao sócio não é rendimento nenhum: vai pro Quadro 7,
   porque o sócio precisa do saldo pra ficha de Dívidas e Ônus Reais.
+* Sair da sociedade e comprar/vender cotas também não é rendimento, mas muda
+  o patrimônio declarado: a saída vai pra ficha de Dívidas e Ônus Reais e a
+  variação de cotas pra ficha de Bens e Direitos. Os dois saem no Quadro 7,
+  porque é lá que o comprovante diz ao sócio o que lançar em cada ficha.
 * Papel A4, preto sobre branco.
 
 Os textos das linhas são a redação impressa do modelo oficial — mudar uma
@@ -23,10 +27,11 @@ pra PDF. Assim toda a lógica do informe é testável sem abrir janela.
 """
 from __future__ import annotations
 
+import datetime as dt
 import html
 from pathlib import Path
 
-from .fiscal import de_centavos, formatar_cnpj, formatar_cpf
+from .fiscal import de_centavos, formatar_cnpj, formatar_cotas, formatar_cpf
 from .models import InformeRendimento
 
 RODAPE_LEGAL = "Aprovado pela Instrução Normativa RFB nº 2.060, de 13 de dezembro de 2021."
@@ -132,10 +137,17 @@ APELIDOS_CAMPOS = {
     "q3_irrf": "IRRF",
     "q4_lucros_dividendos": "Distribuição de lucros",
     "emprestimo_saldo": "Empréstimo ao sócio",
+    "cota_valor_nominal": "Valor da cota",
 }
 
 # Campos que o sistema preenche sozinho a partir dos lançamentos do ano.
-CAMPOS_SUGERIDOS = ("q3_total_rendimentos", "q3_irrf", "q4_lucros_dividendos", "emprestimo_saldo")
+CAMPOS_SUGERIDOS = (
+    "q3_total_rendimentos",
+    "q3_irrf",
+    "q4_lucros_dividendos",
+    "emprestimo_saldo",
+    "cota_valor_nominal",
+)
 
 
 def bloco_emprestimo(saldo_centavos: int, ano_base: int) -> str:
@@ -149,12 +161,60 @@ def bloco_emprestimo(saldo_centavos: int, ano_base: int) -> str:
     )
 
 
+def _data_br(data_iso: str) -> str:
+    """dd/mm/aaaa a partir do ISO do banco. Data que não vier em ISO sai como
+    está: é dado digitado, e esconder o que está gravado seria pior."""
+    try:
+        return dt.date.fromisoformat(str(data_iso)).strftime("%d/%m/%Y")
+    except (TypeError, ValueError):
+        return str(data_iso or "")
+
+
+def bloco_saida_sociedade(data_saida: str) -> str:
+    """Texto do Quadro 7 para a saída da sociedade. Vai na ficha de Dívidas e
+    Ônus Reais: é lá que a declaração baixa a participação que o sócio tinha."""
+    return (
+        "SAÍDA DE SOCIEDADE DE DIREITO PRIVADO (Ficha de Dívidas e Ônus Reais):\n"
+        f"Data da saída {_data_br(data_saida)}"
+    )
+
+
+def bloco_variacao_cotas(informe: InformeRendimento) -> str:
+    """Texto do Quadro 7 para a compra/venda de cotas do ano.
+
+    A ficha de Bens e Direitos do sócio tem que fechar com o que ele tinha em
+    31/12 — então o comprovante informa quantas cotas mudaram de mão no ano,
+    por quanto, e qual ficou sendo o saldo. Sem variação não há bloco: quem
+    continuou com as mesmas cotas repete a declaração do ano anterior."""
+    variacao = (informe.cotas_fim or 0) - (informe.cotas_inicio or 0)
+    if not variacao:
+        return ""
+    quantidade = abs(variacao)
+    nominal = informe.cota_valor_nominal or 0
+    return (
+        "VARIAÇÃO DE COTAS (por alteração contratual) (Ficha de Bens e Direitos):\n"
+        f"{'Alienação' if variacao < 0 else 'Aquisição'} de {formatar_cotas(quantidade)} "
+        f"Cotas Societárias, no valor nominal de R$ {de_centavos(nominal)} cada uma, "
+        f"totalizando R$ {de_centavos(round(quantidade * nominal))}. "
+        f"Saldo em 31/12/{informe.ano_base}: {formatar_cotas(informe.cotas_fim)} Cotas = "
+        f"R$ {de_centavos(round((informe.cotas_fim or 0) * nominal))}"
+    )
+
+
 def informacoes_complementares(informe: InformeRendimento) -> str:
-    """Quadro 7 completo: o bloco do empréstimo (quando há saldo) e depois o
-    texto livre digitado, separados por linha em branco."""
+    """Quadro 7 completo: empréstimo, saída da sociedade, variação de cotas e
+    o texto livre digitado, nessa ordem, separados por linha em branco.
+
+    A ordem é a do modelo em uso no escritório — primeiro o que o sócio lança
+    em Dívidas e Ônus Reais, depois o que ele lança em Bens e Direitos."""
     blocos = []
     if informe.emprestimo_saldo:
         blocos.append(bloco_emprestimo(informe.emprestimo_saldo, informe.ano_base))
+    if informe.saida_sociedade_data:
+        blocos.append(bloco_saida_sociedade(informe.saida_sociedade_data))
+    variacao = bloco_variacao_cotas(informe)
+    if variacao:
+        blocos.append(variacao)
     livre = (informe.informacoes_complementares or "").strip()
     if livre:
         blocos.append(livre)

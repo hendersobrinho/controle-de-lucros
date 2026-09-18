@@ -260,10 +260,12 @@ linhas já lidas pelo layout, <b>sem importar nada</b>. Use sempre: errar uma
 letra é fácil, e o estrago — o CNPJ gravado no lugar do capital social — só
 apareceria muito depois. Ao importar, a mesma prévia aparece como confirmação
 antes de qualquer coisa ser gravada.</p>
-<p><b>Salvar layout</b> guarda a configuração com um nome. Da próxima vez é só
-escolher o formato e apontar o arquivo. Alterações ainda não salvas já valem
-para a importação e a exportação daquele momento — o aviso ao lado dos botões
-diz em que pé está.</p>
+<p><b>Salvar layout</b> guarda a configuração com um nome e <b>recolhe a
+grade</b>: da próxima vez é só escolher o formato e apontar o arquivo, sem as
+caixinhas de letra na frente. Para mexer nas colunas de novo, use <b>Editar
+layout</b> — e <b>Fechar</b> recolhe a grade outra vez, sem desfazer nada.
+Alterações ainda não salvas já valem para a importação e a exportação daquele
+momento — o aviso ao lado dos botões diz em que pé está.</p>
 <p>Importar por layout faz <b>as mesmas verificações de sempre</b>: o CPF
 identifica o sócio, empresa que não existe é criada, sócio novo espera sua
 confirmação, e o que já está cadastrado não é duplicado — vínculo que já existe
@@ -553,6 +555,7 @@ sistema calcula sozinho.</p>
 <li><b>IRRF</b> → Quadro 3, linha 5</li>
 <li><b>Distribuição de lucros</b> → Quadro 4, linha 5</li>
 <li><b>Empréstimo da empresa ao sócio</b> (saldo em 31/12) → Quadro 7</li>
+<li><b>Variação de cotas</b> do sócio naquela empresa no ano → Quadro 7</li>
 </ul>
 <p>O que ele não controla — <b>INSS</b>, 13º, pensão alimentícia, diárias — sai
 zerado e precisa ser digitado, conferido contra a folha. Depois de salvo, fica
@@ -577,6 +580,27 @@ empresa) não abate esse saldo: são dívidas em direções opostas, que a
 declaração pede em fichas separadas.</p>
 <p>Empréstimo não é rendimento: ele sai no Quadro 7, para o sócio lançar na
 ficha de <i>Dívidas e Ônus Reais</i>.</p>
+
+<h3>Saída da sociedade e variação de cotas</h3>
+<p>Quando a quantidade de cotas do sócio naquela empresa muda no ano — ele
+vendeu, comprou, ou saiu da sociedade —, isso não é rendimento, mas muda o
+patrimônio que ele declara. O comprovante informa no Quadro 7, e o sistema já
+traz preenchido a partir do histórico de vínculos:</p>
+<ul>
+<li><b>Cotas em 31/12 do ano anterior</b> e <b>em 31/12 do ano</b> — a
+diferença entre as duas é a alienação (vendeu) ou a aquisição (comprou).</li>
+<li><b>Valor nominal da cota</b> — capital social dividido pelo total de cotas
+da empresa. É o que multiplica a variação no texto impresso.</li>
+<li><b>Saiu da sociedade em</b> — marcado, o comprovante informa a data da
+saída, para o sócio baixar a participação na ficha de <i>Dívidas e Ônus
+Reais</i>. Só vem marcado quando o sócio terminou o ano fora da sociedade:
+quem apenas reduziu participação continua sócio.</li>
+</ul>
+<p>A variação de cotas sai na ficha de <i>Bens e Direitos</i> do sócio, com o
+saldo que ficou em 31/12. Sem mudança de cotas no ano, nada disso é impresso —
+quem continuou com as mesmas cotas repete a declaração do ano anterior.</p>
+<p>Como tudo no informe, é <b>sugestão</b>: confira contra o contrato social e
+corrija na tela antes de emitir.</p>
 
 <h3>Conferir e emitir</h3>
 <p><b>Visualizar</b> mostra o mesmo documento que vai para o PDF — conferir na

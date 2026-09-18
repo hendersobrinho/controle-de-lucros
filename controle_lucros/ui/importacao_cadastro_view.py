@@ -399,6 +399,11 @@ class ImportacaoCadastroView(QWidget):
         super().__init__(parent)
         self.conn = conn
 
+        # A grade de colunas fica recolhida: depois de descrever a planilha uma
+        # vez, quem importa todo mês só escolhe o formato e aponta o arquivo —
+        # dezesseis caixinhas de letra permanentes na frente disso são só
+        # ruído. Ela abre em "Novo layout", "Duplicar" e "Editar layout".
+        self._editor_aberto = False
         self.editor = EditorLayout()
         self.editor.alterado.connect(self._ao_editar_layout)
 
@@ -475,6 +480,12 @@ class ImportacaoCadastroView(QWidget):
         )
         self.btn_duplicar.clicked.connect(self._duplicar_como_layout)
 
+        self.btn_editar_layout = QPushButton("Editar layout")
+        self.btn_editar_layout.setToolTip(
+            "Abre a grade de colunas deste layout para mudar alguma letra ou a linha inicial."
+        )
+        self.btn_editar_layout.clicked.connect(self._editar_layout)
+
         self.btn_excluir_layout = QPushButton("Excluir layout")
         self.btn_excluir_layout.setProperty("role", "perigo")
         self.btn_excluir_layout.clicked.connect(self._excluir_layout)
@@ -485,6 +496,7 @@ class ImportacaoCadastroView(QWidget):
         linha.addWidget(self.formato, 1)
         linha.addWidget(self.btn_novo_layout)
         linha.addWidget(self.btn_duplicar)
+        linha.addWidget(self.btn_editar_layout)
         linha.addWidget(self.btn_excluir_layout)
         col.addLayout(linha)
 
@@ -517,6 +529,12 @@ class ImportacaoCadastroView(QWidget):
         )
         self.btn_conferir.clicked.connect(self._conferir_layout)
 
+        self.btn_fechar_editor = QPushButton("Fechar")
+        self.btn_fechar_editor.setToolTip(
+            "Recolhe a grade. O layout escolhido continua valendo para importar e exportar."
+        )
+        self.btn_fechar_editor.clicked.connect(self._fechar_editor)
+
         self.aviso_layout = QLabel()
         self.aviso_layout.setWordWrap(True)
         self.aviso_layout.setProperty("role", "subtitulo")
@@ -525,6 +543,7 @@ class ImportacaoCadastroView(QWidget):
         linha.setSpacing(8)
         linha.addWidget(self.btn_salvar_layout)
         linha.addWidget(self.btn_conferir)
+        linha.addWidget(self.btn_fechar_editor)
         linha.addWidget(self.aviso_layout, 1)
         col.addLayout(linha)
         return self.card_layout
@@ -639,15 +658,21 @@ class ImportacaoCadastroView(QWidget):
             self.editor.limpar()
 
         e_layout = self._modo_layout()
-        self.card_layout.setVisible(e_layout)
+        # Layout novo já nasce aberto (não há o que ver se não der pra
+        # preencher); layout salvo aparece recolhido até pedirem pra editar.
+        self._editor_aberto = tipo == "novo"
+        self._atualizar_visibilidade_editor()
         self.btn_excluir_layout.setEnabled(tipo == "layout")
         self.btn_duplicar.setEnabled(tipo != "novo")
 
         if e_layout:
             layout = self._layout_escolhido()
+            # Com a grade recolhida, o resumo é a única prova na tela de qual
+            # desenho vai ser usado — e de que dá pra mexer nele.
+            dica = "" if self._editor_aberto else " Use “Editar layout” para ver as colunas."
             self.descricao_formato.setText(
                 "Layout configurado por você: as colunas são lidas pela <b>posição</b> "
-                f"(letra), não pelo cabeçalho. {layout.resumo()}."
+                f"(letra), não pelo cabeçalho. {layout.resumo()}.{dica}"
             )
         else:
             modelo = self._modelo_escolhido()
@@ -656,6 +681,24 @@ class ImportacaoCadastroView(QWidget):
                 "cabeçalho da planilha.)"
             )
         self._atualizar_aviso_layout()
+
+    def _atualizar_visibilidade_editor(self) -> None:
+        self.card_layout.setVisible(self._modo_layout() and self._editor_aberto)
+        # Vale também para o layout novo ainda não salvo: quem recolheu a
+        # grade sem querer precisa de um caminho de volta que não seja
+        # começar tudo de novo.
+        self.btn_editar_layout.setEnabled(self._modo_layout() and not self._editor_aberto)
+
+    def _editar_layout(self) -> None:
+        self._editor_aberto = True
+        self._atualizar_visibilidade_editor()
+        self.editor.primeiro_campo().setFocus()
+
+    def _fechar_editor(self) -> None:
+        """Recolhe a grade sem mexer no layout: o que está na tela continua
+        sendo o que vale para importar e exportar, salvo ou não."""
+        self._editor_aberto = False
+        self._atualizar_visibilidade_editor()
 
     def _ao_editar_layout(self) -> None:
         self._atualizar_aviso_layout()
@@ -717,8 +760,14 @@ class ImportacaoCadastroView(QWidget):
             QMessageBox.warning(self, "Layout incompleto", str(exc))
             return
         self.editor.definir_id(novo_id)
+        # _recarregar_formatos recolhe a grade ao reselecionar o layout salvo:
+        # terminada a configuração, a tela volta a ser só escolher o formato e
+        # apontar o arquivo.
         self._recarregar_formatos(selecionar=f"layout:{novo_id}")
-        self.resultado.setText(f'Layout "{layout.nome}" salvo.')
+        self.resultado.setText(
+            f'Layout "{layout.nome}" salvo. {layout.resumo()}. '
+            "Use “Editar layout” para mudar as colunas."
+        )
 
     def _excluir_layout(self) -> None:
         tipo, identificador = self._formato_atual()

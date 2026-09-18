@@ -6,9 +6,10 @@ caixa de seleção por empresa: dá pra conferir uma a uma e emitir todas de uma
 vez, cada uma no seu PDF.
 
 Os valores vêm sugeridos do que o sistema já controla (pró-labore, IRRF,
-lucro distribuído e saldo de empréstimo do ano). O que ele não controla —
-INSS, 13º, pensão alimentícia — é digitado aqui, conferido contra a folha, e
-fica guardado pra reemissão não precisar de tudo de novo.
+lucro distribuído, saldo de empréstimo do ano e a variação de cotas do sócio
+naquela empresa). O que ele não controla — INSS, 13º, pensão alimentícia — é
+digitado aqui, conferido contra a folha, e fica guardado pra reemissão não
+precisar de tudo de novo.
 """
 from __future__ import annotations
 
@@ -43,7 +44,14 @@ from PySide6.QtWidgets import (
 )
 
 from .. import preferencias, repositories as repo
-from ..fiscal import cpf_valido, de_centavos, formatar_cpf, para_centavos
+from ..fiscal import (
+    cpf_valido,
+    de_centavos,
+    formatar_cotas,
+    formatar_cpf,
+    para_centavos,
+    para_cotas,
+)
 from ..informe_rendimentos import (
     APELIDOS_CAMPOS,
     CAMPOS_SUGERIDOS,
@@ -64,6 +72,16 @@ from .ocupado import Progresso
 # O modelo do comprovante vale a partir do ano-calendário de 1996 (é o ano em
 # que os lucros passaram a ser isentos — a linha 5 do Quadro 4 diz isso).
 PRIMEIRO_ANO = 1996
+
+
+def _para_qdate(data_iso: str) -> dt.date:
+    """Data ISO do banco -> date do Qt. Data ilegível vira hoje: o campo só
+    aparece marcado quando há saída, e travar a tela por causa dela seria
+    pior do que mostrar uma data pra pessoa corrigir."""
+    try:
+        return dt.date.fromisoformat(str(data_iso))
+    except (TypeError, ValueError):
+        return dt.date.today()
 
 
 class CampoDinheiro(QLineEdit):
@@ -89,6 +107,31 @@ class CampoDinheiro(QLineEdit):
             self.setText(de_centavos(self.centavos()))
         except ValueError:
             pass  # deixa como está; a validação de verdade é ao salvar/emitir
+
+
+class CampoCotas(QLineEdit):
+    """Campo de quantidade de cotas. Mesma ideia do CampoDinheiro, só que sem
+    centavos: cota é quantidade, e "12.000" aqui é doze mil, não doze."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAlignment(Qt.AlignRight)
+        self.setPlaceholderText("0")
+        self.setProperty("role", "mono")
+        self.setMaximumWidth(140)
+        self.editingFinished.connect(self._reformatar)
+
+    def definir_cotas(self, quantidade: float) -> None:
+        self.setText(formatar_cotas(quantidade))
+
+    def cotas(self) -> float:
+        return para_cotas(self.text())
+
+    def _reformatar(self) -> None:
+        try:
+            self.setText(formatar_cotas(self.cotas()))
+        except ValueError:
+            pass  # deixa como está; quem reclama de verdade é _validar_formulario
 
 
 class _DialogoVisualizar(QDialog):
@@ -250,6 +293,7 @@ class InformeRendimentosDialog(QDialog):
         form.setSpacing(6)
 
         self.campos: dict[str, CampoDinheiro] = {}
+        self.campos_cotas: dict[str, CampoCotas] = {}
         self.campos_texto: dict[str, QWidget] = {}
 
         identificacao = QFormLayout()
@@ -287,9 +331,10 @@ class InformeRendimentosDialog(QDialog):
                 "Quadro 7 pro sócio declarar em Dívidas e Ônus Reais.",
             )
         )
+        form.addWidget(self._montar_variacao_cotas())
         self.campos_texto["informacoes_complementares"] = QPlainTextEdit()
         self.campos_texto["informacoes_complementares"].setPlaceholderText(
-            "Texto livre, impresso depois do bloco do empréstimo."
+            "Texto livre, impresso depois dos blocos acima."
         )
         self.campos_texto["informacoes_complementares"].setFixedHeight(70)
         form.addWidget(self.campos_texto["informacoes_complementares"])
@@ -323,6 +368,78 @@ class InformeRendimentosDialog(QDialog):
         area.setWidget(interno)
         col.addWidget(area, 1)
         return card
+
+    def _montar_variacao_cotas(self) -> QWidget:
+        """Saída da sociedade e variação de cotas — os dois blocos que o Quadro
+        7 imprime além do empréstimo.
+
+        Ficam juntos porque vêm do mesmo fato: o sócio vendeu (ou comprou)
+        participação no ano. O sistema já sabe disso pelo histórico de
+        vínculos e traz preenchido; a tela existe pra conferir e corrigir,
+        que é como o resto do informe funciona."""
+        caixa = QWidget()
+        col = QVBoxLayout(caixa)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(6)
+
+        ajuda = QLabel(
+            "<b>Variação de cotas</b> — impressa no Quadro 7 quando a quantidade de cotas do "
+            "sócio mudou no ano. Não é rendimento: é o que ele lança na ficha de Bens e "
+            "Direitos (e, na saída, em Dívidas e Ônus Reais)."
+        )
+        ajuda.setWordWrap(True)
+        ajuda.setProperty("role", "subtitulo")
+        col.addWidget(ajuda)
+
+        self.saiu_da_sociedade = QCheckBox("O sócio saiu da sociedade em")
+        self.saiu_da_sociedade.setToolTip(
+            "Marcado, o comprovante informa a data da saída pro sócio baixar a participação "
+            "na declaração."
+        )
+        self.data_saida = QDateEdit(calendarPopup=True)
+        self.data_saida.setDisplayFormat("dd/MM/yyyy")
+        self.data_saida.setEnabled(False)
+        self.saiu_da_sociedade.toggled.connect(self.data_saida.setEnabled)
+        self.saiu_da_sociedade.toggled.connect(self._marcar_alterado)
+        self.data_saida.dateChanged.connect(self._marcar_alterado)
+
+        linha_saida = QHBoxLayout()
+        linha_saida.setSpacing(8)
+        linha_saida.addWidget(self.saiu_da_sociedade)
+        linha_saida.addWidget(self.data_saida)
+        linha_saida.addStretch(1)
+        col.addLayout(linha_saida)
+
+        self.rotulo_cotas_inicio = QLabel()
+        self.rotulo_cotas_fim = QLabel()
+        for campo, rotulo in (
+            ("cotas_inicio", self.rotulo_cotas_inicio),
+            ("cotas_fim", self.rotulo_cotas_fim),
+        ):
+            entrada = CampoCotas()
+            entrada.textEdited.connect(self._marcar_alterado)
+            self.campos_cotas[campo] = entrada
+            linha = QHBoxLayout()
+            linha.setSpacing(10)
+            linha.addWidget(rotulo, 1)
+            linha.addWidget(entrada)
+            col.addLayout(linha)
+
+        col.addLayout(
+            self._linha_valor(
+                "cota_valor_nominal",
+                "",
+                "Valor nominal de cada cota — capital social dividido pelo total de cotas da "
+                "empresa. É o que multiplica a variação no texto do Quadro 7.",
+            )
+        )
+        self._atualizar_rotulos_cotas()
+        return caixa
+
+    def _atualizar_rotulos_cotas(self) -> None:
+        ano = self.ano.value()
+        self.rotulo_cotas_inicio.setText(f"Cotas do sócio em 31/12/{ano - 1}")
+        self.rotulo_cotas_fim.setText(f"Cotas do sócio em 31/12/{ano}")
 
     def _linha_valor(self, campo: str, numero: str, descricao: str) -> QHBoxLayout:
         apelido = APELIDOS_CAMPOS.get(campo)
@@ -376,6 +493,7 @@ class InformeRendimentosDialog(QDialog):
         ano = self.ano.value()
         self._ano_carregado = ano
         self.exercicio.setText(f"exercício {ano + 1}")
+        self._atualizar_rotulos_cotas()
         self._empresas = repo.empresas_do_socio_no_ano(self.conn, self.socio.id, ano)
         self._informes = {}
         self._salvos = {}
@@ -437,10 +555,11 @@ class InformeRendimentosDialog(QDialog):
         self.titulo_form.setText(f"Valores do informe — {empresa.nome}")
         self.origem_valores.setText(
             "Valores já conferidos e salvos para este ano."
+            + self._aviso_cotas_nao_informadas(informe)
             if self._salvos[self._empresa_atual]
             else "Pró-labore, IRRF, lucro distribuído e saldo de empréstimo vieram dos lançamentos "
-            "do ano; o resto (INSS, 13º, pensão) o sistema não controla e precisa ser digitado. "
-            "Confira tudo antes de emitir."
+            "do ano, e a variação de cotas, do histórico de vínculos; o resto (INSS, 13º, pensão) "
+            "o sistema não controla e precisa ser digitado. Confira tudo antes de emitir."
         )
 
         self._carregando = True
@@ -448,6 +567,20 @@ class InformeRendimentosDialog(QDialog):
             entrada.definir_centavos(getattr(informe, campo))
             sugerido = not self._salvos[self._empresa_atual] and campo in CAMPOS_SUGERIDOS
             entrada.setToolTip("Sugerido a partir dos lançamentos do ano." if sugerido else "")
+        for campo, entrada in self.campos_cotas.items():
+            entrada.definir_cotas(getattr(informe, campo))
+            entrada.setToolTip(
+                "Sugerido a partir do histórico de vínculos do sócio."
+                if not self._salvos[self._empresa_atual]
+                else ""
+            )
+        saiu = bool(informe.saida_sociedade_data)
+        self.saiu_da_sociedade.setChecked(saiu)
+        self.data_saida.setDate(
+            _para_qdate(informe.saida_sociedade_data)
+            if saiu
+            else dt.date(informe.ano_base, 12, 31)
+        )
         self.campos_texto["codigo_beneficiario"].setText(informe.codigo_beneficiario)
         self.campos_texto["natureza_rendimento"].setText(informe.natureza_rendimento)
         self.campos_texto["informacoes_complementares"].setPlainText(informe.informacoes_complementares)
@@ -459,6 +592,28 @@ class InformeRendimentosDialog(QDialog):
         self.campos_texto["responsavel_nome"].setText(responsavel)
         self._carregando = False
 
+    def _aviso_cotas_nao_informadas(self, informe: InformeRendimento) -> str:
+        """Informe salvo sem variação de cotas nenhuma, num ano em que o
+        histórico mostra uma — ou porque foi conferido antes de o sistema
+        informar isso, ou porque a saída só foi lançada depois.
+
+        O documento é do jeito que foi conferido e não pode ser reescrito
+        sozinho; o aviso é o meio-termo: mostra o que o histórico diz e quem
+        confere decide. Quem já informou alguma variação não é incomodado,
+        mesmo que os números dele sejam outros — ali alguém já olhou."""
+        if informe.saida_sociedade_data or informe.cotas_fim != informe.cotas_inicio:
+            return ""
+        cotas = repo.variacao_cotas_socio(
+            self.conn, informe.empresa_id, self.socio.id, informe.ano_base
+        )
+        if not cotas["variacao"] and not cotas["data_saida"]:
+            return ""
+        return (
+            " O histórico de vínculos mostra variação de cotas neste ano "
+            f"({formatar_cotas(cotas['cotas_inicio'])} → {formatar_cotas(cotas['cotas_fim'])} cotas), "
+            "que este comprovante ainda não informa — preencha abaixo se for o caso."
+        )
+
     def _limpar_formulario(self) -> None:
         self._carregando = True
         self.titulo_form.setText("Valores do informe")
@@ -468,6 +623,9 @@ class InformeRendimentosDialog(QDialog):
         )
         for entrada in self.campos.values():
             entrada.clear()
+        for entrada in self.campos_cotas.values():
+            entrada.clear()
+        self.saiu_da_sociedade.setChecked(False)
         for widget in self.campos_texto.values():
             widget.clear()
         self._carregando = False
@@ -483,6 +641,16 @@ class InformeRendimentosDialog(QDialog):
                 setattr(informe, campo, entrada.centavos())
             except ValueError:
                 pass  # texto inválido fica como está; _ler_formulario reclama na hora de salvar
+        for campo, entrada in self.campos_cotas.items():
+            try:
+                setattr(informe, campo, entrada.cotas())
+            except ValueError:
+                pass  # idem: quem barra é _validar_formulario, na hora de salvar
+        informe.saida_sociedade_data = (
+            self.data_saida.date().toString("yyyy-MM-dd")
+            if self.saiu_da_sociedade.isChecked()
+            else ""
+        )
         informe.codigo_beneficiario = self.campos_texto["codigo_beneficiario"].text().strip()
         informe.natureza_rendimento = self.campos_texto["natureza_rendimento"].text().strip()
         informe.informacoes_complementares = self.campos_texto["informacoes_complementares"].toPlainText().strip()
@@ -499,6 +667,17 @@ class InformeRendimentosDialog(QDialog):
             except ValueError:
                 QMessageBox.warning(
                     self, "Valor inválido", f'"{entrada.text()}" não é um valor em reais válido.'
+                )
+                entrada.setFocus()
+                return False
+        for entrada in self.campos_cotas.values():
+            try:
+                entrada.cotas()
+            except ValueError:
+                QMessageBox.warning(
+                    self,
+                    "Quantidade inválida",
+                    f'"{entrada.text()}" não é uma quantidade de cotas válida.',
                 )
                 entrada.setFocus()
                 return False

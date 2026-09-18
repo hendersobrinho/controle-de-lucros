@@ -92,6 +92,36 @@ def test_layout_salvo_entra_na_lista_de_formatos(tela, conn):
     assert "Salvo" in tela.aviso_layout.text()
 
 
+def test_salvar_recolhe_a_grade_de_colunas(tela):
+    """Configurado o layout, a tela volta a ser só escolher o formato e
+    apontar o arquivo — a grade não fica aberta embaixo atrapalhando."""
+    _preencher(tela, "Sistema antigo", empresa_nome="B", socio_nome="D")
+    tela._salvar_layout()
+
+    assert not tela.card_layout.isVisibleTo(tela)
+    assert tela.btn_editar_layout.isEnabled()
+    assert "Sistema antigo" in tela.resultado.text()
+
+
+def test_editar_layout_reabre_a_grade_e_fechar_recolhe_de_novo(tela):
+    _preencher(tela, "Sistema antigo", empresa_nome="B", socio_nome="D")
+    tela._salvar_layout()
+
+    tela._editar_layout()
+    assert tela.card_layout.isVisibleTo(tela)
+    assert not tela.btn_editar_layout.isEnabled()  # já está aberta
+
+    tela._fechar_editor()
+    assert not tela.card_layout.isVisibleTo(tela)
+    # Recolher não desfaz nada: o layout escolhido continua valendo.
+    assert tela._layout_escolhido().colunas == {"empresa_nome": "B", "socio_nome": "D"}
+
+
+def test_modelo_do_sistema_nao_oferece_editar_layout(tela):
+    assert tela._formato_atual()[0] == "modelo"
+    assert not tela.btn_editar_layout.isEnabled()
+
+
 def test_layout_incompleto_avisa_e_nao_salva(tela, conn, monkeypatch):
     avisos = []
     monkeypatch.setattr(vista.QMessageBox, "warning",
@@ -107,6 +137,7 @@ def test_editar_layout_salvo_avisa_que_ha_mudanca_pendente(tela):
     _preencher(tela, "Sistema antigo", empresa_nome="B", socio_nome="D")
     tela._salvar_layout()
 
+    tela._editar_layout()
     tela.editor._campos["cnpj"].setText("F")
 
     assert "não salvas" in tela.aviso_layout.text()
@@ -297,7 +328,9 @@ def test_layout_salvo_aparece_ao_abrir_a_tela_de_novo(conn):
     tela.formato.setCurrentIndex(tela.formato.findData("layout:1"))
 
     assert tela.formato.currentText() == "Layout · Sistema antigo"
-    assert tela.card_layout.isVisibleTo(tela)
+    # A grade vem recolhida: escolher o formato já basta pra importar por ele.
+    assert not tela.card_layout.isVisibleTo(tela)
+    assert "Editar layout" in tela.descricao_formato.text()
     assert tela.editor.layout_atual().colunas == {"empresa_nome": "B", "socio_nome": "D"}
     assert tela.editor.linha_inicial.value() == 3
     assert "Salvo" in tela.aviso_layout.text()

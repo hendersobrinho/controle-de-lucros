@@ -4,6 +4,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import datetime as dt
 import sqlite3
 
 import pytest
@@ -70,6 +71,74 @@ def test_carrega_os_valores_sugeridos_da_empresa_selecionada(conn, cenario):
     # A empresa sem lançamento no ano vem zerada, não com os valores da outra.
     dialogo.lista.setCurrentRow(0)
     assert dialogo.campos["q4_lucros_dividendos"].text() == "0,00"
+
+
+def test_traz_a_saida_e_as_cotas_do_socio_que_vendeu_a_participacao(conn, cenario):
+    vinculo = next(
+        v for v in repo.listar_vinculos_socio(conn, cenario["socio"].id) if v.empresa_id == cenario["csi"]
+    )
+    repo.encerrar_vinculo_registrando_alteracao(conn, vinculo, "2025-08-29", "Saída")
+
+    dialogo = _dialogo(conn, cenario)
+    dialogo.lista.setCurrentRow(1)  # CSI
+    assert dialogo.saiu_da_sociedade.isChecked()
+    assert dialogo.data_saida.date().toString("dd/MM/yyyy") == "29/08/2025"
+    assert dialogo.campos_cotas["cotas_inicio"].text() == "1.000"
+    assert dialogo.campos_cotas["cotas_fim"].text() == "0"
+    assert dialogo.campos["cota_valor_nominal"].text() == "100,00"
+    assert dialogo.rotulo_cotas_inicio.text().endswith("31/12/2024")
+
+    # A outra empresa, em que ele continua sócio, não herda nada disso.
+    dialogo.lista.setCurrentRow(0)
+    assert not dialogo.saiu_da_sociedade.isChecked()
+
+
+def test_informe_antigo_avisa_que_a_variacao_de_cotas_ficou_de_fora(conn, cenario):
+    """Informe salvo antes deste recurso não pode ser reescrito sozinho — o
+    documento é o que foi conferido. Mas quem abrir precisa ver que o
+    histórico tem uma saída que o comprovante não informa."""
+    dialogo = _dialogo(conn, cenario)
+    dialogo.lista.setCurrentRow(1)
+    dialogo._salvar()
+    vinculo = next(
+        v for v in repo.listar_vinculos_socio(conn, cenario["socio"].id) if v.empresa_id == cenario["csi"]
+    )
+    repo.encerrar_vinculo_registrando_alteracao(conn, vinculo, "2025-08-29", "Saída")
+
+    outro = _dialogo(conn, cenario)
+    outro.lista.setCurrentRow(1)
+    assert "conferidos e salvos" in outro.origem_valores.text()
+    assert "variação de cotas neste ano" in outro.origem_valores.text()
+    # O que foi conferido continua como estava: o aviso não mexe no documento.
+    salvo = repo.buscar_informe(conn, cenario["csi"], 2025, cenario["socio"].id)
+    assert (salvo.cotas_inicio, salvo.cotas_fim, salvo.saida_sociedade_data) == (1000, 1000, "")
+
+
+def test_variacao_de_cotas_corrigida_na_tela_e_gravada(conn, cenario):
+    dialogo = _dialogo(conn, cenario)
+    dialogo.lista.setCurrentRow(1)
+    dialogo.saiu_da_sociedade.setChecked(True)
+    dialogo.data_saida.setDate(dt.date(2025, 8, 29))
+    dialogo.campos_cotas["cotas_inicio"].setText("12.000")
+    dialogo.campos_cotas["cotas_fim"].setText("0")
+    dialogo.campos["cota_valor_nominal"].setText("1,00")
+    assert dialogo._salvar() is True
+
+    salvo = repo.buscar_informe(conn, cenario["csi"], 2025, cenario["socio"].id)
+    assert salvo.saida_sociedade_data == "2025-08-29"
+    assert salvo.cotas_inicio == 12000  # "12.000" é doze mil, não doze
+    assert salvo.cota_valor_nominal == 100
+
+
+def test_quantidade_de_cotas_mal_digitada_barra_o_salvamento(conn, cenario, monkeypatch):
+    avisos = []
+    monkeypatch.setattr(mod.QMessageBox, "warning", lambda *args, **kwargs: avisos.append(args[2]))
+    dialogo = _dialogo(conn, cenario)
+    dialogo.lista.setCurrentRow(1)
+    dialogo.campos_cotas["cotas_fim"].setText("umas cem")
+    assert dialogo._salvar() is False
+    assert avisos and "quantidade de cotas válida" in avisos[0]
+    assert repo.buscar_informe(conn, cenario["csi"], 2025, cenario["socio"].id) is None
 
 
 def test_o_que_foi_digitado_sobrevive_a_troca_de_empresa(conn, cenario):

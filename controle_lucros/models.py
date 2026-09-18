@@ -168,6 +168,11 @@ CAMPOS_VALOR_INFORME = (
 
 NATUREZA_RENDIMENTO_PADRAO = "RENDIMENTO DO TRABALHO ASSALARIADO NO PAÍS"
 
+# Campos do Quadro 7 que descrevem a variação de cotas do ano. Ficam fora de
+# CAMPOS_VALOR_INFORME porque não são rendimento — e porque quantidade de
+# cotas não é dinheiro em centavos.
+CAMPOS_COTAS_INFORME = ("saida_sociedade_data", "cotas_inicio", "cotas_fim", "cota_valor_nominal")
+
 
 @dataclass
 class InformeRendimento:
@@ -205,6 +210,12 @@ class InformeRendimento:
     q5_irrf_decimo_terceiro: int = 0
     q5_outros: int = 0
     emprestimo_saldo: int = 0
+    # Variação de cotas do ano (Quadro 7). Quantidade é float porque cota
+    # fracionada existe; só o valor da cota é centavo, como o resto do informe.
+    saida_sociedade_data: str = ""
+    cotas_inicio: float = 0.0
+    cotas_fim: float = 0.0
+    cota_valor_nominal: int = 0
     informacoes_complementares: str = ""
     responsavel_nome: str = ""
     atualizado_em: str = ""

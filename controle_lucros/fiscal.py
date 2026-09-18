@@ -114,3 +114,44 @@ def reais_para_centavos(valor: float | None) -> int:
     É a única fronteira float -> centavos: daqui pra frente, no informe, só
     inteiro."""
     return round(float(valor or 0) * 100)
+
+
+# ----------------------------------------------------------------- Cotas --
+
+
+def para_cotas(valor: str | int | float | None) -> float:
+    """Lê uma quantidade de cotas digitada em pt-BR ("12.000", "1.234,5").
+
+    Não dá pra reaproveitar para_centavos aqui: lá o último separador é o
+    decimal (porque dinheiro sempre tem centavos), e "12.000" cotas viraria
+    12 cotas. Em quantidade, ponto é sempre milhar e vírgula é sempre
+    decimal."""
+    if valor is None:
+        return 0.0
+    if isinstance(valor, bool):
+        raise ValueError("Quantidade de cotas inválida.")
+    if isinstance(valor, (int, float)):
+        return float(valor)
+
+    texto = str(valor).strip().replace(" ", "").replace(" ", "")
+    if not texto:
+        return 0.0
+    negativo = texto.startswith("-")
+    texto = texto.lstrip("+-").replace(".", "").replace(",", ".")
+    try:
+        quantidade = float(texto)
+    except ValueError:
+        raise ValueError(f'Quantidade de cotas inválida: "{valor}".') from None
+    return -quantidade if negativo else quantidade
+
+
+def formatar_cotas(valor: float | None) -> str:
+    """Quantidade de cotas com separador de milhar ("12.000"). Cota fracionada
+    existe (desdobramento de capital gera meia cota), então a casa decimal
+    aparece só quando o número tem uma — senão todo quadro societário sairia
+    com ",00" pendurado."""
+    quantidade = float(valor or 0)
+    if quantidade == int(quantidade):
+        return f"{int(quantidade):,}".replace(",", ".")
+    inteiro, _, decimal = f"{quantidade:,.4f}".partition(".")
+    return inteiro.replace(",", ".") + "," + decimal.rstrip("0")

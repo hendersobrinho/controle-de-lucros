@@ -15,11 +15,20 @@ from controle_lucros.informe_rendimentos import (
     QUADRO_5_LINHAS,
     RODAPE_LEGAL,
     bloco_emprestimo,
+    bloco_saida_sociedade,
+    bloco_variacao_cotas,
     informacoes_complementares,
     montar_html,
     nome_arquivo_sugerido,
 )
-from controle_lucros.models import CAMPOS_VALOR_INFORME, Empresa, InformeRendimento, Movimentacao, Socio
+from controle_lucros.models import (
+    CAMPOS_COTAS_INFORME,
+    CAMPOS_VALOR_INFORME,
+    Empresa,
+    InformeRendimento,
+    Movimentacao,
+    Socio,
+)
 
 
 @pytest.fixture()
@@ -81,6 +90,56 @@ def test_sem_emprestimo_o_quadro_7_nao_traz_o_bloco():
     assert informacoes_complementares(informe) == "Só isso."
 
 
+def test_bloco_de_saida_da_sociedade_tem_a_redacao_do_modelo():
+    assert bloco_saida_sociedade("2025-08-29") == (
+        "SAÍDA DE SOCIEDADE DE DIREITO PRIVADO (Ficha de Dívidas e Ônus Reais):\n"
+        "Data da saída 29/08/2025"
+    )
+
+
+def test_bloco_de_variacao_descreve_a_alienacao_como_no_comprovante_de_verdade():
+    """Redação conferida contra o comprovante emitido pela contabilidade para
+    um sócio que vendeu as 12.000 cotas dele e saiu."""
+    informe = _informe(cotas_inicio=12000, cotas_fim=0, cota_valor_nominal=100)
+    assert bloco_variacao_cotas(informe) == (
+        "VARIAÇÃO DE COTAS (por alteração contratual) (Ficha de Bens e Direitos):\n"
+        "Alienação de 12.000 Cotas Societárias, no valor nominal de R$ 1,00 cada uma, "
+        "totalizando R$ 12.000,00. Saldo em 31/12/2025: 0 Cotas = R$ 0,00"
+    )
+
+
+def test_comprar_cotas_sai_como_aquisicao_com_o_saldo_que_ficou():
+    informe = _informe(cotas_inicio=500, cotas_fim=1500, cota_valor_nominal=250)
+    texto = bloco_variacao_cotas(informe)
+    assert "Aquisição de 1.000 Cotas Societárias" in texto
+    assert "no valor nominal de R$ 2,50 cada uma, totalizando R$ 2.500,00" in texto
+    assert "Saldo em 31/12/2025: 1.500 Cotas = R$ 3.750,00" in texto
+
+
+def test_cotas_iguais_no_comeco_e_no_fim_do_ano_nao_geram_bloco():
+    """Quem não mexeu na participação repete a declaração do ano anterior —
+    imprimir "variação de 0 cotas" só confundiria quem declara."""
+    assert bloco_variacao_cotas(_informe(cotas_inicio=1000, cotas_fim=1000)) == ""
+
+
+def test_quadro_7_ordena_emprestimo_saida_variacao_e_texto_livre():
+    informe = _informe(
+        emprestimo_saldo=78551616,
+        saida_sociedade_data="2025-08-29",
+        cotas_inicio=12000,
+        cotas_fim=0,
+        cota_valor_nominal=100,
+        informacoes_complementares="Observação do escritório.",
+    )
+    blocos = informacoes_complementares(informe).split("\n\n")
+    assert [b.split("\n")[0] for b in blocos] == [
+        "EMPRÉSTIMO A SÓCIOS (Ficha de Dívidas e Ônus Reais):",
+        "SAÍDA DE SOCIEDADE DE DIREITO PRIVADO (Ficha de Dívidas e Ônus Reais):",
+        "VARIAÇÃO DE COTAS (por alteração contratual) (Ficha de Bens e Direitos):",
+        "Observação do escritório.",
+    ]
+
+
 # ------------------------------------------------- mapeamento dos valores --
 
 
@@ -106,7 +165,7 @@ def test_todo_campo_de_valor_aparece_em_algum_quadro():
 
 
 def test_apelidos_apontam_para_campos_que_existem():
-    campos = set(CAMPOS_VALOR_INFORME) | {"emprestimo_saldo"}
+    campos = set(CAMPOS_VALOR_INFORME) | {"emprestimo_saldo"} | set(CAMPOS_COTAS_INFORME)
     assert set(APELIDOS_CAMPOS) <= campos
 
 
@@ -182,6 +241,17 @@ def test_html_poe_o_emprestimo_so_no_quadro_7():
     assert "785.516,16" not in html.split("7. Informações Complementares")[0]
 
 
+def test_html_imprime_a_variacao_de_cotas_no_quadro_7():
+    html = _html_roselene(
+        saida_sociedade_data="2025-08-29", cotas_inicio=12000, cotas_fim=0, cota_valor_nominal=100
+    )
+    corpo_q7 = html.split("7. Informações Complementares")[1]
+    assert "Data da saída 29/08/2025" in corpo_q7
+    assert "Alienação de 12.000 Cotas Societárias" in corpo_q7
+    # Cota não é rendimento: nada disso pode subir pros quadros de valores.
+    assert "Cotas Societárias" not in html.split("7. Informações Complementares")[0]
+
+
 def test_html_escapa_texto_do_usuario():
     html = _html_roselene(informacoes_complementares="Acerto <b>especial</b> & cia")
     assert "&lt;b&gt;especial&lt;/b&gt; &amp; cia" in html
@@ -224,6 +294,88 @@ def test_sugestao_de_emprestimo_acumula_ate_31_12_do_ano(conn):
     assert repo.saldo_emprestimo_em(conn, empresa_id, socio_id, 2025) == pytest.approx(785516.16)
     assert repo.informe_sugerido(conn, empresa_id, 2025, socio_id).emprestimo_saldo == 78551616
     assert repo.saldo_emprestimo_em(conn, empresa_id, socio_id, 2024) == pytest.approx(100000.00)
+
+
+def test_sugestao_traz_a_saida_e_a_alienacao_de_cotas_do_ano(conn):
+    """O caso que motivou o recurso: o sócio vendeu as cotas e saiu em agosto.
+    O comprovante do ano tem que mandar ele baixar a participação."""
+    empresa_id, socio_id = _empresa(conn), _socio(conn)
+    repo.associar_socio_a_empresa(conn, empresa_id, socio_id, 10, 100, "2010-01-01", "Inclusão")
+    vinculo = repo.listar_vinculos_socio(conn, socio_id)[0]
+    repo.encerrar_vinculo_registrando_alteracao(conn, vinculo, "2025-08-29", "Saída")
+
+    informe = repo.informe_sugerido(conn, empresa_id, 2025, socio_id)
+    assert informe.saida_sociedade_data == "2025-08-29"
+    assert informe.cotas_inicio == 100
+    assert informe.cotas_fim == 0
+    assert informe.cota_valor_nominal == 1000  # capital 10.000 / 1.000 cotas
+    assert "Alienação de 100 Cotas Societárias" in informacoes_complementares(informe)
+
+
+def test_reduzir_participacao_nao_vira_saida_da_sociedade(conn):
+    """Reduzir cotas fecha um vínculo e abre outro na mesma data — ler isso
+    como saída faria o informe mandar o sócio baixar uma participação que
+    ele ainda tem."""
+    empresa_id, socio_id = _empresa(conn), _socio(conn)
+    repo.associar_socio_a_empresa(conn, empresa_id, socio_id, 10, 100, "2010-01-01", "Inclusão")
+    vinculo = repo.listar_vinculos_socio(conn, socio_id)[0]
+    repo.atualizar_cotas_vinculo(conn, vinculo, 4.0, 40, "2025-08-29")
+
+    informe = repo.informe_sugerido(conn, empresa_id, 2025, socio_id)
+    assert informe.saida_sociedade_data == ""
+    assert (informe.cotas_inicio, informe.cotas_fim) == (100, 40)
+    texto = informacoes_complementares(informe)
+    assert "SAÍDA DE SOCIEDADE" not in texto
+    assert "Alienação de 60 Cotas Societárias" in texto
+    assert "Saldo em 31/12/2025: 40 Cotas" in texto
+
+
+def test_entrar_na_sociedade_no_ano_sugere_aquisicao(conn):
+    empresa_id, socio_id = _empresa(conn), _socio(conn)
+    repo.associar_socio_a_empresa(conn, empresa_id, socio_id, 10, 100, "2025-04-01", "Inclusão")
+
+    informe = repo.informe_sugerido(conn, empresa_id, 2025, socio_id)
+    assert (informe.cotas_inicio, informe.cotas_fim) == (0, 100)
+    assert "Aquisição de 100 Cotas Societárias" in informacoes_complementares(informe)
+
+
+def test_quem_saiu_em_ano_anterior_nao_repete_a_saida_todo_ano(conn):
+    """Sem isso, o informe emitido por causa de um empréstimo antigo mandaria
+    o sócio baixar de novo, todo ano, uma participação que ele já baixou."""
+    empresa_id, socio_id = _empresa(conn), _socio(conn)
+    repo.associar_socio_a_empresa(conn, empresa_id, socio_id, 10, 100, "2010-01-01", "Inclusão")
+    vinculo = repo.listar_vinculos_socio(conn, socio_id)[0]
+    repo.encerrar_vinculo_registrando_alteracao(conn, vinculo, "2024-08-29", "Saída")
+
+    informe = repo.informe_sugerido(conn, empresa_id, 2025, socio_id)
+    assert informe.saida_sociedade_data == ""
+    assert (informe.cotas_inicio, informe.cotas_fim) == (0, 0)
+    assert informacoes_complementares(informe) == ""
+
+
+def test_variacao_de_cotas_conferida_na_tela_fica_guardada(conn):
+    empresa_id, socio_id = _empresa(conn), _socio(conn)
+    informe = _informe(
+        empresa_id=empresa_id,
+        socio_id=socio_id,
+        saida_sociedade_data="2025-08-29",
+        cotas_inicio=12000,
+        cotas_fim=0,
+        cota_valor_nominal=100,
+    )
+    repo.salvar_informe(conn, informe)
+
+    recarregado = repo.buscar_informe(conn, empresa_id, 2025, socio_id)
+    assert recarregado.saida_sociedade_data == "2025-08-29"
+    assert recarregado.cotas_inicio == 12000
+    assert recarregado.cotas_fim == 0
+    assert recarregado.cota_valor_nominal == 100
+
+
+def test_salvar_recusa_quantidade_de_cotas_negativa(conn):
+    empresa_id, socio_id = _empresa(conn), _socio(conn)
+    with pytest.raises(ValueError, match="cotas"):
+        repo.salvar_informe(conn, _informe(empresa_id=empresa_id, socio_id=socio_id, cotas_fim=-1))
 
 
 def test_salvar_e_recarregar_mantem_os_valores_conferidos(conn):
