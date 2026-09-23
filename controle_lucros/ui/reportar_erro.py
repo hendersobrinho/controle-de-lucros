@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from .. import relatorio_erro
+from .. import db, relatorio_erro
 
 
 class DialogoReportarProblema(QDialog):
@@ -249,6 +249,13 @@ class CapturaDeErros:
 
         self._dentro = True
         try:
+            # Rede que caiu ou banco ocupado por outro PC não é defeito do
+            # programa: pedir relatório disso só confunde. A pessoa precisa
+            # é saber o que aconteceu e o que fazer.
+            explicacao = db.explicar_erro(valor)
+            if explicacao != str(valor):
+                QMessageBox.warning(self.janela_principal, "Problema com o banco de dados", explicacao)
+                return
             abrir_para_erro(valor, tela=self._tela_atual(), parent=self.janela_principal)
         except Exception:  # noqa: BLE001 — relatar não pode virar outro erro
             pass

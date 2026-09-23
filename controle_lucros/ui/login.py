@@ -20,6 +20,7 @@ from .. import repositories as repo
 from ..models import Usuario
 from . import theme
 from .icones import pasta_assets
+from .local_banco import escolher_banco_existente
 
 LARGURA_ENTRADA = 420
 
@@ -91,11 +92,17 @@ def _rotulo_de_erro() -> QLabel:
 
 class DialogoPrimeiroUsuario(QDialog):
     """Só aparece quando ainda não existe nenhum usuário cadastrado — cria a
-    primeira conta, que já nasce administradora."""
+    primeira conta, que já nasce administradora.
+
+    É também a primeira tela de um PC novo no escritório, cujo banco local
+    está vazio: por isso oferece apontar pro banco do servidor, onde os
+    usuários já existem. Escolhido, o diálogo fecha com trocou_banco e quem
+    chamou reconecta."""
 
     def __init__(self, conn, parent=None):
         super().__init__(parent)
         self.conn = conn
+        self.trocou_banco = False
         self.setWindowTitle("Bem-vindo")
         self.setFixedWidth(LARGURA_ENTRADA)
         self.setModal(True)
@@ -114,6 +121,9 @@ class DialogoPrimeiroUsuario(QDialog):
 
         sair = _botao_discreto("Sair")
         sair.clicked.connect(self.reject)
+
+        usar_servidor = _botao_discreto("Usar o banco do servidor…")
+        usar_servidor.clicked.connect(self._usar_banco_do_servidor)
 
         miolo = QVBoxLayout()
         miolo.setContentsMargins(38, 32, 38, 30)
@@ -141,11 +151,17 @@ class DialogoPrimeiroUsuario(QDialog):
 
         rodape = QHBoxLayout()
         rodape.addStretch()
+        rodape.addWidget(usar_servidor)
         rodape.addWidget(sair)
         rodape.addStretch()
         layout.addLayout(rodape)
 
         self.nome.setFocus()
+
+    def _usar_banco_do_servidor(self) -> None:
+        if escolher_banco_existente(self) is not None:
+            self.trocou_banco = True
+            self.reject()
 
     def _criar(self) -> None:
         nome = self.nome.text().strip()

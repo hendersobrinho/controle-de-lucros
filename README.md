@@ -390,6 +390,42 @@ nova abre, esse cadastro é copiado pro lugar compartilhado. O original não é
 apagado: fica lá como garantia, e pode ser removido depois de conferir que o
 sistema abriu com tudo no lugar.
 
+### Banco numa pasta do servidor (vários PCs)
+
+O programa também roda instalado em cada PC, com todos apontando pro mesmo
+banco numa pasta compartilhada (`\\SERVIDOR\pasta\controle_lucros.db` ou
+unidade mapeada). É o caminho quando o servidor não roda o próprio programa —
+o Qt 6 exige Windows 10 1809 / Server 2019 ou mais novo. Pensado pra poucas
+pessoas (umas 5) com gravações curtas.
+
+- **Configurar:** o instalador pergunta a pasta do banco (seção `[Code]` do
+  `controle_lucros.iss`) e grava a resposta no `configuracao_local.json` — o
+  programa já abre no banco do servidor, sem criar um local antes. Ele vê se
+  a pasta já tem banco: se tem, este PC usa o mesmo; se não, grava
+  `criar_banco` e o programa cria na primeira abertura. Só pergunta em
+  instalação nova (sem configuração nem banco local). Sem essa resposta
+  (instalação silenciosa, pasta copiada à mão), o programa pergunta a mesma
+  coisa antes de abrir (`DialogoConfigurarBanco`). Banco configurado que não
+  existe nunca vira banco novo em silêncio (`db.verificar_banco_configurado`). Quem já usava num PC só leva os dados com
+  *Backup → Levar o banco para o servidor*. O caminho escolhido fica em
+  `configuracao_local.json`, na pasta de dados de cada PC
+  (`db.definir_banco`).
+- **Sem WAL na rede:** o WAL coordena os programas por memória compartilhada,
+  que só existe numa máquina — na rede ele corrompe o banco. Banco em pasta de
+  rede abre com o journal tradicional (`db._ajustar_journal`), e um que chegue
+  lá em WAL é convertido na abertura.
+- **O que é de cada PC e o que é de todos:** tema e último formato de
+  importação ficam no PC (`preferencias.CHAVES_DO_COMPUTADOR`); pasta de
+  backup e responsável do informe ficam no `preferencias.json` ao lado do
+  banco. O registro de falhas também fica no PC.
+- **Restaurar backup** passa pelo backup do SQLite em vez de copiar o arquivo
+  por cima, porque outros PCs podem estar com o banco aberto.
+- **Servidor fora do ar** na abertura mostra *Tentar de novo / Escolher outro
+  banco* em vez de fechar; com o programa aberto, erro de rede vira mensagem
+  explicando o que fazer (`db.explicar_erro`).
+- A senha protege o programa, não o arquivo: a pasta compartilhada deve dar
+  acesso só às contas de quem usa o sistema.
+
 ### Gerar um instalador (Inno Setup)
 
 Opcional — empacota a pasta `dist\ControleDeLucros\` num instalador único

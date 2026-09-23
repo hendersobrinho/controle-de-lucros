@@ -1,6 +1,11 @@
-"""Preferências persistidas localmente num JSON só (tema, pasta de backup,
-etc.) — cada funcionalidade lê/grava sua própria chave sem apagar as outras,
-porque salvar sempre relê o arquivo inteiro antes de escrever de volta."""
+"""Preferências persistidas em JSON — cada funcionalidade lê/grava sua
+própria chave sem apagar as outras, porque salvar sempre relê o arquivo
+inteiro antes de escrever de volta.
+
+São dois arquivos. O preferencias.json fica ao lado do banco e vale pra todo
+mundo que usa aquele banco (pasta de backup, quem assina o informe). As
+chaves em CHAVES_DO_COMPUTADOR ficam na configuração local de cada PC: com o
+banco no servidor, o tema escuro de um virava o tema de todos."""
 from __future__ import annotations
 
 import json
@@ -16,6 +21,10 @@ def _arquivo() -> Path:
     return db.get_db_path().parent / "preferencias.json"
 
 
+# Gosto de quem está sentado naquele PC, não regra do escritório.
+CHAVES_DO_COMPUTADOR = {"modo", "importacao_formato"}
+
+
 def carregar() -> dict:
     try:
         return json.loads(_arquivo().read_text(encoding="utf-8"))
@@ -24,10 +33,22 @@ def carregar() -> dict:
 
 
 def obter(chave: str, padrao=None):
+    if chave in CHAVES_DO_COMPUTADOR:
+        local = db.ler_config_local()
+        if chave in local:
+            return local[chave]
+        # Quem atualiza de uma versão que guardava tudo junto do banco
+        # continua com o tema que tinha, até trocar de novo.
     return carregar().get(chave, padrao)
 
 
 def salvar_chave(chave: str, valor) -> None:
+    if chave in CHAVES_DO_COMPUTADOR:
+        try:
+            db.gravar_config_local(chave, valor)
+        except OSError:
+            pass
+        return
     dados = carregar()
     dados[chave] = valor
     arquivo = _arquivo()

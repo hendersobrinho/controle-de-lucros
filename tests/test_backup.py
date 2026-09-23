@@ -85,20 +85,58 @@ def test_automatico_habilitado_cria_uma_vez_por_dia(conn, tmp_path):
     assert len(backup.listar_backups(tmp_path)) == 1
 
 
-def test_restaurar_backup_substitui_arquivo_e_remove_sidecars(tmp_path):
-    caminho_db = tmp_path / "controle_lucros.db"
-    caminho_db.write_bytes(b"dados antigos")
-    (tmp_path / "controle_lucros.db-wal").write_bytes(b"wal")
-    (tmp_path / "controle_lucros.db-shm").write_bytes(b"shm")
+def _banco_com_empresa(caminho, nome):
+    conn = db.connect(caminho)
+    db.init_schema(conn)
+    conn.execute(
+        "INSERT INTO empresa (numero_chamada, nome, cnpj, capital_social, quantidade_cotas) "
+        "VALUES ('001', ?, '', 1000, 100)", (nome,)
+    )
+    conn.commit()
+    return conn
 
+
+def test_restaurar_backup_substitui_os_dados(tmp_path):
+    caminho_db = tmp_path / "controle_lucros.db"
+    _banco_com_empresa(caminho_db, "ATUAL LTDA").close()
     caminho_backup = tmp_path / "backup_para_restaurar.db"
-    caminho_backup.write_bytes(b"dados do backup")
+    _banco_com_empresa(caminho_backup, "DO BACKUP LTDA").close()
 
     backup.restaurar_backup(caminho_backup, caminho_db)
 
-    assert caminho_db.read_bytes() == b"dados do backup"
-    assert not (tmp_path / "controle_lucros.db-wal").exists()
-    assert not (tmp_path / "controle_lucros.db-shm").exists()
+    conn = db.connect(caminho_db)
+    assert [r["nome"] for r in conn.execute("SELECT nome FROM empresa")] == ["DO BACKUP LTDA"]
+    conn.close()
+
+
+def test_restaurar_com_outro_computador_usando_o_banco(tmp_path):
+    """Com o banco no servidor, outro PC pode estar com ele aberto. Trocar o
+    arquivo por baixo dele corromperia o banco; pelo backup do SQLite, o
+    outro PC passa a enxergar os dados restaurados."""
+    caminho_db = tmp_path / "controle_lucros.db"
+    outro_pc = _banco_com_empresa(caminho_db, "ATUAL LTDA")
+    caminho_backup = tmp_path / "backup_para_restaurar.db"
+    _banco_com_empresa(caminho_backup, "DO BACKUP LTDA").close()
+
+    backup.restaurar_backup(caminho_backup, caminho_db)
+
+    assert [r["nome"] for r in outro_pc.execute("SELECT nome FROM empresa")] == ["DO BACKUP LTDA"]
+    outro_pc.close()
+
+
+def test_restaurar_recusa_arquivo_que_nao_e_backup(tmp_path):
+    """Escolher o arquivo errado não pode apagar o banco do escritório."""
+    caminho_db = tmp_path / "controle_lucros.db"
+    _banco_com_empresa(caminho_db, "ATUAL LTDA").close()
+    errado = tmp_path / "qualquer.db"
+    errado.write_bytes(b"nao sou um banco")
+
+    with pytest.raises(ValueError):
+        backup.restaurar_backup(errado, caminho_db)
+
+    conn = db.connect(caminho_db)
+    assert [r["nome"] for r in conn.execute("SELECT nome FROM empresa")] == ["ATUAL LTDA"]
+    conn.close()
 
 
 def test_formatar_tamanho():

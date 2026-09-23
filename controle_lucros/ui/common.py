@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .. import db
 from . import theme
 
 
@@ -681,7 +682,7 @@ class CrudTab(QWidget):
             registro = self.ler_form(self._registro_atual_id)
             self.salvar_registro(registro)
         except Exception as exc:
-            QMessageBox.warning(self, "Erro ao salvar", str(exc))
+            QMessageBox.warning(self, "Erro ao salvar", db.explicar_erro(exc))
             return
         self.atualizar()
         self._registro_atual_id = None
@@ -701,7 +702,7 @@ class CrudTab(QWidget):
         try:
             self.excluir_registro(self._registro_atual_id)
         except Exception as exc:
-            QMessageBox.warning(self, "Erro ao excluir", str(exc))
+            QMessageBox.warning(self, "Erro ao excluir", db.explicar_erro(exc))
             return
         self.atualizar()
         self._registro_atual_id = None

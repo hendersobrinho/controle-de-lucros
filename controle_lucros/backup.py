@@ -4,8 +4,8 @@ um arquivo de backup escolhido."""
 from __future__ import annotations
 
 import datetime as dt
-import shutil
 import sqlite3
+import tempfile
 from pathlib import Path
 
 from . import db, preferencias
@@ -45,9 +45,18 @@ def criar_backup(conn: sqlite3.Connection, pasta: Path | None = None) -> Path:
     destino = sqlite3.connect(caminho)
     try:
         conn.backup(destino)
+        _tirar_do_wal(destino)
     finally:
         destino.close()
     return caminho
+
+
+def _tirar_do_wal(conn: sqlite3.Connection) -> None:
+    """A cópia pelo backup do SQLite herda o modo WAL do banco de origem, e
+    esse modo vai junto quando ela for restaurada. Num banco do servidor,
+    WAL é o que corrompe (ver db._ajustar_journal) — então cópia nunca fica
+    em WAL. Num banco local, a próxima abertura liga o WAL de novo."""
+    conn.execute("PRAGMA journal_mode = DELETE;")
 
 
 def listar_backups(pasta: Path | None = None) -> list[dict]:
@@ -84,15 +93,38 @@ def backup_automatico_se_necessario(conn: sqlite3.Connection) -> Path | None:
 
 
 def restaurar_backup(caminho_backup: Path, caminho_db: Path | None = None) -> None:
-    """Substitui o arquivo do banco pelo backup escolhido. A conexão sqlite
-    já aberta pelo processo atual (e o WAL dela) não sabe que o arquivo por
-    baixo mudou — quem chamar isso precisa fechar e reabrir o app depois."""
+    """Substitui o conteúdo do banco pelo do backup escolhido.
+
+    Pelo backup do próprio SQLite, e não copiando o arquivo por cima: com o
+    banco no servidor, outros PCs podem estar com ele aberto, e trocar o
+    arquivo debaixo deles corrompe o banco (ou nem é permitido pelo Windows).
+    Assim a troca respeita o travamento — espera quem estiver gravando, e
+    ninguém vê o banco pela metade. Também dispensa mexer no -wal e no -shm.
+
+    As telas já abertas continuam mostrando o que tinham carregado — quem
+    chamar isso precisa fechar e reabrir o app depois."""
+    caminho_backup = Path(caminho_backup)
+    if not db.e_banco_do_sistema(caminho_backup):
+        raise ValueError(f"{caminho_backup.name} não é um backup deste sistema.")
     caminho_db = Path(caminho_db) if caminho_db else db.get_db_path()
-    for sufixo in ("-wal", "-shm"):
-        sidecar = caminho_db.with_name(caminho_db.name + sufixo)
-        if sidecar.exists():
-            sidecar.unlink()
-    shutil.copy2(caminho_backup, caminho_db)
+    with tempfile.TemporaryDirectory() as pasta:
+        # Backup feito por versão anterior pode estar em WAL: passa por uma
+        # cópia particular, sem disputa, pra sair de lá antes de ir pro banco.
+        copia = sqlite3.connect(Path(pasta) / "restaurar.db")
+        try:
+            origem = sqlite3.connect(caminho_backup)
+            try:
+                origem.backup(copia)
+            finally:
+                origem.close()
+            _tirar_do_wal(copia)
+            destino = db.connect(caminho_db)
+            try:
+                copia.backup(destino)
+            finally:
+                destino.close()
+        finally:
+            copia.close()
 
 
 def formatar_tamanho(bytes_: int) -> str:

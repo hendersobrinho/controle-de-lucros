@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QApplication, QDialog
 
 from controle_lucros import backup, db, relatorio_erro, repositories as repo, sessao, traducao
 from controle_lucros.ui.icones import icone_app
+from controle_lucros.ui.local_banco import DialogoBancoInacessivel, DialogoConfigurarBanco
 from controle_lucros.ui.login import DialogoLogin, DialogoPrimeiroUsuario
 from controle_lucros.ui.main_window import MainWindow
 from controle_lucros.ui.reportar_erro import CapturaDeErros, abrir_para_fechamento
@@ -42,6 +43,27 @@ def _preparar_registro_de_falhas(pasta) -> str:
     return detalhes
 
 
+def _abrir_banco() -> sqlite3.Connection:
+    """Conecta e prepara o banco, insistindo enquanto a pessoa quiser.
+
+    Com o banco no servidor, não abrir é coisa do dia a dia — servidor
+    reiniciando, PC que ainda não entrou na rede. Em vez de o programa cair
+    com erro técnico, a pessoa tenta de novo ou aponta pra outro banco."""
+    while True:
+        conn = None
+        try:
+            db.verificar_banco_configurado()
+            conn = db.connect()
+            db.init_schema(conn)
+            db.banco_aberto_com_sucesso()
+            return conn
+        except (OSError, sqlite3.Error) as erro:
+            if conn is not None:
+                conn.close()
+            if DialogoBancoInacessivel(erro).exec() == QDialog.Rejected:
+                sys.exit(0)
+
+
 def main() -> None:
     # Antes de abrir o banco: numa máquina que já rodou a versão anterior, o
     # cadastro está na conta do Windows de quem usou, e o compartilhado ainda
@@ -54,10 +76,9 @@ def main() -> None:
         # antigo continua intacto no lugar dele, e o novo nasce vazio.
         pass
 
-    conn = db.connect()
-    db.init_schema(conn)
-
-    fechamento_anterior = _preparar_registro_de_falhas(db.get_db_path().parent)
+    # Na pasta deste PC, não na do banco: com o banco no servidor, os PCs
+    # ficariam lendo a marca de sessão uns dos outros como se fosse tombo.
+    fechamento_anterior = _preparar_registro_de_falhas(db.pasta_local())
 
     app = QApplication(sys.argv)
     traducao.instalar(app)
@@ -67,6 +88,13 @@ def main() -> None:
     captura = CapturaDeErros()
     captura.instalar()
 
+    # Instalação nova: antes de abrir (e com isso criar um banco local vazio),
+    # saber se este PC cria o banco no servidor ou usa o que já está lá.
+    if db.precisa_configurar() and DialogoConfigurarBanco().exec() != QDialog.Accepted:
+        sys.exit(0)
+
+    conn = _abrir_banco()
+
     while True:
         if not repo.existe_algum_usuario(conn):
             dialogo = DialogoPrimeiroUsuario(conn)
@@ -74,6 +102,12 @@ def main() -> None:
             dialogo = DialogoLogin(conn)
 
         if dialogo.exec() != QDialog.Accepted:
+            if getattr(dialogo, "trocou_banco", False):
+                # PC novo apontado pro banco do servidor: os usuários estão
+                # lá, então volta pro começo já com a tela de login.
+                conn.close()
+                conn = _abrir_banco()
+                continue
             sys.exit(0)
 
         usuario = dialogo.usuario_autenticado
