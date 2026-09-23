@@ -1,13 +1,12 @@
 """Testes do informe de rendimentos: o que o sistema sugere a partir dos
 lançamentos, o que fica guardado, e a redação/mapeamento do documento."""
 import os
-import sqlite3
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 
-from controle_lucros import db, repositories as repo
+from controle_lucros import repositories as repo
 from controle_lucros.informe_rendimentos import (
     APELIDOS_CAMPOS,
     QUADRO_3_LINHAS,
@@ -29,16 +28,6 @@ from controle_lucros.models import (
     Movimentacao,
     Socio,
 )
-
-
-@pytest.fixture()
-def conn():
-    connection = sqlite3.connect(":memory:")
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = ON;")
-    db.init_schema(connection)
-    yield connection
-    connection.close()
 
 
 def _empresa(conn, nome="CSI - CENTRO DE SOLUCOES EM INFORMATICA", numero="001", cnpj="36415149000189") -> int:

@@ -1,9 +1,9 @@
 # Controle de Distribuição de Lucros
 
-Sistema local (desktop) para controle de distribuição de lucros entre sócios,
-substituindo a planilha de controle. Feito em Python + PySide6, com banco de
-dados SQLite local — sem servidor, sem nuvem, cada instalação guarda seus
-próprios dados.
+Sistema desktop para controle de distribuição de lucros entre sócios,
+substituindo a planilha de controle. Feito em Python + PySide6, com o banco de
+dados num servidor PostgreSQL do escritório — o programa é instalado em cada
+PC e todos se conectam no mesmo banco. Sem nuvem.
 
 ## Como funcionam as telas de cadastro
 
@@ -297,7 +297,8 @@ tela é conferir o documento impresso.
 
 ## Rodar a partir do código-fonte
 
-Requer Python 3.11+.
+Requer Python 3.11+ e um PostgreSQL acessível (15 ou mais novo — pra
+desenvolver, o da própria máquina serve).
 
 ```bash
 python -m venv .venv
@@ -306,7 +307,10 @@ pip install -r requirements.txt
 python main.py
 ```
 
-No primeiro uso, o sistema pede pra criar o primeiro usuário (administrador).
+Na primeira abertura, o sistema pergunta a conexão com o PostgreSQL (servidor,
+porta, banco, usuário, senha) e, com o banco vazio, pede pra criar o primeiro
+usuário (administrador). O banco e o usuário precisam existir antes — veja
+[Servidor PostgreSQL](#servidor-postgresql).
 
 ## Ícone do programa
 
@@ -362,69 +366,72 @@ python -m PyInstaller --clean controle_lucros.spec
 
 ### Onde ficam os dados depois de empacotado
 
-Rodando o `.exe`, o banco de dados, backups e preferências (tema
-claro/escuro) ficam em `%PROGRAMDATA%\ControleDeLucros\` (normalmente
-`C:\ProgramData\ControleDeLucros\`) — não dentro da pasta do programa. Isso
-significa que dá pra atualizar o programa (trocar os arquivos em
-`dist\ControleDeLucros\` por uma versão nova) sem perder os dados: eles moram
-em outro lugar.
+O cadastro inteiro (empresas, sócios, lançamentos, usuários) fica no
+**PostgreSQL**, no servidor. Em cada PC, fica só o que é daquela máquina, em
+`%PROGRAMDATA%\ControleDeLucros\data\` (normalmente
+`C:\ProgramData\ControleDeLucros\data\`), fora da pasta do programa:
 
-`%PROGRAMDATA%` é a pasta de dados da **máquina**, não a de cada conta do
-Windows — é isso que faz todos os usuários daquele PC trabalharem no mesmo
-cadastro. Duas pessoas podem estar com o programa aberto ao mesmo tempo (em
-contas diferentes, via troca rápida de usuário): o banco roda em modo WAL,
-então quem está lendo uma tela não trava quem está gravando, e cada gravação
-espera a vez por até dez segundos em vez de devolver erro. A tela aberta não
-se atualiza sozinha — o que o colega gravou aparece ao entrar de novo naquela
-tela (trocar de aba e voltar já basta).
+- `configuracao_local.json` — a conexão com o servidor (`db.definir_conexao`),
+  com a senha do banco em texto: legível por quem usa aquele PC;
+- `preferencias.json` — tema, pasta dos backups, responsável do informe,
+  último formato de importação;
+- `backups\` — os backups feitos por este PC (pasta padrão, configurável);
+- o registro de falhas (`relatorio_erro`).
+
+`%PROGRAMDATA%` é a pasta da **máquina**, não a de cada conta do Windows: a
+conexão configurada uma vez vale pra todos os usuários daquele PC.
 
 > A permissão de escrita dessa pasta pra usuário comum é o instalador que
 > abre (seção `[Dirs]` do `controle_lucros.iss`). Copiando a pasta
 > `dist\ControleDeLucros\` na mão, sem instalador, é preciso liberar
-> `C:\ProgramData\ControleDeLucros` pro grupo Usuários — senão só quem criou
-> cada arquivo consegue alterá-lo, e o segundo usuário lê mas não grava.
+> `C:\ProgramData\ControleDeLucros` pro grupo Usuários.
 
-**Atualizando de uma versão anterior à 1.2.0**, o banco ficava em
-`%LOCALAPPDATA%`, dentro da conta de quem usava. Na primeira vez que a versão
-nova abre, esse cadastro é copiado pro lugar compartilhado. O original não é
-apagado: fica lá como garantia, e pode ser removido depois de conferir que o
-sistema abriu com tudo no lugar.
+### Servidor PostgreSQL
 
-### Banco numa pasta do servidor (vários PCs)
+O banco roda num **PostgreSQL 15**: é a versão mais nova cujo instalador
+(EDB) é testado no Windows Server 2016, o servidor do escritório — que não
+roda o próprio programa, porque o Qt 6 exige Windows 10 1809 / Server 2019.
+O SQL do sistema não usa nada posterior ao 15. O passo a passo pra quem cuida
+do servidor (instalar, criar o banco, liberar a rede, firewall, backup com
+`pg_dump`) está no manual do programa, tópico **Servidor PostgreSQL**
+(`ui/manual.py`, `_SERVIDOR`). Em resumo:
 
-O programa também roda instalado em cada PC, com todos apontando pro mesmo
-banco numa pasta compartilhada (`\\SERVIDOR\pasta\controle_lucros.db` ou
-unidade mapeada). É o caminho quando o servidor não roda o próprio programa —
-o Qt 6 exige Windows 10 1809 / Server 2019 ou mais novo. Pensado pra poucas
-pessoas (umas 5) com gravações curtas.
+```sql
+CREATE ROLE controle_lucros LOGIN PASSWORD '...';
+CREATE DATABASE controle_lucros OWNER controle_lucros ENCODING 'UTF8';
+```
 
-- **Configurar:** o instalador pergunta a pasta do banco (seção `[Code]` do
-  `controle_lucros.iss`) e grava a resposta no `configuracao_local.json` — o
-  programa já abre no banco do servidor, sem criar um local antes. Ele vê se
-  a pasta já tem banco: se tem, este PC usa o mesmo; se não, grava
-  `criar_banco` e o programa cria na primeira abertura. Só pergunta em
-  instalação nova (sem configuração nem banco local). Sem essa resposta
-  (instalação silenciosa, pasta copiada à mão), o programa pergunta a mesma
-  coisa antes de abrir (`DialogoConfigurarBanco`). Banco configurado que não
-  existe nunca vira banco novo em silêncio (`db.verificar_banco_configurado`). Quem já usava num PC só leva os dados com
-  *Backup → Levar o banco para o servidor*. O caminho escolhido fica em
-  `configuracao_local.json`, na pasta de dados de cada PC
-  (`db.definir_banco`).
-- **Sem WAL na rede:** o WAL coordena os programas por memória compartilhada,
-  que só existe numa máquina — na rede ele corrompe o banco. Banco em pasta de
-  rede abre com o journal tradicional (`db._ajustar_journal`), e um que chegue
-  lá em WAL é convertido na abertura.
-- **O que é de cada PC e o que é de todos:** tema e último formato de
-  importação ficam no PC (`preferencias.CHAVES_DO_COMPUTADOR`); pasta de
-  backup e responsável do informe ficam no `preferencias.json` ao lado do
-  banco. O registro de falhas também fica no PC.
-- **Restaurar backup** passa pelo backup do SQLite em vez de copiar o arquivo
-  por cima, porque outros PCs podem estar com o banco aberto.
-- **Servidor fora do ar** na abertura mostra *Tentar de novo / Escolher outro
-  banco* em vez de fechar; com o programa aberto, erro de rede vira mensagem
-  explicando o que fazer (`db.explicar_erro`).
-- A senha protege o programa, não o arquivo: a pasta compartilhada deve dar
-  acesso só às contas de quem usa o sistema.
+mais uma linha no `pg_hba.conf` liberando a rede do escritório e a porta 5432
+no firewall. O **OWNER** é obrigatório: no PostgreSQL 15 só o dono cria
+tabelas no schema `public`, e o programa cria as dele na primeira conexão
+(`db.init_schema`, protegido por uma trava pra dois PCs abrindo ao mesmo tempo
+não disputarem).
+
+Como o código conversa com o banco (`db.Conexao`):
+
+- **Mesmo jeito do sqlite3**, de onde o sistema veio: `conn.execute(...)`
+  devolve o cursor, linhas se leem por nome ou posição (`db.Linha`), e
+  gravações ficam pendentes até `conn.commit()`. Parâmetros são `%s`.
+- **Leitura não abre transação.** Só INSERT/UPDATE/DELETE/DDL abrem; assim uma
+  tela parada não segura travas no servidor.
+- **Erro no meio de uma gravação desfaz a transação na hora** — no PostgreSQL,
+  sem isso, todo comando seguinte falharia com "transaction is aborted".
+- **Conexão que caiu é refeita no próximo comando** (servidor reiniciado, rede
+  que piscou), e a ação que falhou vira mensagem explicando o que fazer
+  (`db.explicar_erro`, que reconhece as mensagens do servidor em inglês e em
+  português).
+- **Gravação travada por outro PC** espera até 10 s (`lock_timeout`) e então
+  vira aviso de "tente de novo".
+- Datas continuam como texto ISO (`'2024-03-31'`) em colunas `TEXT`; um
+  `date` do Python é convertido pra texto ao gravar, como o sqlite3 fazia.
+  Valores do informe são `BIGINT` de centavos.
+
+**Backup** (`backup.py`): arquivo `.json` com todas as tabelas, lidas numa
+transação `REPEATABLE READ` (uma foto só, mesmo com outro PC gravando).
+Restaurar é uma transação única — `TRUNCATE` de tudo, inserção e ajuste das
+sequências de id —, então ou o banco inteiro vira o do backup, ou nada muda.
+Não depende do `pg_dump` estar nos PCs; o backup do próprio servidor (com
+`pg_dump`, agendado) é recomendado à parte, no manual.
 
 ### Gerar um instalador (Inno Setup)
 
@@ -442,9 +449,10 @@ isso, em vez de gerar um instalador vazio.
 O instalador final fica em `installer\ControleDeLucros_Setup_<versão>.exe`.
 Ele instala em Arquivos de Programas (pede elevação) e cria
 `C:\ProgramData\ControleDeLucros\` já com escrita liberada pro grupo
-Usuários — é o que permite a qualquer conta do Windows daquele PC abrir o
-programa e gravar no mesmo cadastro. Os dados ficam fora da pasta de
-instalação, então desinstalar ou reinstalar/atualizar nunca apaga o banco.
+Usuários. A conexão com o servidor **não** é perguntada no instalador: ele
+roda como administrador, que não enxerga a rede como quem usa o PC. O
+programa pergunta na primeira abertura, já como o usuário. Desinstalar ou
+atualizar nunca toca no banco, que está no servidor.
 
 ### Lançar uma nova versão
 
@@ -478,3 +486,11 @@ python -m PyInstaller --clean --hidden-import PySide6.QtCharts --hidden-import P
 pip install -r requirements-dev.txt
 python -m pytest
 ```
+
+Os testes precisam dos binários do PostgreSQL na máquina (`initdb`, `pg_ctl`
+— no Ubuntu, o pacote `postgresql`; no Windows, o instalador da EDB): o
+`tests/conftest.py` cria um PostgreSQL descartável numa pasta temporária,
+numa porta livre, e o desliga no fim. Nenhum servidor de verdade é tocado.
+Pra usar um servidor de teste que já existe, aponte
+`CONTROLE_LUCROS_TESTE_PG` pra ele (`"host=... dbname=... user=..."`) —
+**todas as tabelas do sistema nesse banco são apagadas a cada teste**.

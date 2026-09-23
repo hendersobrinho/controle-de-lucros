@@ -18,6 +18,8 @@ num instalador — e lê a versão do próprio .exe gerado aqui.
 """
 
 import sys
+
+from PyInstaller.utils.hooks import collect_dynamic_libs, collect_submodules
 from pathlib import Path
 
 RAIZ = Path(SPECPATH)
@@ -107,11 +109,15 @@ _versao_para_o_instalador()
 a = Analysis(
     ["main.py"],
     pathex=[],
-    binaries=[],
+    # O psycopg carrega o psycopg_binary (que traz o libpq, o cliente do
+    # PostgreSQL, compilado) por import feito em tempo de execução, que o
+    # PyInstaller não enxerga. Sem ele o programa empacotado não conecta:
+    # "no pq wrapper available".
+    binaries=collect_dynamic_libs("psycopg_binary"),
     datas=[("controle_lucros/ui/assets", "controle_lucros/ui/assets")],
     # QtSvgWidgets entra na mão porque só é usado dentro da tela "Sobre", por
     # import indireto que o PyInstaller não enxerga sozinho.
-    hiddenimports=["PySide6.QtSvgWidgets"],
+    hiddenimports=["PySide6.QtSvgWidgets", *collect_submodules("psycopg_binary")],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

@@ -8,12 +8,11 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-import sqlite3
 
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from controle_lucros import db, repositories as repo
+from controle_lucros import repositories as repo
 from controle_lucros.ui.main_window import MainWindow
 
 
@@ -21,15 +20,6 @@ from controle_lucros.ui.main_window import MainWindow
 def app():
     aplicativo = QApplication.instance() or QApplication([])
     yield aplicativo
-
-
-@pytest.fixture()
-def conn():
-    connection = sqlite3.connect(":memory:")
-    connection.row_factory = sqlite3.Row
-    db.init_schema(connection)
-    yield connection
-    connection.close()
 
 
 def _janela(conn, admin: bool) -> MainWindow:

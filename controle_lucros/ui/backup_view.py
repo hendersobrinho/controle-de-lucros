@@ -3,12 +3,13 @@ qualquer momento, backup automático opcional (uma vez por dia ao entrar no
 sistema), pasta de destino configurável, e restauração a partir de um
 arquivo de backup (da pasta configurada ou de qualquer lugar).
 
-No topo, onde o banco fica: é daqui que o administrador leva o banco pra
-pasta do servidor, pra os outros PCs do escritório usarem o mesmo."""
+No topo, em que servidor este PC está conectado — e o botão pra trocar,
+quando o servidor mudar de endereço ou a senha do banco for trocada."""
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
+
+import psycopg
 
 from PySide6.QtCore import QUrl, Qt
 from PySide6.QtGui import QDesktopServices
@@ -16,6 +17,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QCheckBox,
+    QDialog,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -29,7 +31,7 @@ from PySide6.QtWidgets import (
 
 from .. import backup, db
 from .common import TabelaLista
-from .local_banco import botao_tutorial, descrever_local, escolher_banco_existente, levar_banco_para_rede
+from .local_banco import DialogoConexao, botao_tutorial, descrever_conexao
 from .ocupado import ocupado
 
 COLUNAS = ["Arquivo", "Criado em", "Tamanho"]
@@ -41,7 +43,7 @@ class BackupView(QWidget):
         self.conn = conn
         self._backups: list[dict] = []
 
-        titulo_local = QLabel("Onde fica o banco")
+        titulo_local = QLabel("Conexão com o banco")
         titulo_local.setProperty("role", "secao")
 
         self.rotulo_banco = QLabel()
@@ -49,23 +51,15 @@ class BackupView(QWidget):
         self.rotulo_banco.setProperty("role", "mono")
         self.rotulo_banco.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
-        self.rotulo_local = QLabel()
-        self.rotulo_local.setWordWrap(True)
-        self.rotulo_local.setProperty("role", "subtitulo")
-
-        btn_levar = QPushButton("Levar o banco para o servidor…")
-        btn_levar.setToolTip(
-            "Copia o banco deste computador para uma pasta compartilhada. Depois, nos outros "
-            "computadores, use \"Usar um banco que já está no servidor\"."
+        btn_alterar_conexao = QPushButton("Alterar a conexão…")
+        btn_alterar_conexao.setToolTip(
+            "Vale só para este computador. Use quando o servidor mudar de endereço ou a senha "
+            "do banco for trocada."
         )
-        btn_levar.clicked.connect(self._levar_para_servidor)
-
-        btn_usar_outro = QPushButton("Usar um banco que já está no servidor…")
-        btn_usar_outro.clicked.connect(self._usar_outro_banco)
+        btn_alterar_conexao.clicked.connect(self._alterar_conexao)
 
         linha_local = QHBoxLayout()
-        linha_local.addWidget(btn_levar)
-        linha_local.addWidget(btn_usar_outro)
+        linha_local.addWidget(btn_alterar_conexao)
         linha_local.addSpacing(8)
         linha_local.addWidget(botao_tutorial(self))
         linha_local.addStretch()
@@ -75,8 +69,9 @@ class BackupView(QWidget):
 
         explicacao = QLabel(
             "Faça uma cópia de segurança do banco a qualquer momento, ou deixe o sistema fazer "
-            "automaticamente (uma vez por dia) ao entrar. Restaurar um backup substitui todos os "
-            "dados atuais pelos daquele arquivo — o sistema fecha depois pra recarregar do zero."
+            "automaticamente (uma vez por dia) ao entrar. O arquivo fica na pasta escolhida abaixo, "
+            "neste computador. Restaurar um backup substitui todos os dados atuais do servidor "
+            "pelos daquele arquivo — o sistema fecha depois pra recarregar do zero."
         )
         explicacao.setWordWrap(True)
         explicacao.setProperty("role", "subtitulo")
@@ -136,7 +131,6 @@ class BackupView(QWidget):
         layout.setSpacing(12)
         layout.addWidget(titulo_local)
         layout.addWidget(self.rotulo_banco)
-        layout.addWidget(self.rotulo_local)
         layout.addLayout(linha_local)
         layout.addSpacing(12)
         layout.addWidget(titulo)
@@ -151,9 +145,7 @@ class BackupView(QWidget):
         self.atualizar()
 
     def atualizar(self) -> None:
-        caminho_banco = db.get_db_path()
-        self.rotulo_banco.setText(str(caminho_banco))
-        self.rotulo_local.setText(descrever_local(caminho_banco))
+        self.rotulo_banco.setText(descrever_conexao())
         self.rotulo_pasta.setText(str(backup.pasta_backup_configurada()))
         self.check_automatico.blockSignals(True)
         self.check_automatico.setChecked(backup.automatico_habilitado())
@@ -175,34 +167,18 @@ class BackupView(QWidget):
     def _atualizar_disponibilidade(self) -> None:
         self.btn_restaurar.setEnabled(bool(self.tabela.selectionModel().selectedRows()))
 
-    def _levar_para_servidor(self) -> None:
-        resposta = QMessageBox.question(
-            self,
-            "Levar o banco para o servidor",
-            "O banco deste computador vai ser copiado para a pasta que você escolher, e este "
-            "computador passa a usar a cópia de lá. O arquivo daqui fica como estava, mas deixa "
-            "de ser usado.\n\nDepois, em cada um dos outros computadores, escolha \"Usar um "
-            "banco que já está no servidor\" e aponte para o mesmo arquivo.\n\nContinuar?",
-        )
-        if resposta != QMessageBox.Yes:
-            return
-        destino = levar_banco_para_rede(self.conn, self)
-        if destino is not None:
-            self._fechar_para_trocar_de_banco(destino)
+    def _alterar_conexao(self) -> None:
+        if DialogoConexao(self).exec() == QDialog.Accepted:
+            self._fechar_para_trocar_de_banco()
 
-    def _usar_outro_banco(self) -> None:
-        destino = escolher_banco_existente(self)
-        if destino is not None:
-            self._fechar_para_trocar_de_banco(destino)
-
-    def _fechar_para_trocar_de_banco(self, destino: Path) -> None:
+    def _fechar_para_trocar_de_banco(self) -> None:
         """A conexão aberta continua no banco antigo e as telas mostram o que
         leram dele — recomeçar do zero é o jeito seguro de ninguém gravar no
         arquivo errado."""
         QMessageBox.information(
             self,
             "Banco trocado",
-            f"Este computador agora usa o banco em:\n{destino}\n\n"
+            f"Este computador agora usa o banco:\n{descrever_conexao()}\n\n"
             "O sistema vai fechar agora — abra novamente.",
         )
         QApplication.instance().quit()
@@ -223,7 +199,7 @@ class BackupView(QWidget):
         try:
             with ocupado(self, "Backup", "Copiando o banco de dados…"):
                 caminho = backup.criar_backup(self.conn)
-        except (OSError, sqlite3.Error) as exc:
+        except (OSError, psycopg.Error) as exc:
             QMessageBox.warning(self, "Erro ao fazer backup", db.explicar_erro(exc))
             return
         self.atualizar()
@@ -236,7 +212,7 @@ class BackupView(QWidget):
 
     def _importar_arquivo(self) -> None:
         caminho, _ = QFileDialog.getOpenFileName(
-            self, "Selecionar arquivo de backup", str(backup.pasta_backup_configurada()), "Banco de dados (*.db)"
+            self, "Selecionar arquivo de backup", str(backup.pasta_backup_configurada()), "Backup do Controle de Lucros (*.json)"
         )
         if not caminho:
             return
@@ -255,13 +231,9 @@ class BackupView(QWidget):
             "Restaurar backup",
             f"Isso vai substituir TODOS os dados atuais pelos do arquivo:\n\n{caminho_backup.name}\n\n"
             "Essa ação não pode ser desfeita. O sistema vai fechar em seguida — abra de novo pra "
-            "carregar os dados restaurados."
-            + (
-                "\n\nO banco fica no servidor: peça a quem estiver com o programa aberto em outro "
-                "computador que feche e abra de novo depois."
-                if db.banco_em_rede(db.get_db_path()) else ""
-            )
-            + "\n\nTem certeza que quer continuar?",
+            "carregar os dados restaurados.\n\nO banco é o do servidor, usado por todo o escritório: "
+            "peça a quem estiver com o programa aberto em outro computador que feche e abra de novo "
+            "depois.\n\nTem certeza que quer continuar?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
@@ -269,8 +241,8 @@ class BackupView(QWidget):
             return
         try:
             with ocupado(self, "Backup", "Restaurando o banco de dados…"):
-                backup.restaurar_backup(caminho_backup)
-        except (OSError, ValueError, sqlite3.Error) as exc:
+                backup.restaurar_backup(self.conn, caminho_backup)
+        except (OSError, ValueError, psycopg.Error) as exc:
             QMessageBox.warning(self, "Erro ao restaurar", db.explicar_erro(exc))
             return
         QMessageBox.information(

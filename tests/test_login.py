@@ -9,12 +9,11 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-import sqlite3
 
 import pytest
 from PySide6.QtWidgets import QApplication, QDialog
 
-from controle_lucros import db, repositories as repo
+from controle_lucros import repositories as repo
 from controle_lucros.ui.login import (
     DialogoLogin,
     DialogoPrimeiroUsuario,
@@ -25,15 +24,6 @@ from controle_lucros.ui.login import (
 @pytest.fixture(scope="module", autouse=True)
 def app():
     yield QApplication.instance() or QApplication([])
-
-
-@pytest.fixture()
-def conn():
-    connection = sqlite3.connect(":memory:")
-    connection.row_factory = sqlite3.Row
-    db.init_schema(connection)
-    yield connection
-    connection.close()
 
 
 @pytest.fixture()

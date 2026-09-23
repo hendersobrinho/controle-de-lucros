@@ -1,20 +1,9 @@
-import sqlite3
 
 import pytest
 
 from controle_lucros import db, repositories as repo
 from controle_lucros.layout_importacao import LayoutImportacao
 from controle_lucros.models import AlteracaoContratual, Empresa, Movimentacao, Socio, VinculoSocietario
-
-
-@pytest.fixture()
-def conn():
-    connection = sqlite3.connect(":memory:")
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = ON;")
-    db.init_schema(connection)
-    yield connection
-    connection.close()
 
 
 def _nova_empresa(conn, **overrides) -> int:
@@ -709,43 +698,6 @@ def test_atualizar_cotas_vinculo_rejeita_data_anterior_a_entrada(conn):
     assert len(repo.listar_alteracoes(conn, empresa_id)) == alteracoes_antes
 
 
-def test_init_schema_migra_banco_antigo_sem_colunas_novas():
-    """Bug encontrado importando dados reais: um banco criado antes do
-    tipo_pessoa/pro_labore/irrf existirem no schema nunca ganhava essas
-    colunas, porque CREATE TABLE IF NOT EXISTS não altera tabela já criada
-    — a primeira tela que usasse esses campos quebrava com
-    "table has no column named ..."."""
-    antigo = sqlite3.connect(":memory:")
-    antigo.row_factory = sqlite3.Row
-    antigo.executescript(
-        """
-        CREATE TABLE empresa (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, numero_chamada TEXT NOT NULL,
-            nome TEXT NOT NULL, cnpj TEXT, capital_social REAL NOT NULL DEFAULT 0,
-            quantidade_cotas REAL NOT NULL DEFAULT 0
-        );
-        CREATE TABLE socio (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, cpf TEXT);
-        CREATE TABLE distribuicao_lucro (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, empresa_id INTEGER NOT NULL,
-            ano_base INTEGER NOT NULL, socio_id INTEGER NOT NULL,
-            valor_distribuido REAL NOT NULL DEFAULT 0
-        );
-        """
-    )
-    antigo.commit()
-
-    db.init_schema(antigo)  # deve migrar sem apagar nada e sem dar erro
-
-    colunas_socio = {r["name"] for r in antigo.execute("PRAGMA table_info(socio)").fetchall()}
-    colunas_dist = {r["name"] for r in antigo.execute("PRAGMA table_info(distribuicao_lucro)").fetchall()}
-    assert "tipo_pessoa" in colunas_socio
-    assert {"pro_labore", "irrf"} <= colunas_dist
-
-    socio_id = repo.salvar_socio(antigo, Socio(id=None, nome="Fulano", cpf="111.111.111-11", tipo_pessoa="juridica"))
-    (socio,) = repo.listar_socios(antigo)
-    assert socio.tipo_pessoa == "juridica"
-
-
 # ------------------------------------------------- Trancamento de período --
 
 def test_periodo_comeca_destrancado(conn):
@@ -1108,13 +1060,13 @@ def test_panorama_nao_trava_com_vinculo_de_data_entrada_igual_saida(conn):
     conn.execute(
         """INSERT INTO vinculo_societario
            (empresa_id, socio_id, percentual_capital, quantidade_cotas, data_entrada, data_saida)
-           VALUES (?, ?, ?, ?, ?, ?)""",
+           VALUES (%s, %s, %s, %s, %s, %s)""",
         (empresa_id, socio_id, 8.0, 10, "2026-08-24", "2026-08-24"),
     )
     conn.execute(
         """INSERT INTO vinculo_societario
            (empresa_id, socio_id, percentual_capital, quantidade_cotas, data_entrada, data_saida)
-           VALUES (?, ?, ?, ?, ?, ?)""",
+           VALUES (%s, %s, %s, %s, %s, %s)""",
         (empresa_id, socio_id, 8.0, 10, "2026-08-24", None),
     )
     conn.commit()

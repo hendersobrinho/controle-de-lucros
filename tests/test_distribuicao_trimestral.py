@@ -1,20 +1,9 @@
 """Distribuição trimestral e a propagação dela para a distribuição anual."""
-import sqlite3
 
 import pytest
 
-from controle_lucros import db, repositories as repo
+from controle_lucros import repositories as repo
 from controle_lucros.models import Empresa, Socio, periodo_trimestre
-
-
-@pytest.fixture()
-def conn():
-    connection = sqlite3.connect(":memory:")
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = ON;")
-    db.init_schema(connection)
-    yield connection
-    connection.close()
 
 
 @pytest.fixture()

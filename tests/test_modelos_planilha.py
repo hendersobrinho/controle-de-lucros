@@ -4,12 +4,11 @@ Os três modelos são lidos pelo MESMO importador — colunas identificadas pelo
 cabeçalho — então um modelo menor é só um arquivo com menos colunas, não um
 formato novo. É isso que estes testes prendem.
 """
-import sqlite3
 
 import openpyxl
 import pytest
 
-from controle_lucros import db, repositories as repo
+from controle_lucros import repositories as repo
 from controle_lucros.planilha import (
     COLUNAS_CADASTRO,
     LINHAS_EXEMPLO_CADASTRO,
@@ -20,16 +19,6 @@ from controle_lucros.planilha import (
     importar_distribuicao,
     modelo_cadastro,
 )
-
-
-@pytest.fixture()
-def conn():
-    connection = sqlite3.connect(":memory:")
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = ON;")
-    db.init_schema(connection)
-    yield connection
-    connection.close()
 
 
 IDS = [m.id for m in MODELOS_CADASTRO]

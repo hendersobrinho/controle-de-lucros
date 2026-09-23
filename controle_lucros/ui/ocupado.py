@@ -14,7 +14,7 @@ Duas formas, conforme dê ou não para contar os passos:
   verdade, com "12 de 160" — e é ela que prova que o programa não travou.
 
 A barra anda porque o laço devolve o controle ao Qt de tempos em tempos
-(processEvents). Não é thread: o banco é SQLite ligado a esta linha de
+(processEvents). Não é thread: a conexão com o banco é ligada a esta linha de
 execução, e mover a gravação para outra abriria um problema bem maior do que o
 que resolveria.
 """

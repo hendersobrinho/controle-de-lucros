@@ -9,12 +9,11 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-import sqlite3
 
 import pytest
 from PySide6.QtWidgets import QApplication, QDialogButtonBox
 
-from controle_lucros import db, preferencias, repositories as repo
+from controle_lucros import preferencias, repositories as repo
 from controle_lucros.models import Empresa, Socio
 from controle_lucros.ui.common import MODO_CANCELADO, MODO_VAZIO
 from controle_lucros.ui.socios_tab import SociosTab
@@ -24,16 +23,6 @@ from controle_lucros.ui.socios_tab import SociosTab
 def app():
     aplicativo = QApplication.instance() or QApplication([])
     yield aplicativo
-
-
-@pytest.fixture()
-def conn():
-    connection = sqlite3.connect(":memory:")
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = ON;")
-    db.init_schema(connection)
-    yield connection
-    connection.close()
 
 
 # ================================ 1. sugestão de sócio já cadastrado =======
@@ -139,7 +128,7 @@ def test_o_aviso_nao_impede_cadastrar_homonimo(conn):
 
 @pytest.fixture()
 def prefs(tmp_path, monkeypatch):
-    monkeypatch.setenv("CONTROLE_LUCROS_DB", str(tmp_path / "teste.db"))
+    monkeypatch.setenv("CONTROLE_LUCROS_DADOS", str(tmp_path))
     return tmp_path
 
 

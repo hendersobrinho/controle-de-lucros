@@ -5,13 +5,12 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import datetime as dt
-import sqlite3
 
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from controle_lucros import db, repositories as repo
+from controle_lucros import repositories as repo
 from controle_lucros.models import Empresa, Movimentacao, Socio
 from controle_lucros.ui import informe_rendimentos_view as mod
 from controle_lucros.ui.informe_rendimentos_view import InformeRendimentosDialog
@@ -21,15 +20,6 @@ from controle_lucros.ui.informe_rendimentos_view import InformeRendimentosDialog
 def app():
     aplicativo = QApplication.instance() or QApplication([])
     yield aplicativo
-
-
-@pytest.fixture()
-def conn():
-    connection = sqlite3.connect(":memory:")
-    connection.row_factory = sqlite3.Row
-    db.init_schema(connection)
-    yield connection
-    connection.close()
 
 
 @pytest.fixture()

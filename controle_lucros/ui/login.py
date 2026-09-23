@@ -20,7 +20,7 @@ from .. import repositories as repo
 from ..models import Usuario
 from . import theme
 from .icones import pasta_assets
-from .local_banco import escolher_banco_existente
+from .local_banco import DialogoConexao
 
 LARGURA_ENTRADA = 420
 
@@ -94,10 +94,10 @@ class DialogoPrimeiroUsuario(QDialog):
     """Só aparece quando ainda não existe nenhum usuário cadastrado — cria a
     primeira conta, que já nasce administradora.
 
-    É também a primeira tela de um PC novo no escritório, cujo banco local
-    está vazio: por isso oferece apontar pro banco do servidor, onde os
-    usuários já existem. Escolhido, o diálogo fecha com trocou_banco e quem
-    chamou reconecta."""
+    Num escritório que já usa o sistema, cair aqui quer dizer que este PC
+    está conectado no banco errado (vazio): por isso oferece trocar a
+    conexão, pro banco onde os usuários já existem. Trocada, o diálogo fecha
+    com trocou_banco e quem chamou reconecta."""
 
     def __init__(self, conn, parent=None):
         super().__init__(parent)
@@ -122,7 +122,7 @@ class DialogoPrimeiroUsuario(QDialog):
         sair = _botao_discreto("Sair")
         sair.clicked.connect(self.reject)
 
-        usar_servidor = _botao_discreto("Usar o banco do servidor…")
+        usar_servidor = _botao_discreto("Alterar a conexão…")
         usar_servidor.clicked.connect(self._usar_banco_do_servidor)
 
         miolo = QVBoxLayout()
@@ -159,7 +159,7 @@ class DialogoPrimeiroUsuario(QDialog):
         self.nome.setFocus()
 
     def _usar_banco_do_servidor(self) -> None:
-        if escolher_banco_existente(self) is not None:
+        if DialogoConexao(self).exec() == QDialog.Accepted:
             self.trocou_banco = True
             self.reject()
 

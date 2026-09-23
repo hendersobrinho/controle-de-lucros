@@ -8,12 +8,11 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-import sqlite3
 
 import pytest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from controle_lucros import db, repositories as repo
+from controle_lucros import repositories as repo
 from controle_lucros.models import Empresa, Socio
 from controle_lucros.ui import socios_tab as socios_mod
 from controle_lucros.ui.common import (
@@ -31,15 +30,6 @@ from controle_lucros.ui.socios_tab import SociosTab
 def app():
     aplicativo = QApplication.instance() or QApplication([])
     yield aplicativo
-
-
-@pytest.fixture()
-def conn():
-    connection = sqlite3.connect(":memory:")
-    connection.row_factory = sqlite3.Row
-    db.init_schema(connection)
-    yield connection
-    connection.close()
 
 
 @pytest.fixture(autouse=True)
@@ -151,12 +141,12 @@ def test_trocar_de_tema_nao_perde_o_estado(empresas, tmp_path, monkeypatch):
     """O aviso tem cor calculada na mão (não vem do QSS global), então ele é
     reaplicado ao trocar de tema — e o modo não pode se perder nisso.
 
-    O tema é persistido em preferencias.json ao lado do banco; sem apontar o
-    CONTROLE_LUCROS_DB pra um lugar temporário, o teste escreveria na
+    O tema é persistido em preferencias.json na pasta local; sem apontar o
+    CONTROLE_LUCROS_DADOS pra um lugar temporário, o teste escreveria na
     preferência de verdade de quem estiver rodando a suíte."""
     from controle_lucros.ui import theme
 
-    monkeypatch.setenv("CONTROLE_LUCROS_DB", str(tmp_path / "teste.db"))
+    monkeypatch.setenv("CONTROLE_LUCROS_DADOS", str(tmp_path))
     modo_inicial = theme.estado().modo
 
     empresas.tabela.selectRow(0)

@@ -1,19 +1,13 @@
-import sqlite3
 
 import pytest
 
-from controle_lucros import db, repositories as repo, sessao
+from controle_lucros import repositories as repo, sessao
 from controle_lucros.models import Empresa
 
 
-@pytest.fixture()
-def conn():
-    connection = sqlite3.connect(":memory:")
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = ON;")
-    db.init_schema(connection)
-    yield connection
-    connection.close()
+@pytest.fixture(autouse=True)
+def sem_usuario_na_sessao():
+    yield
     sessao.definir_usuario_atual(None)
 
 
@@ -137,7 +131,7 @@ def test_log_sobrevive_a_exclusao_do_usuario(conn):
     sessao.definir_usuario_atual(repo.autenticar(conn, "fulano", "senha123"))
     repo.salvar_empresa(conn, Empresa(None, "001", "ACME LTDA", "", 10000, 1000))
 
-    conn.execute("DELETE FROM usuario WHERE id=?", (usuario_id,))
+    conn.execute("DELETE FROM usuario WHERE id=%s", (usuario_id,))
     conn.commit()
 
     logs = [l for l in repo.listar_log_atividade(conn) if l.entidade == "empresa"]

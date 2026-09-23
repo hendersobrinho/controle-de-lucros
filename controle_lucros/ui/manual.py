@@ -62,9 +62,9 @@ participou. É isso que permite emitir um informe de 2023 hoje, ou explicar
 uma distribuição de três anos atrás.</p>
 
 <h3>Onde ficam os dados</h3>
-<p>Tudo num arquivo local, nesta máquina — não há servidor nem nuvem. Por isso
-o <b>backup é responsabilidade de quem usa</b>: veja o tópico
-<i>Backup</i>.</p>
+<p>Num servidor PostgreSQL do escritório, que todos os computadores usam —
+não há nuvem. Por isso o <b>backup é responsabilidade do escritório</b>: veja
+os tópicos <i>Backup</i> e <i>Servidor PostgreSQL</i>.</p>
 
 <p><i>Aperte F1 em qualquer tela para abrir este manual já no tópico dela.</i></p>
 """
@@ -679,30 +679,25 @@ trancamento de período, lançamentos e emissão de informe. É onde se responde
 "quem mudou esse valor?" — vale consultar antes de refazer um trabalho.</p>
 
 <h3>Banco no servidor (vários computadores)</h3>
-<p>Para o escritório inteiro usar o mesmo cadastro, o programa é instalado em
-cada computador e todos apontam para o mesmo banco numa <b>pasta
-compartilhada do servidor</b>. Usuários, senhas, administradores e todos os
-dados vêm do banco — valem igual em qualquer computador.</p>
-<p>A pasta do banco é escolhida <b>na instalação</b>, uma vez em cada
-computador: use o caminho de rede (<code>\\\\SERVIDOR\\pasta</code>) e a
-<b>mesma pasta</b> em todos. O instalador vê se a pasta já tem banco: no
-primeiro computador, avisa que vai criar um banco novo; nos outros, que vai
-usar o que já está lá. Nada é apagado. (Sem essa escolha na instalação, o
-programa pergunta a mesma coisa na primeira vez que abre.)</p>
-<p>Se o banco não estiver na pasta escolhida — rede fora do ar, arquivo
-movido —, o programa avisa e não cria um banco vazio no lugar.</p>
-<p>Como compartilhar a pasta no servidor e montar o caminho: veja o tópico
-<b>Caminho do servidor</b>.</p>
-<p>Se o sistema já era usado só num computador, leve os dados para o
-servidor por aqui, em Backup: <b>Levar o banco para o servidor</b>.</p>
-<p>O tema claro/escuro continua sendo de cada computador. Se o servidor ou a
-rede cair, o programa avisa em vez de fechar — espere voltar e tente de novo.
-Dê acesso à pasta só a quem usa o sistema: a senha protege o programa, não o
-arquivo.</p>
+<p>O programa é instalado em cada computador, e todos se conectam no mesmo
+banco, num <b>servidor PostgreSQL</b> do escritório. Usuários, senhas,
+administradores e todos os dados vêm do banco — valem igual em qualquer
+computador.</p>
+<p>Os dados da conexão (servidor, porta, banco, usuário e senha) são
+perguntados na <b>primeira vez que o programa abre</b> em cada computador, e
+podem ser trocados depois em Backup: <b>Alterar a conexão</b>. Como preparar
+o servidor: veja o tópico <b>Servidor PostgreSQL</b>.</p>
+<p>O tema claro/escuro e a pasta dos backups são de cada computador. Se o
+servidor ou a rede cair, o programa avisa em vez de fechar — espere voltar e
+tente de novo.</p>
 
 <h3>Backup</h3>
-<p>Não há nuvem: se o computador onde está o banco (ou o servidor) for
-perdido ou o disco falhar, o backup é a única recuperação possível.</p>
+<p>Não há nuvem: se o servidor for perdido ou o disco dele falhar, o backup
+é a única recuperação possível.</p>
+<p>O backup feito aqui é um arquivo <code>.json</code> com o banco inteiro,
+salvo na pasta escolhida, <b>neste computador</b>. Restaurar troca os dados
+do servidor — de todo o escritório — pelos do arquivo. Além dele, o servidor
+deve ter o backup próprio (tópico <i>Servidor PostgreSQL</i>).</p>
 <p>Gere um backup <b>com frequência</b> e guarde a cópia <b>fora desta
 máquina</b> (pen drive, outro computador, unidade de rede). Backup no mesmo
 disco não protege contra falha de disco.</p>
@@ -710,84 +705,89 @@ disco não protege contra falha de disco.</p>
 destrancar um período fechado, e no fechamento de cada exercício.</p>
 """
 
-# Texto cru (r""") por causa das barras invertidas dos caminhos de rede.
+# Texto cru (r""") por causa das barras invertidas dos caminhos do Windows.
 _SERVIDOR = r"""
-<h2>Como configurar o caminho do servidor</h2>
-<p>Para o escritório inteiro usar o mesmo cadastro, o banco fica numa
-<b>pasta compartilhada do servidor</b>, e todos os computadores apontam para
-ela pelo mesmo caminho, sempre neste formato:</p>
-<p style="font-size: 15px;"><code><b>\\NOME-DO-SERVIDOR\NOME-DO-COMPARTILHAMENTO</b></code></p>
-<p>Exemplo: <code>\\SRV-ESCRITORIO\ControleDeLucros</code></p>
+<h2>Servidor PostgreSQL</h2>
+<p>O banco do escritório fica num <b>PostgreSQL 15</b>, instalado no
+servidor. É a versão mais nova com instalador testado no <b>Windows Server
+2016</b>. Feito uma vez só, por quem cuida do servidor.</p>
 
-<h3>1. No servidor: compartilhar a pasta (uma vez só)</h3>
-<p>Feito por quem cuida do servidor.</p>
+<h3>1. Instalar</h3>
 <ol>
-<li>Crie uma pasta para o banco, por exemplo <code>C:\ControleDeLucros</code>.</li>
-<li>Clique nela com o botão direito → <b>Propriedades</b> → aba
-<b>Compartilhamento</b> → <b>Compartilhamento Avançado</b>.</li>
-<li>Marque <b>Compartilhar esta pasta</b> e dê um nome ao compartilhamento,
-por exemplo <code>ControleDeLucros</code>. Esse é o nome que entra no
-caminho.</li>
-<li>Em <b>Permissões</b>, dê <b>Alterar</b> (ou Controle total) às contas de
-quem usa o sistema, e tire o grupo <b>Todos</b>.</li>
-<li>Na aba <b>Segurança</b> da mesma pasta, dê <b>Modificar</b> às mesmas
-contas. As duas abas contam: se uma delas só deixar ler, o sistema abre mas
-não consegue gravar.</li>
+<li>Baixe o instalador em <code>postgresql.org/download/windows</code>
+(<b>Download the installer</b>) — versão <b>15.x</b>, Windows x86-64.</li>
+<li>Instale com as opções padrão. Porta: <code>5432</code>. Anote a senha do
+usuário <code>postgres</code> e guarde num lugar seguro: ela é a chave de
+administrador do banco, e <b>não</b> é a que vai nos computadores.</li>
+<li>Pode desmarcar o <b>Stack Builder</b> no fim: não é preciso.</li>
 </ol>
-<p>A permissão é na <b>pasta</b>, não só no arquivo do banco: ao gravar, o
-sistema cria e apaga um arquivo temporário ao lado dele.</p>
 
-<h3>2. Descobrir o nome do servidor</h3>
-<p>No servidor, abra o <b>Prompt de Comando</b> e digite <code>hostname</code>.
-O nome que aparece é o que vai no caminho. Também dá para ver em
-<b>Painel de Controle → Sistema</b>, no campo <b>Nome do computador</b>.</p>
+<h3>2. Criar o banco do sistema</h3>
+<p>Abra o <b>SQL Shell (psql)</b> no menu Iniciar, aperte Enter nas
+perguntas até pedir a senha e entre com a do <code>postgres</code>. Depois
+rode, trocando a senha:</p>
+<p><code>CREATE ROLE controle_lucros LOGIN PASSWORD 'troque-esta-senha';</code><br>
+<code>CREATE DATABASE controle_lucros OWNER controle_lucros ENCODING 'UTF8';</code></p>
+<p>O <b>OWNER</b> é obrigatório: no PostgreSQL 15 só o dono do banco cria
+tabelas nele, e o sistema cria as dele na primeira vez que conecta.</p>
 
-<h3>3. Montar o caminho</h3>
+<h3>3. Liberar a rede do escritório</h3>
+<ol>
+<li>Abra a pasta de dados (<code>C:\Program Files\PostgreSQL\15\data</code>)
+e edite o arquivo <code>pg_hba.conf</code> no Bloco de Notas. No fim dele,
+acrescente uma linha com a faixa de IPs da rede do escritório, por
+exemplo:<br>
+<code>host  controle_lucros  controle_lucros  192.168.0.0/24  scram-sha-256</code></li>
+<li>No mesmo lugar, em <code>postgresql.conf</code>, confira que
+<code>listen_addresses = '*'</code>.</li>
+<li>Reinicie o serviço: <b>Serviços</b> (services.msc) →
+<b>postgresql-x64-15</b> → Reiniciar.</li>
+<li>Libere a porta no firewall do servidor. No Prompt de Comando como
+administrador:<br>
+<code>netsh advfirewall firewall add rule name="PostgreSQL" dir=in action=allow protocol=TCP localport=5432 remoteip=localsubnet</code></li>
+</ol>
+<p>Dê ao servidor um <b>IP fixo</b>: é por ele que os computadores o acham.
+No Prompt de Comando do servidor, <code>ipconfig</code> mostra o IP atual.</p>
+
+<h3>4. Em cada computador</h3>
+<p>Na primeira vez que o programa abre, ele pergunta a conexão:</p>
 <table cellpadding="4">
-<tr><td>Nome do servidor</td><td><code>SRV-ESCRITORIO</code></td></tr>
-<tr><td>Nome do compartilhamento</td><td><code>ControleDeLucros</code></td></tr>
-<tr><td><b>Caminho</b></td><td><code><b>\\SRV-ESCRITORIO\ControleDeLucros</b></code></td></tr>
+<tr><td>Servidor</td><td>o IP do servidor, ex.: <code>192.168.0.10</code></td></tr>
+<tr><td>Porta</td><td><code>5432</code></td></tr>
+<tr><td>Banco</td><td><code>controle_lucros</code></td></tr>
+<tr><td>Usuário</td><td><code>controle_lucros</code></td></tr>
+<tr><td>Senha</td><td>a do passo 2</td></tr>
 </table>
-<p>Duas barras no começo e uma entre os nomes. Use o <b>nome do
-compartilhamento</b>, não o caminho da pasta dentro do servidor
-(<code>C:\ControleDeLucros</code> só funciona no próprio servidor).</p>
+<p>Use <b>Testar conexão</b> antes de salvar. No primeiro computador, o
+sistema cria as tabelas e pede o primeiro usuário, que nasce administrador;
+nos outros, já abre a tela de login.</p>
+<p>A senha do banco fica guardada neste computador, legível por quem usa
+esta máquina. Por isso o usuário do banco é um só do sistema, e nunca o
+<code>postgres</code>.</p>
 
-<h3>4. Testar em cada computador</h3>
-<ol>
-<li>Aperte <b>Windows + E</b> para abrir o Explorador de Arquivos.</li>
-<li>Clique na barra de endereço, digite o caminho e aperte <b>Enter</b>.</li>
-<li>A pasta tem que abrir. Se pedir usuário e senha, entre com a conta que
-tem permissão e marque <b>Lembrar minhas credenciais</b>.</li>
-<li>Crie um arquivo de teste na pasta e apague em seguida. Se não deixar,
-falta permissão (passo 1).</li>
-</ol>
+<h3>5. Backup do servidor</h3>
+<p>Além do backup feito pelo programa, agende no servidor (Agendador de
+Tarefas, todo dia) uma cópia com o <code>pg_dump</code>, que vem junto com o
+PostgreSQL, e guarde-a fora do servidor:</p>
+<p><code>"C:\Program Files\PostgreSQL\15\bin\pg_dump.exe" -U controle_lucros -F c -f D:\Backups\controle_lucros.dump controle_lucros</code></p>
+<p>Para rodar sem pedir senha, a senha vai no arquivo
+<code>%APPDATA%\postgresql\pgpass.conf</code> da conta que roda a tarefa, no
+formato <code>localhost:5432:controle_lucros:controle_lucros:SENHA</code>.</p>
 
-<h3>5. Usar o caminho no sistema</h3>
-<p>Na instalação, ou na tela <b>Onde fica o banco de dados?</b>, quando a
-janela de escolher pasta abrir, <b>cole o caminho na barra de endereço</b>
-dela e confirme.</p>
+<h3>Se o programa não conectar</h3>
 <ul>
-<li><b>Primeiro computador:</b> <b>Criar um banco novo no servidor</b>.</li>
-<li><b>Todos os outros:</b> <b>Usar o banco que já está no servidor</b>, com
-<b>o mesmo caminho</b>.</li>
+<li><b>"não respondeu"</b>: o servidor está desligado, este computador está
+fora da rede, ou o firewall (passo 3) bloqueia a porta.</li>
+<li><b>"o PostgreSQL não atendeu"</b>: o serviço <b>postgresql-x64-15</b>
+está parado, ou a porta está errada.</li>
+<li><b>"não aceita conexões deste computador"</b>: falta a linha do
+<code>pg_hba.conf</code> (passo 3), ou o IP deste computador está fora da
+faixa dela.</li>
+<li><b>"recusou o usuário ou a senha"</b>: confira os dados do passo 4.</li>
+<li><b>"não pode criar tabelas"</b>: o banco foi criado sem o
+<b>OWNER</b> do passo 2. No psql, como <code>postgres</code>:
+<code>ALTER DATABASE controle_lucros OWNER TO controle_lucros;</code></li>
 </ul>
-
-<h3>E a letra de unidade (Z:)?</h3>
-<p>Evite. A letra é configurada por usuário: em outra conta do Windows ela
-pode não existir ou apontar para outro lugar, e o instalador (que roda como
-administrador) não a enxerga. Se você só conhece a letra, descubra o
-caminho verdadeiro: em <b>Este Computador</b> a unidade aparece como
-<i>ControleDeLucros (\\SRV-ESCRITORIO) (Z:)</i>; ou, no Prompt de Comando,
-<code>net use</code> lista cada letra com o seu caminho. Se mesmo assim a
-pasta for escolhida pela letra aqui no sistema, ele troca sozinho pelo
-caminho de rede.</p>
-
-<h3>Se aparecer "Não encontrei o banco de dados"</h3>
-<p>Teste o caminho como no passo 4. Não abriu: o servidor está desligado ou
-este computador está fora da rede. Abriu, mas não há
-<code>controle_lucros.db</code> dentro: o caminho escolhido é outro que não
-o dos demais computadores; use <b>Escolher outro banco</b> e aponte para o
-certo.</p>
 """
 
 TOPICOS: tuple[Topico, ...] = (
@@ -801,7 +801,7 @@ TOPICOS: tuple[Topico, ...] = (
     Topico("informe", "Informe de rendimentos", _INFORME),
     Topico("dashboard", "Dashboards", _DASHBOARD),
     Topico("sistema", "Usuários, log e backup", _SISTEMA),
-    Topico("sistema.servidor", "Caminho do servidor", _SERVIDOR),
+    Topico("sistema.servidor", "Servidor PostgreSQL", _SERVIDOR),
 )
 
 # Da tela aberta pro tópico que responde a dúvida dela. As chaves são as

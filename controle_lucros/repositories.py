@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import datetime as dt
 import re
-import sqlite3
 import unicodedata
 
+import psycopg
+
 from . import fiscal, sessao
+from .db import Conexao, Linha
 from .auth import gerar_hash_senha, senha_confere
 from .layout_importacao import LayoutImportacao, de_json, garantir_valido, limpar_colunas, para_json
 from .models import (
@@ -28,13 +30,13 @@ from .models import (
 )
 
 
-def _registrar_log(conn: sqlite3.Connection, acao: str, entidade: str, entidade_id: int | None, detalhes: str) -> None:
+def _registrar_log(conn: Conexao, acao: str, entidade: str, entidade_id: int | None, detalhes: str) -> None:
     """Grava uma linha de auditoria com o usuário da sessão atual — chamado
     de dentro das próprias funções de gravação, na mesma transação."""
     usuario = sessao.usuario_atual()
     conn.execute(
         """INSERT INTO log_atividade (usuario_id, usuario_nome, data_hora, acao, entidade, entidade_id, detalhes)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (%s, %s, %s, %s, %s, %s, %s)""",
         (
             usuario.id if usuario else None,
             usuario.nome if usuario else "Sistema",
@@ -58,29 +60,30 @@ def normalizar_documento(valor: str | None) -> str:
 # ---------------------------------------------------------------- Empresa --
 
 
-def listar_empresas(conn: sqlite3.Connection) -> list[Empresa]:
+def listar_empresas(conn: Conexao) -> list[Empresa]:
     rows = conn.execute("SELECT * FROM empresa ORDER BY nome").fetchall()
     return [Empresa(**dict(r)) for r in rows]
 
 
-def buscar_empresa(conn: sqlite3.Connection, empresa_id: int) -> Empresa | None:
-    row = conn.execute("SELECT * FROM empresa WHERE id=?", (empresa_id,)).fetchone()
+def buscar_empresa(conn: Conexao, empresa_id: int) -> Empresa | None:
+    row = conn.execute("SELECT * FROM empresa WHERE id=%s", (empresa_id,)).fetchone()
     return Empresa(**dict(row)) if row else None
 
 
-def salvar_empresa(conn: sqlite3.Connection, e: Empresa) -> int:
+def salvar_empresa(conn: Conexao, e: Empresa) -> int:
     if e.id is None:
         cur = conn.execute(
             """INSERT INTO empresa (numero_chamada, nome, cnpj, capital_social, quantidade_cotas)
-               VALUES (?, ?, ?, ?, ?)""",
+               VALUES (%s, %s, %s, %s, %s) RETURNING id""",
             (e.numero_chamada, e.nome, e.cnpj, e.capital_social, e.quantidade_cotas),
         )
-        _registrar_log(conn, "criar", "empresa", cur.lastrowid, f"{e.nome} (nº {e.numero_chamada})")
+        novo_id = cur.fetchone()[0]
+        _registrar_log(conn, "criar", "empresa", novo_id, f"{e.nome} (nº {e.numero_chamada})")
         conn.commit()
-        return cur.lastrowid
+        return novo_id
     conn.execute(
-        """UPDATE empresa SET numero_chamada=?, nome=?, cnpj=?, capital_social=?, quantidade_cotas=?
-           WHERE id=?""",
+        """UPDATE empresa SET numero_chamada=%s, nome=%s, cnpj=%s, capital_social=%s, quantidade_cotas=%s
+           WHERE id=%s""",
         (e.numero_chamada, e.nome, e.cnpj, e.capital_social, e.quantidade_cotas, e.id),
     )
     _registrar_log(conn, "atualizar", "empresa", e.id, f"{e.nome} (nº {e.numero_chamada})")
@@ -88,11 +91,11 @@ def salvar_empresa(conn: sqlite3.Connection, e: Empresa) -> int:
     return e.id
 
 
-def excluir_empresa(conn: sqlite3.Connection, empresa_id: int) -> None:
+def excluir_empresa(conn: Conexao, empresa_id: int) -> None:
     empresa = buscar_empresa(conn, empresa_id)
     try:
-        conn.execute("DELETE FROM empresa WHERE id=?", (empresa_id,))
-    except sqlite3.IntegrityError:
+        conn.execute("DELETE FROM empresa WHERE id=%s", (empresa_id,))
+    except psycopg.IntegrityError:
         raise ValueError(
             "Não é possível excluir esta empresa: há sócios vinculados, alterações contratuais, "
             "distribuições ou movimentações registradas para ela. Remova-os primeiro."
@@ -104,7 +107,7 @@ def excluir_empresa(conn: sqlite3.Connection, empresa_id: int) -> None:
 # ------------------------------------------------------------------ Socio --
 
 
-def listar_socios(conn: sqlite3.Connection) -> list[Socio]:
+def listar_socios(conn: Conexao) -> list[Socio]:
     rows = conn.execute("SELECT * FROM socio ORDER BY nome").fetchall()
     return [Socio(**dict(r)) for r in rows]
 
@@ -119,7 +122,7 @@ def chave_nome(valor: str | None) -> str:
 
 
 def socios_semelhantes(
-    conn: sqlite3.Connection, nome: str, documento: str = "", ignorar_id: int | None = None
+    conn: Conexao, nome: str, documento: str = "", ignorar_id: int | None = None
 ) -> list[tuple[Socio, str]]:
     """Sócios já cadastrados que podem ser a mesma pessoa que está sendo
     digitada, cada um com o motivo. Existe pra avisar ANTES de duplicar: um
@@ -152,31 +155,32 @@ def socios_semelhantes(
     return achados
 
 
-def salvar_socio(conn: sqlite3.Connection, s: Socio) -> int:
+def salvar_socio(conn: Conexao, s: Socio) -> int:
     cpf_normalizado = normalizar_documento(s.cpf)
     if cpf_normalizado:
-        outros = conn.execute("SELECT id, nome, cpf FROM socio WHERE id IS NOT ?", (s.id,)).fetchall()
+        outros = conn.execute("SELECT id, nome, cpf FROM socio WHERE id IS DISTINCT FROM %s", (s.id,)).fetchall()
         outro = next((o for o in outros if normalizar_documento(o["cpf"]) == cpf_normalizado), None)
         if outro is not None:
             raise ValueError(f'Já existe um sócio cadastrado com esse CPF/CNPJ: "{outro["nome"]}".')
     if s.id is None:
         cur = conn.execute(
-            "INSERT INTO socio (nome, cpf, tipo_pessoa) VALUES (?, ?, ?)", (s.nome, s.cpf, s.tipo_pessoa)
+            "INSERT INTO socio (nome, cpf, tipo_pessoa) VALUES (%s, %s, %s) RETURNING id", (s.nome, s.cpf, s.tipo_pessoa)
         )
-        _registrar_log(conn, "criar", "socio", cur.lastrowid, s.nome)
+        novo_id = cur.fetchone()[0]
+        _registrar_log(conn, "criar", "socio", novo_id, s.nome)
         conn.commit()
-        return cur.lastrowid
-    conn.execute("UPDATE socio SET nome=?, cpf=?, tipo_pessoa=? WHERE id=?", (s.nome, s.cpf, s.tipo_pessoa, s.id))
+        return novo_id
+    conn.execute("UPDATE socio SET nome=%s, cpf=%s, tipo_pessoa=%s WHERE id=%s", (s.nome, s.cpf, s.tipo_pessoa, s.id))
     _registrar_log(conn, "atualizar", "socio", s.id, s.nome)
     conn.commit()
     return s.id
 
 
-def excluir_socio(conn: sqlite3.Connection, socio_id: int) -> None:
-    socio = conn.execute("SELECT nome FROM socio WHERE id=?", (socio_id,)).fetchone()
+def excluir_socio(conn: Conexao, socio_id: int) -> None:
+    socio = conn.execute("SELECT nome FROM socio WHERE id=%s", (socio_id,)).fetchone()
     try:
-        conn.execute("DELETE FROM socio WHERE id=?", (socio_id,))
-    except sqlite3.IntegrityError:
+        conn.execute("DELETE FROM socio WHERE id=%s", (socio_id,))
+    except psycopg.IntegrityError:
         raise ValueError(
             "Não é possível excluir este sócio: há vínculos societários, distribuições ou movimentações "
             "registradas para ele. Remova-os primeiro."
@@ -188,32 +192,32 @@ def excluir_socio(conn: sqlite3.Connection, socio_id: int) -> None:
 # ------------------------------------------------------- AlteracaoContratual --
 
 
-def listar_alteracoes(conn: sqlite3.Connection, empresa_id: int) -> list[AlteracaoContratual]:
+def listar_alteracoes(conn: Conexao, empresa_id: int) -> list[AlteracaoContratual]:
     rows = conn.execute(
-        "SELECT * FROM alteracao_contratual WHERE empresa_id=? ORDER BY numero",
+        "SELECT * FROM alteracao_contratual WHERE empresa_id=%s ORDER BY numero",
         (empresa_id,),
     ).fetchall()
     return [AlteracaoContratual(**{**dict(r), "fechada": bool(r["fechada"])}) for r in rows]
 
 
-def buscar_alteracao(conn: sqlite3.Connection, alteracao_id: int) -> AlteracaoContratual | None:
+def buscar_alteracao(conn: Conexao, alteracao_id: int) -> AlteracaoContratual | None:
     row = conn.execute(
-        "SELECT * FROM alteracao_contratual WHERE id=?", (alteracao_id,)
+        "SELECT * FROM alteracao_contratual WHERE id=%s", (alteracao_id,)
     ).fetchone()
     if row is None:
         return None
     return AlteracaoContratual(**{**dict(row), "fechada": bool(row["fechada"])})
 
 
-def proximo_numero_alteracao(conn: sqlite3.Connection, empresa_id: int) -> int:
+def proximo_numero_alteracao(conn: Conexao, empresa_id: int) -> int:
     maior = conn.execute(
-        "SELECT MAX(numero) AS m FROM alteracao_contratual WHERE empresa_id=?",
+        "SELECT MAX(numero) AS m FROM alteracao_contratual WHERE empresa_id=%s",
         (empresa_id,),
     ).fetchone()["m"]
     return (maior or 0) + 1
 
 
-def estado_atual_empresa(conn: sqlite3.Connection, empresa_id: int) -> dict:
+def estado_atual_empresa(conn: Conexao, empresa_id: int) -> dict:
     """Snapshot vigente: da alteração contratual mais recente *por data*
     (não por número) — um registro retroativo (nº mais alto, mas com data
     efetiva anterior a uma alteração já existente) não pode virar o estado
@@ -223,7 +227,7 @@ def estado_atual_empresa(conn: sqlite3.Connection, empresa_id: int) -> dict:
     empresa-base."""
     ultima = conn.execute(
         """SELECT nome_empresa AS nome, capital_social, quantidade_cotas
-           FROM alteracao_contratual WHERE empresa_id=? ORDER BY date(data) DESC, numero DESC LIMIT 1""",
+           FROM alteracao_contratual WHERE empresa_id=%s ORDER BY data DESC, numero DESC LIMIT 1""",
         (empresa_id,),
     ).fetchone()
     if ultima is not None:
@@ -236,7 +240,7 @@ def estado_atual_empresa(conn: sqlite3.Connection, empresa_id: int) -> dict:
     }
 
 
-def salvar_alteracao(conn: sqlite3.Connection, a: AlteracaoContratual) -> int:
+def salvar_alteracao(conn: Conexao, a: AlteracaoContratual) -> int:
     if a.id is not None:
         existente = buscar_alteracao(conn, a.id)
         if existente is not None and existente.fechada:
@@ -246,17 +250,18 @@ def salvar_alteracao(conn: sqlite3.Connection, a: AlteracaoContratual) -> int:
         cur = conn.execute(
             """INSERT INTO alteracao_contratual
                (empresa_id, numero, data, nome_empresa, capital_social, quantidade_cotas, descricao, fechada)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 0)""",
+               VALUES (%s, %s, %s, %s, %s, %s, %s, 0) RETURNING id""",
             (a.empresa_id, a.numero, a.data, a.nome_empresa, a.capital_social, a.quantidade_cotas, a.descricao),
         )
+        novo_id = cur.fetchone()[0]
         _registrar_log(
-            conn, "criar", "alteracao_contratual", cur.lastrowid, f"Nº {a.numero} — {a.nome_empresa} — {a.descricao}"
+            conn, "criar", "alteracao_contratual", novo_id, f"Nº {a.numero} — {a.nome_empresa} — {a.descricao}"
         )
         conn.commit()
-        return cur.lastrowid
+        return novo_id
     conn.execute(
-        """UPDATE alteracao_contratual SET data=?, nome_empresa=?, capital_social=?,
-           quantidade_cotas=?, descricao=? WHERE id=?""",
+        """UPDATE alteracao_contratual SET data=%s, nome_empresa=%s, capital_social=%s,
+           quantidade_cotas=%s, descricao=%s WHERE id=%s""",
         (a.data, a.nome_empresa, a.capital_social, a.quantidade_cotas, a.descricao, a.id),
     )
     _registrar_log(
@@ -266,27 +271,27 @@ def salvar_alteracao(conn: sqlite3.Connection, a: AlteracaoContratual) -> int:
     return a.id
 
 
-def fechar_alteracao(conn: sqlite3.Connection, alteracao_id: int) -> None:
-    conn.execute("UPDATE alteracao_contratual SET fechada=1 WHERE id=?", (alteracao_id,))
+def fechar_alteracao(conn: Conexao, alteracao_id: int) -> None:
+    conn.execute("UPDATE alteracao_contratual SET fechada=1 WHERE id=%s", (alteracao_id,))
     _registrar_log(conn, "fechar", "alteracao_contratual", alteracao_id, "")
     conn.commit()
 
 
-def reabrir_alteracao(conn: sqlite3.Connection, alteracao_id: int) -> None:
-    conn.execute("UPDATE alteracao_contratual SET fechada=0 WHERE id=?", (alteracao_id,))
+def reabrir_alteracao(conn: Conexao, alteracao_id: int) -> None:
+    conn.execute("UPDATE alteracao_contratual SET fechada=0 WHERE id=%s", (alteracao_id,))
     _registrar_log(conn, "reabrir", "alteracao_contratual", alteracao_id, "")
     conn.commit()
 
 
-def excluir_alteracao(conn: sqlite3.Connection, alteracao_id: int) -> None:
+def excluir_alteracao(conn: Conexao, alteracao_id: int) -> None:
     existente = buscar_alteracao(conn, alteracao_id)
     if existente is not None and existente.fechada:
         raise ValueError("Esta alteração contratual está fechada. Destranque-a para excluir.")
     if existente is not None:
         _garantir_periodo_aberto(conn, existente.empresa_id, existente.data)
     try:
-        conn.execute("DELETE FROM alteracao_contratual WHERE id=?", (alteracao_id,))
-    except sqlite3.IntegrityError:
+        conn.execute("DELETE FROM alteracao_contratual WHERE id=%s", (alteracao_id,))
+    except psycopg.IntegrityError:
         raise ValueError(
             "Não é possível excluir esta alteração contratual: há vínculos societários (entrada ou saída "
             "de sócio) registrados nela. Remova esses movimentos primeiro."
@@ -298,43 +303,43 @@ def excluir_alteracao(conn: sqlite3.Connection, alteracao_id: int) -> None:
 # ------------------------------------------------------ Período de distribuição --
 
 
-def periodo_esta_fechado(conn: sqlite3.Connection, empresa_id: int, ano_base: int) -> bool:
+def periodo_esta_fechado(conn: Conexao, empresa_id: int, ano_base: int) -> bool:
     row = conn.execute(
-        "SELECT fechado FROM periodo_distribuicao WHERE empresa_id=? AND ano_base=?",
+        "SELECT fechado FROM periodo_distribuicao WHERE empresa_id=%s AND ano_base=%s",
         (empresa_id, ano_base),
     ).fetchone()
     return bool(row["fechado"]) if row else False
 
 
-def fechar_periodo(conn: sqlite3.Connection, empresa_id: int, ano_base: int) -> None:
+def fechar_periodo(conn: Conexao, empresa_id: int, ano_base: int) -> None:
     """Tranca todo dado ligado a esse ano/empresa — distribuição, pró-labore,
     IRRF, movimentações, e qualquer mudança de sócio ou cotas datada dentro
     do ano. Nada disso pode ser alterado enquanto o período não for
     destrancado de novo."""
     existente = conn.execute(
-        "SELECT id FROM periodo_distribuicao WHERE empresa_id=? AND ano_base=?", (empresa_id, ano_base)
+        "SELECT id FROM periodo_distribuicao WHERE empresa_id=%s AND ano_base=%s", (empresa_id, ano_base)
     ).fetchone()
     hoje = dt.date.today().isoformat()
     if existente is not None:
-        conn.execute("UPDATE periodo_distribuicao SET fechado=1, fechado_em=? WHERE id=?", (hoje, existente["id"]))
+        conn.execute("UPDATE periodo_distribuicao SET fechado=1, fechado_em=%s WHERE id=%s", (hoje, existente["id"]))
     else:
         conn.execute(
-            "INSERT INTO periodo_distribuicao (empresa_id, ano_base, fechado, fechado_em) VALUES (?, ?, 1, ?)",
+            "INSERT INTO periodo_distribuicao (empresa_id, ano_base, fechado, fechado_em) VALUES (%s, %s, 1, %s)",
             (empresa_id, ano_base, hoje),
         )
     _registrar_log(conn, "fechar", "periodo_distribuicao", empresa_id, f"Ano {ano_base}")
     conn.commit()
 
 
-def reabrir_periodo(conn: sqlite3.Connection, empresa_id: int, ano_base: int) -> None:
+def reabrir_periodo(conn: Conexao, empresa_id: int, ano_base: int) -> None:
     conn.execute(
-        "UPDATE periodo_distribuicao SET fechado=0 WHERE empresa_id=? AND ano_base=?", (empresa_id, ano_base)
+        "UPDATE periodo_distribuicao SET fechado=0 WHERE empresa_id=%s AND ano_base=%s", (empresa_id, ano_base)
     )
     _registrar_log(conn, "reabrir", "periodo_distribuicao", empresa_id, f"Ano {ano_base}")
     conn.commit()
 
 
-def _garantir_periodo_aberto(conn: sqlite3.Connection, empresa_id: int, data_ou_ano) -> None:
+def _garantir_periodo_aberto(conn: Conexao, empresa_id: int, data_ou_ano) -> None:
     """Barreira usada por toda função que grava algo datado — distribuição,
     movimentação, vínculo, alteração contratual. Aceita um ano (int) ou uma
     data ISO ("AAAA-MM-DD"), pra cada chamador poder passar o que já tem à
@@ -350,27 +355,27 @@ def _garantir_periodo_aberto(conn: sqlite3.Connection, empresa_id: int, data_ou_
 # -------------------------------------------------------- VinculoSocietario --
 
 
-def listar_vinculos_empresa(conn: sqlite3.Connection, empresa_id: int) -> list[VinculoSocietario]:
+def listar_vinculos_empresa(conn: Conexao, empresa_id: int) -> list[VinculoSocietario]:
     rows = conn.execute(
-        "SELECT * FROM vinculo_societario WHERE empresa_id=? ORDER BY data_entrada",
+        "SELECT * FROM vinculo_societario WHERE empresa_id=%s ORDER BY data_entrada",
         (empresa_id,),
     ).fetchall()
     return [VinculoSocietario(**dict(r)) for r in rows]
 
 
 def vinculos_movimentados_na_alteracao(
-    conn: sqlite3.Connection, alteracao_id: int
+    conn: Conexao, alteracao_id: int
 ) -> list[VinculoSocietario]:
     """Vínculos que entraram e/ou saíram nesta alteração contratual específica."""
     rows = conn.execute(
         """SELECT * FROM vinculo_societario
-           WHERE alteracao_entrada_id=? OR alteracao_saida_id=?""",
+           WHERE alteracao_entrada_id=%s OR alteracao_saida_id=%s""",
         (alteracao_id, alteracao_id),
     ).fetchall()
     return [VinculoSocietario(**dict(r)) for r in rows]
 
 
-def _garantir_alteracao_editavel(conn: sqlite3.Connection, alteracao_id: int | None) -> None:
+def _garantir_alteracao_editavel(conn: Conexao, alteracao_id: int | None) -> None:
     if alteracao_id is None:
         return
     alteracao = buscar_alteracao(conn, alteracao_id)
@@ -378,7 +383,7 @@ def _garantir_alteracao_editavel(conn: sqlite3.Connection, alteracao_id: int | N
         raise ValueError("A alteração contratual associada está fechada. Destranque-a para editar.")
 
 
-def salvar_vinculo(conn: sqlite3.Connection, v: VinculoSocietario) -> int:
+def salvar_vinculo(conn: Conexao, v: VinculoSocietario) -> int:
     if v.data_saida is not None and v.data_saida < v.data_entrada:
         raise ValueError("A data de saída não pode ser anterior à data de entrada.")
     _garantir_periodo_aberto(conn, v.empresa_id, v.data_entrada)
@@ -391,7 +396,7 @@ def salvar_vinculo(conn: sqlite3.Connection, v: VinculoSocietario) -> int:
             """INSERT INTO vinculo_societario
                (empresa_id, socio_id, percentual_capital, quantidade_cotas, data_entrada,
                 data_saida, alteracao_entrada_id, alteracao_saida_id, observacao)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
             (
                 v.empresa_id,
                 v.socio_id,
@@ -404,13 +409,14 @@ def salvar_vinculo(conn: sqlite3.Connection, v: VinculoSocietario) -> int:
                 v.observacao,
             ),
         )
-        _registrar_log(conn, "criar", "vinculo_societario", cur.lastrowid, _descricao_vinculo(conn, v))
+        novo_id = cur.fetchone()[0]
+        _registrar_log(conn, "criar", "vinculo_societario", novo_id, _descricao_vinculo(conn, v))
         conn.commit()
-        return cur.lastrowid
+        return novo_id
     conn.execute(
-        """UPDATE vinculo_societario SET empresa_id=?, socio_id=?, percentual_capital=?,
-           quantidade_cotas=?, data_entrada=?, data_saida=?, alteracao_entrada_id=?,
-           alteracao_saida_id=?, observacao=? WHERE id=?""",
+        """UPDATE vinculo_societario SET empresa_id=%s, socio_id=%s, percentual_capital=%s,
+           quantidade_cotas=%s, data_entrada=%s, data_saida=%s, alteracao_entrada_id=%s,
+           alteracao_saida_id=%s, observacao=%s WHERE id=%s""",
         (
             v.empresa_id,
             v.socio_id,
@@ -429,14 +435,14 @@ def salvar_vinculo(conn: sqlite3.Connection, v: VinculoSocietario) -> int:
     return v.id
 
 
-def _descricao_vinculo(conn: sqlite3.Connection, v: VinculoSocietario) -> str:
-    socio = conn.execute("SELECT nome FROM socio WHERE id=?", (v.socio_id,)).fetchone()
-    empresa = conn.execute("SELECT nome FROM empresa WHERE id=?", (v.empresa_id,)).fetchone()
+def _descricao_vinculo(conn: Conexao, v: VinculoSocietario) -> str:
+    socio = conn.execute("SELECT nome FROM socio WHERE id=%s", (v.socio_id,)).fetchone()
+    empresa = conn.execute("SELECT nome FROM empresa WHERE id=%s", (v.empresa_id,)).fetchone()
     return f"{socio['nome'] if socio else '?'} em {empresa['nome'] if empresa else '?'} ({v.percentual_capital:.4f}%)"
 
 
 def encerrar_vinculo(
-    conn: sqlite3.Connection, vinculo_id: int, data_saida: str, alteracao_saida_id: int | None
+    conn: Conexao, vinculo_id: int, data_saida: str, alteracao_saida_id: int | None
 ) -> None:
     """Fecha o vínculo vigente (preenche data_saida) sem apagar histórico."""
     vinculo = buscar_vinculo(conn, vinculo_id)
@@ -446,14 +452,14 @@ def encerrar_vinculo(
         _garantir_periodo_aberto(conn, vinculo.empresa_id, data_saida)
     _garantir_alteracao_editavel(conn, alteracao_saida_id)
     conn.execute(
-        "UPDATE vinculo_societario SET data_saida=?, alteracao_saida_id=? WHERE id=?",
+        "UPDATE vinculo_societario SET data_saida=%s, alteracao_saida_id=%s WHERE id=%s",
         (data_saida, alteracao_saida_id, vinculo_id),
     )
     _registrar_log(conn, "encerrar", "vinculo_societario", vinculo_id, f"Saída em {data_saida}")
     conn.commit()
 
 
-def excluir_vinculo(conn: sqlite3.Connection, vinculo_id: int) -> None:
+def excluir_vinculo(conn: Conexao, vinculo_id: int) -> None:
     vinculo = buscar_vinculo(conn, vinculo_id)
     if vinculo is not None:
         _garantir_periodo_aberto(conn, vinculo.empresa_id, vinculo.data_entrada)
@@ -461,20 +467,20 @@ def excluir_vinculo(conn: sqlite3.Connection, vinculo_id: int) -> None:
             _garantir_periodo_aberto(conn, vinculo.empresa_id, vinculo.data_saida)
         _garantir_alteracao_editavel(conn, vinculo.alteracao_entrada_id)
         _garantir_alteracao_editavel(conn, vinculo.alteracao_saida_id)
-    conn.execute("DELETE FROM vinculo_societario WHERE id=?", (vinculo_id,))
+    conn.execute("DELETE FROM vinculo_societario WHERE id=%s", (vinculo_id,))
     _registrar_log(conn, "excluir", "vinculo_societario", vinculo_id, "")
     conn.commit()
 
 
-def listar_vinculos_socio(conn: sqlite3.Connection, socio_id: int) -> list[VinculoSocietario]:
+def listar_vinculos_socio(conn: Conexao, socio_id: int) -> list[VinculoSocietario]:
     rows = conn.execute(
-        "SELECT * FROM vinculo_societario WHERE socio_id=? ORDER BY data_entrada",
+        "SELECT * FROM vinculo_societario WHERE socio_id=%s ORDER BY data_entrada",
         (socio_id,),
     ).fetchall()
     return [VinculoSocietario(**dict(r)) for r in rows]
 
 
-def valor_participacao(conn: sqlite3.Connection, vinculo: VinculoSocietario) -> float:
+def valor_participacao(conn: Conexao, vinculo: VinculoSocietario) -> float:
     """Valor atual da participação do sócio: cotas do vínculo × valor de cada
     cota hoje (capital social vigente da empresa / total de cotas vigente)."""
     estado = estado_atual_empresa(conn, vinculo.empresa_id)
@@ -485,7 +491,7 @@ def valor_participacao(conn: sqlite3.Connection, vinculo: VinculoSocietario) -> 
     return (vinculo.quantidade_cotas or 0) * valor_por_cota
 
 
-def _abrir_alteracao_automatica(conn: sqlite3.Connection, empresa_id: int, data: str, descricao: str) -> int:
+def _abrir_alteracao_automatica(conn: Conexao, empresa_id: int, data: str, descricao: str) -> int:
     """Cria uma alteração contratual já aberta, herdando nome/capital/cotas
     vigentes da empresa — usada quando o movimento de sócio é registrado pela
     aba de Sócios em vez de pela aba de Alterações contratuais."""
@@ -507,7 +513,7 @@ def _abrir_alteracao_automatica(conn: sqlite3.Connection, empresa_id: int, data:
 
 
 def associar_socio_a_empresa(
-    conn: sqlite3.Connection,
+    conn: Conexao,
     empresa_id: int,
     socio_id: int,
     percentual_capital: float,
@@ -536,7 +542,7 @@ def associar_socio_a_empresa(
 
 
 def encerrar_vinculo_registrando_alteracao(
-    conn: sqlite3.Connection,
+    conn: Conexao,
     vinculo: VinculoSocietario,
     data_saida: str,
     descricao: str = "Saída de sócio (registrado pela aba de Sócios)",
@@ -552,7 +558,7 @@ def encerrar_vinculo_registrando_alteracao(
 
 
 def vinculos_ativos_fora_da_lista(
-    conn: sqlite3.Connection, empresa_id: int, documentos: set[str], data_corte: str
+    conn: Conexao, empresa_id: int, documentos: set[str], data_corte: str
 ) -> list[tuple[VinculoSocietario, Socio]]:
     """Sócios ativos na empresa naquela data cujo documento não está em
     `documentos` — o quadro que o relatório traz.
@@ -573,7 +579,7 @@ def vinculos_ativos_fora_da_lista(
 
 
 def encerrar_vinculos_fora_da_lista(
-    conn: sqlite3.Connection,
+    conn: Conexao,
     empresa_id: int,
     documentos: set[str],
     data_saida: str,
@@ -602,7 +608,7 @@ def _participacao_mudou(vinculo: VinculoSocietario, linha: dict) -> bool:
 
 
 def _registrar_nova_participacao(
-    conn: sqlite3.Connection,
+    conn: Conexao,
     vinculo: VinculoSocietario,
     linha: dict,
     data_mudanca: str,
@@ -630,7 +636,7 @@ def _registrar_nova_participacao(
 
 
 def atualizar_cotas_vinculo(
-    conn: sqlite3.Connection,
+    conn: Conexao,
     vinculo: VinculoSocietario,
     novo_percentual: float,
     novas_cotas: float,
@@ -663,16 +669,16 @@ def atualizar_cotas_vinculo(
 # ---------------------------------------------------------- DistribuicaoLucro --
 
 
-def listar_distribuicoes(conn: sqlite3.Connection, empresa_id: int, ano_base: int) -> list[DistribuicaoLucro]:
+def listar_distribuicoes(conn: Conexao, empresa_id: int, ano_base: int) -> list[DistribuicaoLucro]:
     rows = conn.execute(
-        "SELECT * FROM distribuicao_lucro WHERE empresa_id=? AND ano_base=?",
+        "SELECT * FROM distribuicao_lucro WHERE empresa_id=%s AND ano_base=%s",
         (empresa_id, ano_base),
     ).fetchall()
     return [DistribuicaoLucro(**dict(r)) for r in rows]
 
 
 def salvar_distribuicao(
-    conn: sqlite3.Connection,
+    conn: Conexao,
     empresa_id: int,
     ano_base: int,
     socio_id: int,
@@ -684,17 +690,17 @@ def salvar_distribuicao(
     valores em vez de duplicar, porque é a deliberação vigente daquele ano."""
     _garantir_periodo_aberto(conn, empresa_id, ano_base)
     existente = conn.execute(
-        "SELECT id FROM distribuicao_lucro WHERE empresa_id=? AND ano_base=? AND socio_id=?",
+        "SELECT id FROM distribuicao_lucro WHERE empresa_id=%s AND ano_base=%s AND socio_id=%s",
         (empresa_id, ano_base, socio_id),
     ).fetchone()
-    socio = conn.execute("SELECT nome FROM socio WHERE id=?", (socio_id,)).fetchone()
+    socio = conn.execute("SELECT nome FROM socio WHERE id=%s", (socio_id,)).fetchone()
     detalhes = (
         f"{socio['nome'] if socio else '?'} — {ano_base} — R$ {valor_distribuido:.2f}"
         f" (pró-labore R$ {pro_labore:.2f}, IRRF R$ {irrf:.2f})"
     )
     if existente is not None:
         conn.execute(
-            "UPDATE distribuicao_lucro SET valor_distribuido=?, pro_labore=?, irrf=? WHERE id=?",
+            "UPDATE distribuicao_lucro SET valor_distribuido=%s, pro_labore=%s, irrf=%s WHERE id=%s",
             (valor_distribuido, pro_labore, irrf, existente["id"]),
         )
         _registrar_log(conn, "atualizar", "distribuicao_lucro", existente["id"], detalhes)
@@ -702,23 +708,24 @@ def salvar_distribuicao(
         return existente["id"]
     cur = conn.execute(
         """INSERT INTO distribuicao_lucro (empresa_id, ano_base, socio_id, valor_distribuido, pro_labore, irrf)
-           VALUES (?, ?, ?, ?, ?, ?)""",
+           VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
         (empresa_id, ano_base, socio_id, valor_distribuido, pro_labore, irrf),
     )
-    _registrar_log(conn, "criar", "distribuicao_lucro", cur.lastrowid, detalhes)
+    novo_id = cur.fetchone()[0]
+    _registrar_log(conn, "criar", "distribuicao_lucro", novo_id, detalhes)
     conn.commit()
-    return cur.lastrowid
+    return novo_id
 
 
-def total_distribuido_empresa_ano(conn: sqlite3.Connection, empresa_id: int, ano_base: int) -> float:
+def total_distribuido_empresa_ano(conn: Conexao, empresa_id: int, ano_base: int) -> float:
     row = conn.execute(
-        "SELECT COALESCE(SUM(valor_distribuido), 0) AS total FROM distribuicao_lucro WHERE empresa_id=? AND ano_base=?",
+        "SELECT COALESCE(SUM(valor_distribuido), 0) AS total FROM distribuicao_lucro WHERE empresa_id=%s AND ano_base=%s",
         (empresa_id, ano_base),
     ).fetchone()
     return row["total"]
 
 
-def estado_empresa_no_periodo(conn: sqlite3.Connection, empresa_id: int, ano_base: int) -> dict:
+def estado_empresa_no_periodo(conn: Conexao, empresa_id: int, ano_base: int) -> dict:
     """Capital social e total de cotas vigentes no início e no fim do ano (a
     partir do histórico de alterações contratuais) — dá pra saber se houve
     aumento/redução de capital, ou mudança na quantidade de cotas, naquele
@@ -727,8 +734,8 @@ def estado_empresa_no_periodo(conn: sqlite3.Connection, empresa_id: int, ano_bas
     def estado_ate(data_limite: str) -> tuple[float, float]:
         row = conn.execute(
             """SELECT capital_social, quantidade_cotas FROM alteracao_contratual
-               WHERE empresa_id=? AND date(data) <= date(?)
-               ORDER BY date(data) DESC, numero DESC LIMIT 1""",
+               WHERE empresa_id=%s AND data <= %s
+               ORDER BY data DESC, numero DESC LIMIT 1""",
             (empresa_id, data_limite),
         ).fetchone()
         if row is not None:
@@ -748,7 +755,7 @@ def estado_empresa_no_periodo(conn: sqlite3.Connection, empresa_id: int, ano_bas
     }
 
 
-def consistencia_cotas_socios(conn: sqlite3.Connection, empresa_id: int, ano_base: int) -> dict:
+def consistencia_cotas_socios(conn: Conexao, empresa_id: int, ano_base: int) -> dict:
     """Compara o total de cotas da empresa no fim do ano contra a soma das
     cotas dos sócios ainda ativos nessa data. Se não bater, o capital/cotas
     da empresa mudou (por alteração contratual) mas ninguém redistribuiu as
@@ -758,8 +765,8 @@ def consistencia_cotas_socios(conn: sqlite3.Connection, empresa_id: int, ano_bas
 
     row = conn.execute(
         """SELECT COALESCE(SUM(quantidade_cotas), 0) AS total FROM vinculo_societario
-           WHERE empresa_id=? AND date(data_entrada) <= date(?)
-             AND (data_saida IS NULL OR date(data_saida) > date(?))""",
+           WHERE empresa_id=%s AND data_entrada <= %s
+             AND (data_saida IS NULL OR data_saida > %s)""",
         (empresa_id, fim_ano, fim_ano),
     ).fetchone()
     soma_socios = row["total"]
@@ -771,15 +778,15 @@ def consistencia_cotas_socios(conn: sqlite3.Connection, empresa_id: int, ano_bas
     }
 
 
-def consistencia_percentual_socios(conn: sqlite3.Connection, empresa_id: int, ano_base: int) -> dict:
+def consistencia_percentual_socios(conn: Conexao, empresa_id: int, ano_base: int) -> dict:
     """A soma dos percentuais de capital dos sócios ativos deveria fechar em
     100%. Se não fechar, tem sócio faltando, sobrando, ou percentual
     cadastrado errado — vale avisar antes de fechar a distribuição do ano."""
     fim_ano = f"{ano_base}-12-31"
     row = conn.execute(
         """SELECT COALESCE(SUM(percentual_capital), 0) AS total FROM vinculo_societario
-           WHERE empresa_id=? AND date(data_entrada) <= date(?)
-             AND (data_saida IS NULL OR date(data_saida) > date(?))""",
+           WHERE empresa_id=%s AND data_entrada <= %s
+             AND (data_saida IS NULL OR data_saida > %s)""",
         (empresa_id, fim_ano, fim_ano),
     ).fetchone()
     soma_percentual = row["total"]
@@ -790,8 +797,8 @@ def consistencia_percentual_socios(conn: sqlite3.Connection, empresa_id: int, an
     }
 
 
-def buscar_vinculo(conn: sqlite3.Connection, vinculo_id: int) -> VinculoSocietario | None:
-    row = conn.execute("SELECT * FROM vinculo_societario WHERE id=?", (vinculo_id,)).fetchone()
+def buscar_vinculo(conn: Conexao, vinculo_id: int) -> VinculoSocietario | None:
+    row = conn.execute("SELECT * FROM vinculo_societario WHERE id=%s", (vinculo_id,)).fetchone()
     return VinculoSocietario(**dict(row)) if row else None
 
 
@@ -799,7 +806,7 @@ def buscar_vinculo(conn: sqlite3.Connection, vinculo_id: int) -> VinculoSocietar
 
 
 def listar_movimentacoes(
-    conn: sqlite3.Connection, empresa_id: int, socio_id: int, ano_base: int, tipo: str | None = None
+    conn: Conexao, empresa_id: int, socio_id: int, ano_base: int, tipo: str | None = None
 ) -> list[Movimentacao]:
     """tipo=None lista todos os 4 tipos juntos (empréstimo nos dois sentidos,
     adiantamento de lucro, devolução de capital) — pensado pra caber numa
@@ -807,14 +814,14 @@ def listar_movimentacoes(
     if tipo is None:
         rows = conn.execute(
             """SELECT * FROM movimentacao
-               WHERE empresa_id=? AND socio_id=? AND strftime('%Y', data)=?
+               WHERE empresa_id=%s AND socio_id=%s AND left(data, 4)=%s
                ORDER BY data""",
             (empresa_id, socio_id, str(ano_base)),
         ).fetchall()
     else:
         rows = conn.execute(
             """SELECT * FROM movimentacao
-               WHERE empresa_id=? AND socio_id=? AND tipo=? AND strftime('%Y', data)=?
+               WHERE empresa_id=%s AND socio_id=%s AND tipo=%s AND left(data, 4)=%s
                ORDER BY data""",
             (empresa_id, socio_id, tipo, str(ano_base)),
         ).fetchall()
@@ -822,30 +829,31 @@ def listar_movimentacoes(
 
 
 def soma_movimentacoes(
-    conn: sqlite3.Connection, empresa_id: int, socio_id: int, ano_base: int, tipo: str
+    conn: Conexao, empresa_id: int, socio_id: int, ano_base: int, tipo: str
 ) -> float:
     row = conn.execute(
         """SELECT COALESCE(SUM(valor), 0) AS total FROM movimentacao
-           WHERE empresa_id=? AND socio_id=? AND tipo=? AND strftime('%Y', data)=?""",
+           WHERE empresa_id=%s AND socio_id=%s AND tipo=%s AND left(data, 4)=%s""",
         (empresa_id, socio_id, tipo, str(ano_base)),
     ).fetchone()
     return row["total"]
 
 
-def salvar_movimentacao(conn: sqlite3.Connection, m: Movimentacao) -> int:
+def salvar_movimentacao(conn: Conexao, m: Movimentacao) -> int:
     _garantir_periodo_aberto(conn, m.empresa_id, m.data)
-    socio = conn.execute("SELECT nome FROM socio WHERE id=?", (m.socio_id,)).fetchone()
+    socio = conn.execute("SELECT nome FROM socio WHERE id=%s", (m.socio_id,)).fetchone()
     detalhes = f"{TIPOS_MOVIMENTACAO_LABEL.get(m.tipo, m.tipo)} — {socio['nome'] if socio else '?'} — R$ {m.valor:.2f} — {m.data}"
     if m.id is None:
         cur = conn.execute(
-            "INSERT INTO movimentacao (empresa_id, socio_id, tipo, valor, data) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO movimentacao (empresa_id, socio_id, tipo, valor, data) VALUES (%s, %s, %s, %s, %s) RETURNING id",
             (m.empresa_id, m.socio_id, m.tipo, m.valor, m.data),
         )
-        _registrar_log(conn, "criar", "movimentacao", cur.lastrowid, detalhes)
+        novo_id = cur.fetchone()[0]
+        _registrar_log(conn, "criar", "movimentacao", novo_id, detalhes)
         conn.commit()
-        return cur.lastrowid
+        return novo_id
     conn.execute(
-        "UPDATE movimentacao SET empresa_id=?, socio_id=?, tipo=?, valor=?, data=? WHERE id=?",
+        "UPDATE movimentacao SET empresa_id=%s, socio_id=%s, tipo=%s, valor=%s, data=%s WHERE id=%s",
         (m.empresa_id, m.socio_id, m.tipo, m.valor, m.data, m.id),
     )
     _registrar_log(conn, "atualizar", "movimentacao", m.id, detalhes)
@@ -853,13 +861,13 @@ def salvar_movimentacao(conn: sqlite3.Connection, m: Movimentacao) -> int:
     return m.id
 
 
-def excluir_movimentacao(conn: sqlite3.Connection, movimentacao_id: int) -> None:
+def excluir_movimentacao(conn: Conexao, movimentacao_id: int) -> None:
     existente = conn.execute(
-        "SELECT empresa_id, data FROM movimentacao WHERE id=?", (movimentacao_id,)
+        "SELECT empresa_id, data FROM movimentacao WHERE id=%s", (movimentacao_id,)
     ).fetchone()
     if existente is not None:
         _garantir_periodo_aberto(conn, existente["empresa_id"], existente["data"])
-    conn.execute("DELETE FROM movimentacao WHERE id=?", (movimentacao_id,))
+    conn.execute("DELETE FROM movimentacao WHERE id=%s", (movimentacao_id,))
     _registrar_log(conn, "excluir", "movimentacao", movimentacao_id, "")
     conn.commit()
 
@@ -867,7 +875,7 @@ def excluir_movimentacao(conn: sqlite3.Connection, movimentacao_id: int) -> None
 # --------------------------------------------------- Panorama de distribuição --
 
 
-def _inicio_do_vinculo_continuo(todos: list[sqlite3.Row], vinculo_atual: sqlite3.Row) -> str:
+def _inicio_do_vinculo_continuo(todos: list[Linha], vinculo_atual: Linha) -> str:
     """Anda pra trás nos segmentos do vínculo até achar onde a passagem
     *atual* realmente começou. Uma atualização de cotas fecha e reabre o
     vínculo no mesmo dia (data_saida do segmento anterior == data_entrada do
@@ -891,7 +899,7 @@ def _inicio_do_vinculo_continuo(todos: list[sqlite3.Row], vinculo_atual: sqlite3
         atual = anterior
 
 
-def _saida_anterior_ao_vinculo_continuo(todos: list[sqlite3.Row], primeira_entrada: str) -> str | None:
+def _saida_anterior_ao_vinculo_continuo(todos: list[Linha], primeira_entrada: str) -> str | None:
     """Se o sócio já tinha saído de vez antes de reentrar (a passagem atual
     começou em primeira_entrada, sem ligação contígua com nada antes), acha
     a data dessa saída anterior — é o outro lado do mesmo evento de
@@ -903,7 +911,7 @@ def _saida_anterior_ao_vinculo_continuo(todos: list[sqlite3.Row], primeira_entra
     return max(anteriores, key=lambda v: v["data_saida"])["data_saida"]
 
 
-def panorama_distribuicao_anual(conn: sqlite3.Connection, empresa_id: int, ano_base: int) -> list[dict]:
+def panorama_distribuicao_anual(conn: Conexao, empresa_id: int, ano_base: int) -> list[dict]:
     """Uma linha por sócio (não por segmento de vínculo) que teve alguma
     participação no ano: cotas/percentual vigentes ao final do ano (ou no
     momento em que saiu), valor e % distribuído, empréstimo recebido, e se
@@ -919,8 +927,8 @@ def panorama_distribuicao_anual(conn: sqlite3.Connection, empresa_id: int, ano_b
 
     socios_no_ano = conn.execute(
         """SELECT DISTINCT socio_id FROM vinculo_societario
-           WHERE empresa_id=? AND date(data_entrada) <= date(?)
-             AND (data_saida IS NULL OR date(data_saida) >= date(?))""",
+           WHERE empresa_id=%s AND data_entrada <= %s
+             AND (data_saida IS NULL OR data_saida >= %s)""",
         (empresa_id, fim, inicio),
     ).fetchall()
 
@@ -933,7 +941,7 @@ def panorama_distribuicao_anual(conn: sqlite3.Connection, empresa_id: int, ano_b
     for row in socios_no_ano:
         socio_id = row["socio_id"]
         todos = conn.execute(
-            "SELECT * FROM vinculo_societario WHERE empresa_id=? AND socio_id=? ORDER BY date(data_entrada)",
+            "SELECT * FROM vinculo_societario WHERE empresa_id=%s AND socio_id=%s ORDER BY data_entrada",
             (empresa_id, socio_id),
         ).fetchall()
 
@@ -1017,36 +1025,36 @@ def panorama_distribuicao_anual(conn: sqlite3.Connection, empresa_id: int, ano_b
 
 
 def listar_distribuicoes_trimestrais(
-    conn: sqlite3.Connection, empresa_id: int, ano_base: int, trimestre: int | None = None
+    conn: Conexao, empresa_id: int, ano_base: int, trimestre: int | None = None
 ) -> list[DistribuicaoTrimestral]:
     """trimestre=None traz o ano inteiro — é assim que se soma o acumulado."""
     if trimestre is None:
         rows = conn.execute(
-            """SELECT * FROM distribuicao_trimestral WHERE empresa_id=? AND ano_base=?
+            """SELECT * FROM distribuicao_trimestral WHERE empresa_id=%s AND ano_base=%s
                ORDER BY trimestre""",
             (empresa_id, ano_base),
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT * FROM distribuicao_trimestral WHERE empresa_id=? AND ano_base=? AND trimestre=?",
+            "SELECT * FROM distribuicao_trimestral WHERE empresa_id=%s AND ano_base=%s AND trimestre=%s",
             (empresa_id, ano_base, trimestre),
         ).fetchall()
     return [DistribuicaoTrimestral(**dict(r)) for r in rows]
 
 
-def trimestres_lancados(conn: sqlite3.Connection, empresa_id: int, ano_base: int) -> list[int]:
+def trimestres_lancados(conn: Conexao, empresa_id: int, ano_base: int) -> list[int]:
     """Quais trimestres do ano já têm algum lançamento — é o que diz se esta
     empresa usa controle trimestral e até onde o acumulado já foi."""
     rows = conn.execute(
         """SELECT DISTINCT trimestre FROM distribuicao_trimestral
-           WHERE empresa_id=? AND ano_base=? ORDER BY trimestre""",
+           WHERE empresa_id=%s AND ano_base=%s ORDER BY trimestre""",
         (empresa_id, ano_base),
     ).fetchall()
     return [r["trimestre"] for r in rows]
 
 
 def acumulado_trimestral(
-    conn: sqlite3.Connection, empresa_id: int, ano_base: int, ate_trimestre: int | None = None
+    conn: Conexao, empresa_id: int, ano_base: int, ate_trimestre: int | None = None
 ) -> dict[int, dict]:
     """Soma dos trimestres por sócio, {socio_id: {valor_distribuido, pro_labore,
     irrf}}. ate_trimestre limita o acumulado (o 2º trimestre mostra 1º + 2º)."""
@@ -1057,7 +1065,7 @@ def acumulado_trimestral(
                   COALESCE(SUM(pro_labore), 0) AS pro_labore,
                   COALESCE(SUM(irrf), 0) AS irrf
            FROM distribuicao_trimestral
-           WHERE empresa_id=? AND ano_base=? AND trimestre <= ?
+           WHERE empresa_id=%s AND ano_base=%s AND trimestre <= %s
            GROUP BY socio_id""",
         (empresa_id, ano_base, limite),
     ).fetchall()
@@ -1072,7 +1080,7 @@ def acumulado_trimestral(
 
 
 def salvar_distribuicao_trimestral(
-    conn: sqlite3.Connection,
+    conn: Conexao,
     empresa_id: int,
     ano_base: int,
     trimestre: int,
@@ -1094,10 +1102,10 @@ def salvar_distribuicao_trimestral(
 
     existente = conn.execute(
         """SELECT id FROM distribuicao_trimestral
-           WHERE empresa_id=? AND ano_base=? AND trimestre=? AND socio_id=?""",
+           WHERE empresa_id=%s AND ano_base=%s AND trimestre=%s AND socio_id=%s""",
         (empresa_id, ano_base, trimestre, socio_id),
     ).fetchone()
-    socio = conn.execute("SELECT nome FROM socio WHERE id=?", (socio_id,)).fetchone()
+    socio = conn.execute("SELECT nome FROM socio WHERE id=%s", (socio_id,)).fetchone()
     detalhes = (
         f"{socio['nome'] if socio else '?'} — {trimestre}º trimestre de {ano_base} — "
         f"R$ {valor_distribuido:.2f} (pró-labore R$ {pro_labore:.2f}, IRRF R$ {irrf:.2f})"
@@ -1105,8 +1113,8 @@ def salvar_distribuicao_trimestral(
 
     if existente is not None:
         conn.execute(
-            """UPDATE distribuicao_trimestral SET valor_distribuido=?, pro_labore=?, irrf=?
-               WHERE id=?""",
+            """UPDATE distribuicao_trimestral SET valor_distribuido=%s, pro_labore=%s, irrf=%s
+               WHERE id=%s""",
             (valor_distribuido, pro_labore, irrf, existente["id"]),
         )
         _registrar_log(conn, "atualizar", "distribuicao_trimestral", existente["id"], detalhes)
@@ -1115,25 +1123,26 @@ def salvar_distribuicao_trimestral(
         cur = conn.execute(
             """INSERT INTO distribuicao_trimestral
                (empresa_id, ano_base, trimestre, socio_id, valor_distribuido, pro_labore, irrf)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
             (empresa_id, ano_base, trimestre, socio_id, valor_distribuido, pro_labore, irrf),
         )
-        _registrar_log(conn, "criar", "distribuicao_trimestral", cur.lastrowid, detalhes)
-        registro_id = cur.lastrowid
+        novo_id = cur.fetchone()[0]
+        _registrar_log(conn, "criar", "distribuicao_trimestral", novo_id, detalhes)
+        registro_id = novo_id
     conn.commit()
 
     _refletir_trimestres_no_anual(conn, empresa_id, ano_base, socio_id)
     return registro_id
 
 
-def excluir_distribuicao_trimestral(conn: sqlite3.Connection, registro_id: int) -> None:
+def excluir_distribuicao_trimestral(conn: Conexao, registro_id: int) -> None:
     registro = conn.execute(
-        "SELECT * FROM distribuicao_trimestral WHERE id=?", (registro_id,)
+        "SELECT * FROM distribuicao_trimestral WHERE id=%s", (registro_id,)
     ).fetchone()
     if registro is None:
         return
     _garantir_periodo_aberto(conn, registro["empresa_id"], registro["ano_base"])
-    conn.execute("DELETE FROM distribuicao_trimestral WHERE id=?", (registro_id,))
+    conn.execute("DELETE FROM distribuicao_trimestral WHERE id=%s", (registro_id,))
     _registrar_log(
         conn,
         "excluir",
@@ -1146,7 +1155,7 @@ def excluir_distribuicao_trimestral(conn: sqlite3.Connection, registro_id: int) 
 
 
 def _refletir_trimestres_no_anual(
-    conn: sqlite3.Connection, empresa_id: int, ano_base: int, socio_id: int
+    conn: Conexao, empresa_id: int, ano_base: int, socio_id: int
 ) -> None:
     """Escreve a soma dos trimestres do sócio na distribuição anual. Quando o
     último trimestre do sócio é excluído, a soma vira zero e o anual zera
@@ -1167,7 +1176,7 @@ def _refletir_trimestres_no_anual(
 
 
 def panorama_distribuicao_trimestral(
-    conn: sqlite3.Connection, empresa_id: int, ano_base: int, trimestre: int
+    conn: Conexao, empresa_id: int, ano_base: int, trimestre: int
 ) -> list[dict]:
     """Uma linha por sócio que esteve na sociedade em algum momento DAQUELE
     trimestre — quem saiu no 1º não aparece no 4º. Cada linha traz o que foi
@@ -1178,9 +1187,9 @@ def panorama_distribuicao_trimestral(
     vinculos = conn.execute(
         """SELECT socio_id, percentual_capital, quantidade_cotas, data_entrada, data_saida
            FROM vinculo_societario
-           WHERE empresa_id=? AND date(data_entrada) <= date(?)
-             AND (data_saida IS NULL OR date(data_saida) >= date(?))
-           ORDER BY date(data_entrada)""",
+           WHERE empresa_id=%s AND data_entrada <= %s
+             AND (data_saida IS NULL OR data_saida >= %s)
+           ORDER BY data_entrada""",
         (empresa_id, fim, inicio),
     ).fetchall()
 
@@ -1219,11 +1228,11 @@ def panorama_distribuicao_trimestral(
 
 
 def total_distribuido_trimestre(
-    conn: sqlite3.Connection, empresa_id: int, ano_base: int, trimestre: int
+    conn: Conexao, empresa_id: int, ano_base: int, trimestre: int
 ) -> float:
     row = conn.execute(
         """SELECT COALESCE(SUM(valor_distribuido), 0) AS total FROM distribuicao_trimestral
-           WHERE empresa_id=? AND ano_base=? AND trimestre=?""",
+           WHERE empresa_id=%s AND ano_base=%s AND trimestre=%s""",
         (empresa_id, ano_base, trimestre),
     ).fetchone()
     return row["total"]
@@ -1232,7 +1241,7 @@ def total_distribuido_trimestre(
 # ---------------------------------------------------- Importação em massa (cadastro) --
 
 
-def preparar_importacao_cadastro(conn: sqlite3.Connection, linhas: list[dict]) -> dict:
+def preparar_importacao_cadastro(conn: Conexao, linhas: list[dict]) -> dict:
     """Casa cada linha da planilha de cadastro em massa (empresa + sócio +
     vínculo) contra os cadastros já existentes. Empresa é casada por nº de
     da empresa, CNPJ ou nome exato — baixo risco de duplicata, resolve sozinha
@@ -1321,7 +1330,7 @@ def preparar_importacao_cadastro(conn: sqlite3.Connection, linhas: list[dict]) -
 
 
 def aplicar_importacao_cadastro(
-    conn: sqlite3.Connection,
+    conn: Conexao,
     linhas_resolvidas: list[dict],
     progresso=None,
     *,
@@ -1510,7 +1519,7 @@ def aplicar_importacao_cadastro(
 CLASSIFICACOES = ("proporcional", "desproporcional", "socio_sem_distribuicao", "empresa_sem_distribuicao")
 
 
-def anos_disponiveis(conn: sqlite3.Connection) -> list[int]:
+def anos_disponiveis(conn: Conexao) -> list[int]:
     """Anos com algum lançamento de distribuição — usado pra sugerir o
     período no seletor do dashboard. Nunca retorna vazio: sem nenhum
     lançamento ainda, sugere o ano corrente."""
@@ -1532,7 +1541,7 @@ def _classificar_linha(linha: dict, total_distribuido_empresa: float, tolerancia
 
 
 def linhas_classificadas_empresa_ano(
-    conn: sqlite3.Connection, empresa_id: int, ano_base: int, tolerancia: float
+    conn: Conexao, empresa_id: int, ano_base: int, tolerancia: float
 ) -> list[dict]:
     """panorama_distribuicao_anual + rótulo de classificação (proporcional /
     desproporcional / sócio sem distribuição / empresa sem distribuição)."""
@@ -1542,7 +1551,7 @@ def linhas_classificadas_empresa_ano(
 
 
 def analise_empresa_periodo(
-    conn: sqlite3.Connection, empresa_id: int, ano_de: int, ano_ate: int, tolerancia: float
+    conn: Conexao, empresa_id: int, ano_de: int, ano_ate: int, tolerancia: float
 ) -> list[dict]:
     """Linhas classificadas de uma empresa, ano a ano, num intervalo."""
     resultado = []
@@ -1551,7 +1560,7 @@ def analise_empresa_periodo(
     return resultado
 
 
-def visao_geral(conn: sqlite3.Connection, ano_de: int, ano_ate: int, tolerancia: float) -> dict:
+def visao_geral(conn: Conexao, ano_de: int, ano_ate: int, tolerancia: float) -> dict:
     """Panorama de todas as empresas no período: quanto foi distribuído
     proporcional/desproporcionalmente, quanto foi emprestado, e quais
     empresas não distribuíram nada no período."""
@@ -1599,44 +1608,45 @@ def visao_geral(conn: sqlite3.Connection, ano_de: int, ano_ate: int, tolerancia:
 # --------------------------------------------------------------- Usuario --
 
 
-def _usuario_de_linha(row: sqlite3.Row) -> Usuario:
+def _usuario_de_linha(row: Linha) -> Usuario:
     dados = dict(row)
     dados["admin"] = bool(dados["admin"])
     dados["ativo"] = bool(dados["ativo"])
     return Usuario(**dados)
 
 
-def existe_algum_usuario(conn: sqlite3.Connection) -> bool:
+def existe_algum_usuario(conn: Conexao) -> bool:
     return conn.execute("SELECT 1 FROM usuario LIMIT 1").fetchone() is not None
 
 
-def listar_usuarios(conn: sqlite3.Connection) -> list[Usuario]:
+def listar_usuarios(conn: Conexao) -> list[Usuario]:
     rows = conn.execute("SELECT * FROM usuario ORDER BY nome").fetchall()
     return [_usuario_de_linha(r) for r in rows]
 
 
-def buscar_usuario_por_login(conn: sqlite3.Connection, login: str) -> Usuario | None:
-    row = conn.execute("SELECT * FROM usuario WHERE login=?", (login.strip().lower(),)).fetchone()
+def buscar_usuario_por_login(conn: Conexao, login: str) -> Usuario | None:
+    row = conn.execute("SELECT * FROM usuario WHERE login=%s", (login.strip().lower(),)).fetchone()
     return _usuario_de_linha(row) if row else None
 
 
 def criar_usuario(
-    conn: sqlite3.Connection, nome: str, login: str, senha: str, admin: bool = False
+    conn: Conexao, nome: str, login: str, senha: str, admin: bool = False
 ) -> int:
     if buscar_usuario_por_login(conn, login) is not None:
         raise ValueError(f'Já existe um usuário com o login "{login}".')
     senha_hash, senha_salt = gerar_hash_senha(senha)
     cur = conn.execute(
         """INSERT INTO usuario (nome, login, senha_hash, senha_salt, admin, ativo, criado_em)
-           VALUES (?, ?, ?, ?, ?, 1, ?)""",
+           VALUES (%s, %s, %s, %s, %s, 1, %s) RETURNING id""",
         (nome, login.strip().lower(), senha_hash, senha_salt, int(admin), dt.date.today().isoformat()),
     )
-    _registrar_log(conn, "criar", "usuario", cur.lastrowid, f"{nome} ({login})")
+    novo_id = cur.fetchone()[0]
+    _registrar_log(conn, "criar", "usuario", novo_id, f"{nome} ({login})")
     conn.commit()
-    return cur.lastrowid
+    return novo_id
 
 
-def autenticar(conn: sqlite3.Connection, login: str, senha: str) -> Usuario | None:
+def autenticar(conn: Conexao, login: str, senha: str) -> Usuario | None:
     usuario = buscar_usuario_por_login(conn, login)
     if usuario is None or not usuario.ativo:
         return None
@@ -1645,27 +1655,27 @@ def autenticar(conn: sqlite3.Connection, login: str, senha: str) -> Usuario | No
     return usuario
 
 
-def atualizar_usuario(conn: sqlite3.Connection, usuario_id: int, nome: str, login: str, admin: bool) -> None:
+def atualizar_usuario(conn: Conexao, usuario_id: int, nome: str, login: str, admin: bool) -> None:
     existente = buscar_usuario_por_login(conn, login)
     if existente is not None and existente.id != usuario_id:
         raise ValueError(f'Já existe um usuário com o login "{login}".')
     conn.execute(
-        "UPDATE usuario SET nome=?, login=?, admin=? WHERE id=?",
+        "UPDATE usuario SET nome=%s, login=%s, admin=%s WHERE id=%s",
         (nome, login.strip().lower(), int(admin), usuario_id),
     )
     _registrar_log(conn, "atualizar", "usuario", usuario_id, f"{nome} ({login})")
     conn.commit()
 
 
-def definir_ativo(conn: sqlite3.Connection, usuario_id: int, ativo: bool) -> None:
-    conn.execute("UPDATE usuario SET ativo=? WHERE id=?", (int(ativo), usuario_id))
+def definir_ativo(conn: Conexao, usuario_id: int, ativo: bool) -> None:
+    conn.execute("UPDATE usuario SET ativo=%s WHERE id=%s", (int(ativo), usuario_id))
     _registrar_log(conn, "ativar" if ativo else "desativar", "usuario", usuario_id, "")
     conn.commit()
 
 
-def alterar_senha(conn: sqlite3.Connection, usuario_id: int, nova_senha: str) -> None:
+def alterar_senha(conn: Conexao, usuario_id: int, nova_senha: str) -> None:
     senha_hash, senha_salt = gerar_hash_senha(nova_senha)
-    conn.execute("UPDATE usuario SET senha_hash=?, senha_salt=? WHERE id=?", (senha_hash, senha_salt, usuario_id))
+    conn.execute("UPDATE usuario SET senha_hash=%s, senha_salt=%s WHERE id=%s", (senha_hash, senha_salt, usuario_id))
     _registrar_log(conn, "trocar_senha", "usuario", usuario_id, "")
     conn.commit()
 
@@ -1673,12 +1683,12 @@ def alterar_senha(conn: sqlite3.Connection, usuario_id: int, nova_senha: str) ->
 # ---------------------------------------------------------- LogAtividade --
 
 
-def _log_de_linha(row: sqlite3.Row) -> LogAtividade:
+def _log_de_linha(row: Linha) -> LogAtividade:
     return LogAtividade(**dict(row))
 
 
 def listar_log_atividade(
-    conn: sqlite3.Connection,
+    conn: Conexao,
     data_de: str | None = None,
     data_ate: str | None = None,
     usuario_id: int | None = None,
@@ -1687,19 +1697,19 @@ def listar_log_atividade(
     condicoes = []
     parametros: list = []
     if data_de:
-        condicoes.append("date(data_hora) >= date(?)")
+        condicoes.append("left(data_hora, 10) >= %s")
         parametros.append(data_de)
     if data_ate:
-        condicoes.append("date(data_hora) <= date(?)")
+        condicoes.append("left(data_hora, 10) <= %s")
         parametros.append(data_ate)
     if usuario_id is not None:
-        condicoes.append("usuario_id = ?")
+        condicoes.append("usuario_id = %s")
         parametros.append(usuario_id)
 
     sql = "SELECT * FROM log_atividade"
     if condicoes:
         sql += " WHERE " + " AND ".join(condicoes)
-    sql += " ORDER BY data_hora DESC, id DESC LIMIT ?"
+    sql += " ORDER BY data_hora DESC, id DESC LIMIT %s"
     parametros.append(limite)
 
     rows = conn.execute(sql, parametros).fetchall()
@@ -1709,7 +1719,7 @@ def listar_log_atividade(
 # ------------------------------------------------- Informe de rendimentos --
 
 
-def empresas_do_socio_no_ano(conn: sqlite3.Connection, socio_id: int, ano_base: int) -> list[Empresa]:
+def empresas_do_socio_no_ano(conn: Conexao, socio_id: int, ano_base: int) -> list[Empresa]:
     """Empresas que foram fonte pagadora desse sócio no ano — uma empresa por
     informe, porque cada uma emite o seu próprio comprovante com o seu CNPJ.
 
@@ -1728,17 +1738,17 @@ def empresas_do_socio_no_ano(conn: sqlite3.Connection, socio_id: int, ano_base: 
         """SELECT DISTINCT e.* FROM empresa e
            WHERE e.id IN (
                SELECT empresa_id FROM vinculo_societario
-               WHERE socio_id = ? AND data_entrada <= ? AND (data_saida IS NULL OR data_saida >= ?)
+               WHERE socio_id = %s AND data_entrada <= %s AND (data_saida IS NULL OR data_saida >= %s)
                UNION
-               SELECT empresa_id FROM distribuicao_lucro WHERE socio_id = ? AND ano_base = ?
-               UNION
-               SELECT empresa_id FROM movimentacao
-               WHERE socio_id = ? AND strftime('%Y', data) = ?
+               SELECT empresa_id FROM distribuicao_lucro WHERE socio_id = %s AND ano_base = %s
                UNION
                SELECT empresa_id FROM movimentacao
-               WHERE socio_id = ? AND tipo = 'emprestimo_empresa_para_socio' AND data <= ?
+               WHERE socio_id = %s AND left(data, 4) = %s
                UNION
-               SELECT empresa_id FROM informe_rendimento WHERE socio_id = ? AND ano_base = ?
+               SELECT empresa_id FROM movimentacao
+               WHERE socio_id = %s AND tipo = 'emprestimo_empresa_para_socio' AND data <= %s
+               UNION
+               SELECT empresa_id FROM informe_rendimento WHERE socio_id = %s AND ano_base = %s
            )
            ORDER BY e.nome""",
         (
@@ -1752,7 +1762,7 @@ def empresas_do_socio_no_ano(conn: sqlite3.Connection, socio_id: int, ano_base: 
     return [Empresa(**dict(r)) for r in rows]
 
 
-def saldo_emprestimo_em(conn: sqlite3.Connection, empresa_id: int, socio_id: int, ano_base: int) -> float:
+def saldo_emprestimo_em(conn: Conexao, empresa_id: int, socio_id: int, ano_base: int) -> float:
     """Saldo acumulado dos empréstimos da empresa ao sócio até 31/12 do ano —
     é o número que vai pro Quadro 7, pro sócio declarar em Dívidas e Ônus
     Reais.
@@ -1764,24 +1774,24 @@ def saldo_emprestimo_em(conn: sqlite3.Connection, empresa_id: int, socio_id: int
     tela deixa corrigir antes de emitir."""
     row = conn.execute(
         """SELECT COALESCE(SUM(valor), 0) AS total FROM movimentacao
-           WHERE empresa_id=? AND socio_id=? AND tipo='emprestimo_empresa_para_socio' AND data <= ?""",
+           WHERE empresa_id=%s AND socio_id=%s AND tipo='emprestimo_empresa_para_socio' AND data <= %s""",
         (empresa_id, socio_id, f"{ano_base}-12-31"),
     ).fetchone()
     return row["total"]
 
 
 def buscar_informe(
-    conn: sqlite3.Connection, empresa_id: int, ano_base: int, socio_id: int
+    conn: Conexao, empresa_id: int, ano_base: int, socio_id: int
 ) -> InformeRendimento | None:
     row = conn.execute(
-        "SELECT * FROM informe_rendimento WHERE empresa_id=? AND ano_base=? AND socio_id=?",
+        "SELECT * FROM informe_rendimento WHERE empresa_id=%s AND ano_base=%s AND socio_id=%s",
         (empresa_id, ano_base, socio_id),
     ).fetchone()
     return InformeRendimento(**dict(row)) if row else None
 
 
 def variacao_cotas_socio(
-    conn: sqlite3.Connection, empresa_id: int, socio_id: int, ano_base: int
+    conn: Conexao, empresa_id: int, socio_id: int, ano_base: int
 ) -> dict:
     """Quantas cotas o sócio tinha nessa empresa em 31/12 do ano anterior e em
     31/12 do ano-base, quanto vale cada cota, e a data em que ele saiu da
@@ -1803,8 +1813,8 @@ def variacao_cotas_socio(
     def cotas_em(data: str) -> float:
         row = conn.execute(
             """SELECT COALESCE(SUM(quantidade_cotas), 0) AS total FROM vinculo_societario
-               WHERE empresa_id=? AND socio_id=? AND date(data_entrada) <= date(?)
-                 AND (data_saida IS NULL OR date(data_saida) > date(?))""",
+               WHERE empresa_id=%s AND socio_id=%s AND data_entrada <= %s
+                 AND (data_saida IS NULL OR data_saida > %s)""",
             (empresa_id, socio_id, data, data),
         ).fetchone()
         return row["total"] or 0.0
@@ -1826,8 +1836,8 @@ def variacao_cotas_socio(
     if not cotas_fim:
         row = conn.execute(
             """SELECT MAX(data_saida) AS data FROM vinculo_societario
-               WHERE empresa_id=? AND socio_id=? AND data_saida IS NOT NULL
-                 AND date(data_saida) BETWEEN date(?) AND date(?)""",
+               WHERE empresa_id=%s AND socio_id=%s AND data_saida IS NOT NULL
+                 AND data_saida BETWEEN %s AND %s""",
             (empresa_id, socio_id, f"{ano_base}-01-01", fim),
         ).fetchone()
         data_saida = row["data"]
@@ -1842,7 +1852,7 @@ def variacao_cotas_socio(
 
 
 def informe_sugerido(
-    conn: sqlite3.Connection, empresa_id: int, ano_base: int, socio_id: int
+    conn: Conexao, empresa_id: int, ano_base: int, socio_id: int
 ) -> InformeRendimento:
     """Monta o informe a partir do que o sistema já sabe, sem gravar nada:
     pró-labore e IRRF da distribuição do ano viram as linhas 1 e 5 do Quadro
@@ -1854,7 +1864,7 @@ def informe_sugerido(
     zerado e é preenchido na tela. É aqui — e só aqui — que os REAL do banco
     viram centavos."""
     distribuicao = conn.execute(
-        "SELECT * FROM distribuicao_lucro WHERE empresa_id=? AND ano_base=? AND socio_id=?",
+        "SELECT * FROM distribuicao_lucro WHERE empresa_id=%s AND ano_base=%s AND socio_id=%s",
         (empresa_id, ano_base, socio_id),
     ).fetchone()
     cotas = variacao_cotas_socio(conn, empresa_id, socio_id, ano_base)
@@ -1879,7 +1889,7 @@ def informe_sugerido(
 
 
 def carregar_informe(
-    conn: sqlite3.Connection, empresa_id: int, ano_base: int, socio_id: int
+    conn: Conexao, empresa_id: int, ano_base: int, socio_id: int
 ) -> tuple[InformeRendimento, bool]:
     """O informe já conferido e salvo, se existir; senão o sugerido a partir
     dos lançamentos. Devolve junto se veio do banco, pra tela poder avisar
@@ -1890,7 +1900,7 @@ def carregar_informe(
     return informe_sugerido(conn, empresa_id, ano_base, socio_id), False
 
 
-def salvar_informe(conn: sqlite3.Connection, informe: InformeRendimento) -> int:
+def salvar_informe(conn: Conexao, informe: InformeRendimento) -> int:
     """Grava os valores conferidos — um registro por (empresa, ano, sócio),
     substituindo o anterior, porque é o informe vigente daquele ano.
 
@@ -1919,20 +1929,20 @@ def salvar_informe(conn: sqlite3.Connection, informe: InformeRendimento) -> int:
     )
     valores = [getattr(informe, campo) for campo in campos]
     agora = dt.datetime.now().isoformat(timespec="seconds")
-    socio = conn.execute("SELECT nome FROM socio WHERE id=?", (informe.socio_id,)).fetchone()
-    empresa = conn.execute("SELECT nome FROM empresa WHERE id=?", (informe.empresa_id,)).fetchone()
+    socio = conn.execute("SELECT nome FROM socio WHERE id=%s", (informe.socio_id,)).fetchone()
+    empresa = conn.execute("SELECT nome FROM empresa WHERE id=%s", (informe.empresa_id,)).fetchone()
     detalhes = (
         f"{socio['nome'] if socio else '?'} — {empresa['nome'] if empresa else '?'} — {informe.ano_base}"
     )
 
     existente = conn.execute(
-        "SELECT id FROM informe_rendimento WHERE empresa_id=? AND ano_base=? AND socio_id=?",
+        "SELECT id FROM informe_rendimento WHERE empresa_id=%s AND ano_base=%s AND socio_id=%s",
         (informe.empresa_id, informe.ano_base, informe.socio_id),
     ).fetchone()
     if existente is not None:
-        atribuicoes = ", ".join(f"{campo}=?" for campo in campos)
+        atribuicoes = ", ".join(f"{campo}=%s" for campo in campos)
         conn.execute(
-            f"UPDATE informe_rendimento SET {atribuicoes}, atualizado_em=? WHERE id=?",
+            f"UPDATE informe_rendimento SET {atribuicoes}, atualizado_em=%s WHERE id=%s",
             (*valores, agora, existente["id"]),
         )
         _registrar_log(conn, "atualizar", "informe_rendimento", existente["id"], detalhes)
@@ -1940,24 +1950,25 @@ def salvar_informe(conn: sqlite3.Connection, informe: InformeRendimento) -> int:
         return existente["id"]
 
     colunas = ", ".join(("empresa_id", "socio_id", "ano_base", *campos, "atualizado_em"))
-    marcadores = ", ".join("?" * (len(campos) + 4))
+    marcadores = ", ".join(["%s"] * (len(campos) + 4))
     cur = conn.execute(
-        f"INSERT INTO informe_rendimento ({colunas}) VALUES ({marcadores})",
+        f"INSERT INTO informe_rendimento ({colunas}) VALUES ({marcadores}) RETURNING id",
         (informe.empresa_id, informe.socio_id, informe.ano_base, *valores, agora),
     )
-    _registrar_log(conn, "criar", "informe_rendimento", cur.lastrowid, detalhes)
+    novo_id = cur.fetchone()[0]
+    _registrar_log(conn, "criar", "informe_rendimento", novo_id, detalhes)
     conn.commit()
-    return cur.lastrowid
+    return novo_id
 
 
 def registrar_emissao_informe(
-    conn: sqlite3.Connection, empresa_id: int, ano_base: int, socio_id: int, destino: str
+    conn: Conexao, empresa_id: int, ano_base: int, socio_id: int, destino: str
 ) -> None:
     """Auditoria da emissão em si — o informe salvo diz o que foi declarado,
     o log diz quando saiu o papel e pra onde, que é o que se pergunta quando
     o sócio liga dizendo que não recebeu."""
-    socio = conn.execute("SELECT nome FROM socio WHERE id=?", (socio_id,)).fetchone()
-    empresa = conn.execute("SELECT nome FROM empresa WHERE id=?", (empresa_id,)).fetchone()
+    socio = conn.execute("SELECT nome FROM socio WHERE id=%s", (socio_id,)).fetchone()
+    empresa = conn.execute("SELECT nome FROM empresa WHERE id=%s", (empresa_id,)).fetchone()
     _registrar_log(
         conn,
         "emitir",
@@ -1970,9 +1981,9 @@ def registrar_emissao_informe(
 
 
 # ----------------------------------------------------- layouts de importação
-def listar_layouts_importacao(conn: sqlite3.Connection) -> list[LayoutImportacao]:
+def listar_layouts_importacao(conn: Conexao) -> list[LayoutImportacao]:
     linhas = conn.execute(
-        "SELECT id, nome, linha_inicial, colunas_json FROM layout_importacao ORDER BY nome COLLATE NOCASE"
+        "SELECT id, nome, linha_inicial, colunas_json FROM layout_importacao ORDER BY lower(nome)"
     ).fetchall()
     return [
         LayoutImportacao(
@@ -1985,7 +1996,7 @@ def listar_layouts_importacao(conn: sqlite3.Connection) -> list[LayoutImportacao
     ]
 
 
-def salvar_layout_importacao(conn: sqlite3.Connection, layout: LayoutImportacao) -> int:
+def salvar_layout_importacao(conn: Conexao, layout: LayoutImportacao) -> int:
     """Grava o layout já validado. O nome é a identidade dele na tela, então
     dois com o mesmo nome seriam impossíveis de distinguir na lista."""
     garantir_valido(layout)
@@ -1994,7 +2005,7 @@ def salvar_layout_importacao(conn: sqlite3.Connection, layout: LayoutImportacao)
     agora = dt.datetime.now().isoformat(timespec="seconds")
 
     repetido = conn.execute(
-        "SELECT id FROM layout_importacao WHERE nome = ? COLLATE NOCASE AND id IS NOT ?",
+        "SELECT id FROM layout_importacao WHERE lower(nome) = lower(%s) AND id IS DISTINCT FROM %s",
         (nome, layout.id),
     ).fetchone()
     if repetido is not None:
@@ -2003,15 +2014,16 @@ def salvar_layout_importacao(conn: sqlite3.Connection, layout: LayoutImportacao)
     if layout.id is None:
         cur = conn.execute(
             "INSERT INTO layout_importacao (nome, linha_inicial, colunas_json, criado_em, atualizado_em) "
-            "VALUES (?, ?, ?, ?, ?)",
+            "VALUES (%s, %s, %s, %s, %s) RETURNING id",
             (nome, layout.linha_inicial, colunas, agora, agora),
         )
-        _registrar_log(conn, "criar", "layout_importacao", cur.lastrowid, nome)
+        novo_id = cur.fetchone()[0]
+        _registrar_log(conn, "criar", "layout_importacao", novo_id, nome)
         conn.commit()
-        return cur.lastrowid
+        return novo_id
 
     conn.execute(
-        "UPDATE layout_importacao SET nome=?, linha_inicial=?, colunas_json=?, atualizado_em=? WHERE id=?",
+        "UPDATE layout_importacao SET nome=%s, linha_inicial=%s, colunas_json=%s, atualizado_em=%s WHERE id=%s",
         (nome, layout.linha_inicial, colunas, agora, layout.id),
     )
     _registrar_log(conn, "atualizar", "layout_importacao", layout.id, nome)
@@ -2019,10 +2031,10 @@ def salvar_layout_importacao(conn: sqlite3.Connection, layout: LayoutImportacao)
     return layout.id
 
 
-def excluir_layout_importacao(conn: sqlite3.Connection, layout_id: int) -> None:
-    linha = conn.execute("SELECT nome FROM layout_importacao WHERE id=?", (layout_id,)).fetchone()
+def excluir_layout_importacao(conn: Conexao, layout_id: int) -> None:
+    linha = conn.execute("SELECT nome FROM layout_importacao WHERE id=%s", (layout_id,)).fetchone()
     if linha is None:
         return
-    conn.execute("DELETE FROM layout_importacao WHERE id=?", (layout_id,))
+    conn.execute("DELETE FROM layout_importacao WHERE id=%s", (layout_id,))
     _registrar_log(conn, "excluir", "layout_importacao", layout_id, linha["nome"])
     conn.commit()

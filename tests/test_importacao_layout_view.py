@@ -8,13 +8,12 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-import sqlite3
 
 import openpyxl
 import pytest
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 
-from controle_lucros import db, repositories as repo
+from controle_lucros import repositories as repo
 from controle_lucros.layout_importacao import LayoutImportacao
 from controle_lucros.models import Empresa, Socio, VinculoSocietario
 from controle_lucros.ui import importacao_cadastro_view as vista
@@ -24,15 +23,6 @@ from controle_lucros.ui import importacao_cadastro_view as vista
 def app():
     aplicativo = QApplication.instance() or QApplication([])
     yield aplicativo
-
-
-@pytest.fixture()
-def conn():
-    connection = sqlite3.connect(":memory:")
-    connection.row_factory = sqlite3.Row
-    db.init_schema(connection)
-    yield connection
-    connection.close()
 
 
 @pytest.fixture()

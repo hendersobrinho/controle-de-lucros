@@ -182,16 +182,15 @@ def test_os_dois_mapas_pintam_do_jeito_que_as_abas_os_abrem():
     aparecia."""
     concluido = _rodar(
         """
-        import sqlite3
         from controle_lucros import db, repositories as repo
         from controle_lucros.models import Empresa, Socio, VinculoSocietario
         from controle_lucros.ui import diagrama_vinculos as dv
         from controle_lucros.ui.empresas_tab import EmpresasTab
         from controle_lucros.ui.socios_tab import SociosTab
 
-        conn = sqlite3.connect(":memory:")
-        conn.row_factory = sqlite3.Row
-        db.init_schema(conn)
+        conn = db.connect()
+        conn.execute(f"TRUNCATE {', '.join(db.TABELAS)} RESTART IDENTITY CASCADE")
+        conn.commit()
         empresa_id = repo.salvar_empresa(conn, Empresa(
             None, "91", "ENDOGASTRO LTDA", "", 1000, 1000))
         socio_id = repo.salvar_socio(conn, Socio(None, "ANDRE FRANZOTTI", "076.925.727-55"))

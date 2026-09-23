@@ -1,27 +1,25 @@
-"""Onde fica o banco: neste computador ou numa pasta do servidor.
+"""Onde fica o banco: em que servidor PostgreSQL este PC se conecta.
 
-Com o banco no servidor, cada PC tem o programa instalado e aponta pro
-mesmo arquivo lá — é assim que o escritório inteiro vê o mesmo cadastro, com
-os mesmos usuários, sem o programa rodar no servidor. O caminho escolhido é
-guardado na configuração local de cada PC (ver db.definir_banco).
+Cada PC tem o programa instalado e conecta no mesmo PostgreSQL — é assim que
+o escritório inteiro vê o mesmo cadastro, com os mesmos usuários. Os dados
+da conexão ficam na configuração local de cada PC (ver db.definir_conexao).
 
-Trocar de banco só vale na próxima conexão, então quem chama cuida de
+Trocar a conexão só vale na próxima abertura, então quem chama cuida de
 reconectar (tela de entrada) ou de fechar o programa (tela de Backup)."""
 from __future__ import annotations
 
-import sqlite3
-from pathlib import Path
-
+import psycopg
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
-    QFileDialog,
+    QFormLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
+    QSpinBox,
     QVBoxLayout,
-    QWidget,
 )
 
 from .. import db
@@ -29,145 +27,157 @@ from . import theme
 from .ocupado import ocupado
 
 
-def descrever_local(caminho: Path) -> str:
-    if db.banco_em_rede(caminho):
-        return "Na rede — compartilhado com os outros computadores que apontam para este arquivo."
-    return "Neste computador — só quem usa esta máquina enxerga estes dados."
+def descrever_conexao() -> str:
+    parametros = db.conexao_configurada()
+    return parametros.descricao() if parametros else "Nenhum servidor configurado neste computador."
 
 
-def abrir_tutorial_do_caminho(parent=None) -> None:
-    """O passo a passo de compartilhar a pasta e montar o \\\\SERVIDOR\\pasta,
-    que fica no manual (tópico "Caminho do servidor")."""
+def abrir_tutorial_do_servidor(parent=None) -> None:
+    """O passo a passo de instalar e liberar o PostgreSQL no servidor, que
+    fica no manual (tópico "Servidor PostgreSQL")."""
     from .manual import DialogoManual
 
     DialogoManual("sistema.servidor", parent).exec()
 
 
 def botao_tutorial(parent=None) -> QPushButton:
-    botao = QPushButton("Como configurar o caminho do servidor?")
+    botao = QPushButton("Como preparar o servidor PostgreSQL?")
     botao.setFlat(True)
     botao.setCursor(Qt.PointingHandCursor)
     botao.setStyleSheet(
         f"QPushButton {{ border: none; background: transparent; color: {theme.BRASS_DARK()};"
         f" text-decoration: underline; padding: 2px 0; text-align: left; }}"
     )
-    botao.clicked.connect(lambda: abrir_tutorial_do_caminho(parent))
+    botao.clicked.connect(lambda: abrir_tutorial_do_servidor(parent))
     return botao
 
 
-def _perguntar_pasta(parent, titulo: str) -> Path | None:
-    pasta = QFileDialog.getExistingDirectory(
-        parent, f"{titulo} — cole o caminho (\\\\SERVIDOR\\pasta) na barra de endereço",
-        str(db.get_db_path().parent),
-    )
-    return db.caminho_de_rede(Path(pasta)) if pasta else None
+class DialogoConexao(QDialog):
+    """Os dados de acesso ao PostgreSQL do escritório. Aparece na primeira
+    abertura do programa neste PC, e depois sempre que alguém quiser trocar
+    (servidor novo, senha trocada).
 
+    Roda como o usuário do Windows, não como administrador — é por isso que
+    a configuração não fica no instalador."""
 
-def _usar_se_for_banco(caminho: Path, parent) -> Path | None:
-    if not db.e_banco_do_sistema(caminho):
-        QMessageBox.warning(
-            parent,
-            "Arquivo não reconhecido",
-            f"{caminho} não é um banco do Controle de Distribuição de Lucros.",
+    def __init__(self, parent=None, primeira_vez: bool = False):
+        super().__init__(parent)
+        self.setWindowTitle("Conexão com o banco de dados")
+        self.setMinimumWidth(480)
+
+        atual = db.conexao_configurada() or db.ParametrosConexao(servidor="")
+
+        titulo = QLabel("Em que servidor está o banco de dados?")
+        titulo.setProperty("role", "secao")
+
+        explicacao = QLabel(
+            "O banco do escritório fica num servidor PostgreSQL, e todos os computadores se "
+            "conectam nele. Peça estes dados a quem instalou o PostgreSQL."
+            + (" Isto só é perguntado uma vez neste computador." if primeira_vez else "")
         )
-        return None
-    db.definir_banco(caminho)
-    return caminho
+        explicacao.setWordWrap(True)
+        explicacao.setProperty("role", "subtitulo")
 
+        self.servidor = QLineEdit(atual.servidor)
+        self.servidor.setPlaceholderText("nome ou IP, ex.: 192.168.0.10")
+        self.porta = QSpinBox()
+        self.porta.setRange(1, 65535)
+        self.porta.setValue(atual.porta)
+        self.banco = QLineEdit(atual.banco)
+        self.usuario = QLineEdit(atual.usuario)
+        self.senha = QLineEdit(atual.senha)
+        self.senha.setEchoMode(QLineEdit.Password)
 
-def escolher_banco_existente(parent: QWidget | None = None) -> Path | None:
-    """Pergunta a pasta onde o banco já está e aponta este PC pra ele — o
-    caso de todo PC depois do primeiro. Devolve o arquivo, ou None se a
-    pessoa desistiu ou a pasta não tem banco."""
-    pasta = _perguntar_pasta(parent, "Escolher a pasta onde o banco já está")
-    if pasta is None:
-        return None
-    caminho = db.banco_na_pasta(pasta)
-    if not caminho.exists():
-        QMessageBox.warning(
-            parent,
-            "Não há banco nesta pasta",
-            f"Não encontrei o {db.NOME_DO_ARQUIVO} em:\n{pasta}\n\n"
-            "Confira se é a mesma pasta escolhida no primeiro computador. Se ainda não existe "
-            "banco nenhum, use \"Criar um banco novo\".",
+        formulario = QFormLayout()
+        formulario.addRow("Servidor:", self.servidor)
+        formulario.addRow("Porta:", self.porta)
+        formulario.addRow("Banco:", self.banco)
+        formulario.addRow("Usuário:", self.usuario)
+        formulario.addRow("Senha:", self.senha)
+
+        testar = QPushButton("Testar conexão")
+        testar.clicked.connect(self._testar)
+
+        salvar = QPushButton("Salvar")
+        salvar.setProperty("role", "primario")
+        salvar.setDefault(True)
+        salvar.clicked.connect(self._salvar)
+
+        cancelar = QPushButton("Sair" if primeira_vez else "Cancelar")
+        cancelar.clicked.connect(self.reject)
+
+        botoes = QHBoxLayout()
+        botoes.addWidget(testar)
+        botoes.addStretch()
+        botoes.addWidget(cancelar)
+        botoes.addWidget(salvar)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.addWidget(titulo)
+        layout.addWidget(explicacao)
+        layout.addLayout(formulario)
+        layout.addWidget(botao_tutorial(self))
+        layout.addSpacing(6)
+        layout.addLayout(botoes)
+
+        (self.servidor if not atual.servidor else self.senha).setFocus()
+
+    def parametros(self) -> db.ParametrosConexao:
+        return db.ParametrosConexao(
+            servidor=self.servidor.text().strip(),
+            porta=self.porta.value(),
+            banco=self.banco.text().strip(),
+            usuario=self.usuario.text().strip(),
+            senha=self.senha.text(),
         )
-        return None
-    return _usar_se_for_banco(caminho, parent)
 
+    def _faltando(self) -> str | None:
+        parametros = self.parametros()
+        for nome, valor in (("o servidor", parametros.servidor), ("o banco", parametros.banco),
+                            ("o usuário", parametros.usuario)):
+            if not valor:
+                return nome
+        return None
 
-def criar_banco_novo(parent: QWidget | None = None) -> Path | None:
-    """Pergunta a pasta e cria o banco lá — o caso do primeiro PC. Se já
-    houver um banco na pasta (outro PC chegou antes), oferece usar esse em
-    vez de criar outro: dois bancos seriam dois cadastros separados, e
-    sobrescrever apagaria o trabalho de quem já usa."""
-    pasta = _perguntar_pasta(parent, "Escolher a pasta onde o banco vai ficar")
-    if pasta is None:
+    def _tentar(self) -> str | None:
+        """Testa a conexão; devolve o erro explicado, ou None se conectou."""
+        faltando = self._faltando()
+        if faltando:
+            return f"Preencha {faltando}."
+        try:
+            with ocupado(self, "Banco de dados", "Conectando ao servidor…"):
+                self._versao = db.testar_conexao(self.parametros())
+        except psycopg.Error as erro:
+            return db.explicar_erro(erro)
         return None
-    caminho = db.banco_na_pasta(pasta)
-    if caminho.exists():
-        resposta = QMessageBox.question(
-            parent,
-            "Já existe um banco nesta pasta",
-            f"Esta pasta já tem um banco:\n{caminho}\n\n"
-            "Provavelmente foi criado por outro computador. Usar este banco? "
-            "(Nada nele é apagado.)",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes,
-        )
-        if resposta != QMessageBox.Yes:
-            return None
-        return _usar_se_for_banco(caminho, parent)
-    if not db.banco_em_rede(pasta):
-        resposta = QMessageBox.question(
-            parent,
-            "Pasta deste computador",
-            f"{pasta} fica neste computador, não no servidor — os outros computadores não "
-            "vão conseguir usar o banco aí.\n\nCriar nessa pasta assim mesmo?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if resposta != QMessageBox.Yes:
-            return None
-    try:
-        caminho = db.criar_banco_em(pasta)
-    except (OSError, sqlite3.Error) as exc:
-        QMessageBox.warning(parent, "Não foi possível criar o banco", db.explicar_erro(exc))
-        return None
-    db.definir_banco(caminho)
-    return caminho
 
+    def _testar(self) -> None:
+        erro = self._tentar()
+        if erro:
+            QMessageBox.warning(self, "Não conectou", erro)
+        else:
+            QMessageBox.information(
+                self, "Conectou", f"Conexão funcionando. PostgreSQL {self._versao} no servidor."
+            )
 
-def levar_banco_para_rede(conn, parent: QWidget | None = None) -> Path | None:
-    """Copia o banco deste PC pra uma pasta do servidor e passa a usar a
-    cópia. Devolve o arquivo novo, ou None se não houve troca."""
-    pasta = QFileDialog.getExistingDirectory(
-        parent, "Escolher a pasta compartilhada do servidor", str(db.get_db_path().parent)
-    )
-    if not pasta:
-        return None
-    pasta = Path(pasta)
-    if not db.banco_em_rede(pasta):
-        resposta = QMessageBox.question(
-            parent,
-            "Pasta deste computador",
-            f"{pasta} fica neste computador, não no servidor — os outros PCs não vão "
-            "conseguir abrir o banco aí.\n\nLevar para essa pasta assim mesmo?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if resposta != QMessageBox.Yes:
-            return None
-    try:
-        with ocupado(parent, "Banco de dados", "Copiando o banco para o servidor…"):
-            destino = db.levar_banco_para(conn, pasta)
-    except FileExistsError as exc:
-        QMessageBox.warning(parent, "Já existe um banco nessa pasta", str(exc))
-        return None
-    except (OSError, sqlite3.Error) as exc:
-        QMessageBox.warning(parent, "Não foi possível copiar o banco", db.explicar_erro(exc))
-        return None
-    db.definir_banco(destino)
-    return destino
+    def _salvar(self) -> None:
+        erro = self._tentar()
+        if erro:
+            if self._faltando():
+                QMessageBox.warning(self, "Faltam dados", erro)
+                return
+            resposta = QMessageBox.question(
+                self,
+                "Não conectou",
+                f"{erro}\n\nSalvar esses dados assim mesmo?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if resposta != QMessageBox.Yes:
+                return
+        db.definir_conexao(self.parametros())
+        self.accept()
 
 
 class DialogoBancoInacessivel(QDialog):
@@ -176,47 +186,38 @@ class DialogoBancoInacessivel(QDialog):
     com um erro técnico, e a única saída seria chamar alguém."""
 
     TENTAR_DE_NOVO = 1
-    OUTRO_BANCO = 2
+    OUTRA_CONEXAO = 2
 
     def __init__(self, erro: BaseException, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Banco de dados indisponível")
         self.setMinimumWidth(460)
 
-        titulo = QLabel("Não consegui abrir o banco de dados")
+        titulo = QLabel("Não consegui conectar no banco de dados")
         titulo.setProperty("role", "secao")
 
-        texto = db.explicar_erro(erro)
-        if isinstance(erro, OSError):
-            # Pasta que não abre (servidor desligado, sem permissão): a
-            # mensagem crua do Windows não diz o que fazer.
-            texto = (
-                f"Não consegui acessar a pasta do banco de dados ({erro.strerror or erro}).\n\n"
-                "Se ela fica no servidor, confira se este computador está na rede, se a pasta "
-                "abre no Explorador de Arquivos e se você tem permissão de gravar nela."
-            )
-        explicacao = QLabel(texto)
+        explicacao = QLabel(db.explicar_erro(erro))
         explicacao.setWordWrap(True)
         explicacao.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
-        caminho = QLabel(str(db.get_db_path()))
-        caminho.setProperty("role", "mono")
-        caminho.setWordWrap(True)
-        caminho.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        conexao = QLabel(descrever_conexao())
+        conexao.setProperty("role", "mono")
+        conexao.setWordWrap(True)
+        conexao.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
         tentar = QPushButton("Tentar de novo")
         tentar.setProperty("role", "primario")
         tentar.setDefault(True)
         tentar.clicked.connect(lambda: self.done(self.TENTAR_DE_NOVO))
 
-        outro = QPushButton("Escolher outro banco…")
-        outro.clicked.connect(self._escolher_outro)
+        outra = QPushButton("Alterar a conexão…")
+        outra.clicked.connect(self._alterar_conexao)
 
         sair = QPushButton("Sair")
         sair.clicked.connect(self.reject)
 
         botoes = QHBoxLayout()
-        botoes.addWidget(outro)
+        botoes.addWidget(outra)
         botoes.addStretch()
         botoes.addWidget(sair)
         botoes.addWidget(tentar)
@@ -225,85 +226,11 @@ class DialogoBancoInacessivel(QDialog):
         layout.setSpacing(10)
         layout.addWidget(titulo)
         layout.addWidget(explicacao)
-        if str(db.get_db_path()) not in texto:
-            layout.addWidget(caminho)
+        layout.addWidget(conexao)
         layout.addWidget(botao_tutorial(self))
         layout.addSpacing(6)
         layout.addLayout(botoes)
 
-    def _escolher_outro(self) -> None:
-        if escolher_banco_existente(self) is not None:
-            self.done(self.OUTRO_BANCO)
-
-
-class DialogoConfigurarBanco(QDialog):
-    """Primeira abertura depois de instalar: onde fica o banco.
-
-    O primeiro PC do escritório cria o banco na pasta do servidor; os outros
-    usam esse mesmo. Cada PC escolhe uma vez só — fica guardado."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Configurar o banco de dados")
-        self.setMinimumWidth(500)
-
-        titulo = QLabel("Onde fica o banco de dados?")
-        titulo.setProperty("role", "secao")
-
-        explicacao = QLabel(
-            "Para o escritório usar o mesmo cadastro, o banco fica numa pasta compartilhada do "
-            "servidor e todos os computadores apontam para ela, pelo caminho de rede — por "
-            "exemplo <b>\\\\SRV-ESCRITORIO\\ControleDeLucros</b>. Isto só é perguntado uma "
-            "vez neste computador."
-        )
-        explicacao.setWordWrap(True)
-        explicacao.setProperty("role", "subtitulo")
-
-        layout = QVBoxLayout(self)
-        layout.setSpacing(10)
-        layout.addWidget(titulo)
-        layout.addWidget(explicacao)
-        layout.addWidget(botao_tutorial(self))
-        layout.addSpacing(4)
-        opcoes = (
-            ("Usar o banco que já está no servidor",
-             "Outro computador já criou o banco. Escolha a mesma pasta que ele escolheu.",
-             self._usar_existente, True),
-            ("Criar um banco novo no servidor",
-             "Este é o primeiro computador do escritório a usar o sistema.",
-             self._criar_novo, False),
-            ("Usar só neste computador",
-             "Sem servidor: o banco fica nesta máquina e os outros computadores não o veem.",
-             self._so_neste, False),
-        )
-        for texto, detalhe, acao, principal in opcoes:
-            botao = QPushButton(texto)
-            if principal:
-                botao.setProperty("role", "primario")
-            botao.setMinimumHeight(38)
-            botao.clicked.connect(acao)
-            rotulo = QLabel(detalhe)
-            rotulo.setWordWrap(True)
-            rotulo.setProperty("role", "subtitulo")
-            layout.addWidget(botao)
-            layout.addWidget(rotulo)
-            layout.addSpacing(4)
-
-        sair = QPushButton("Sair")
-        sair.clicked.connect(self.reject)
-        rodape = QHBoxLayout()
-        rodape.addStretch()
-        rodape.addWidget(sair)
-        layout.addLayout(rodape)
-
-    def _usar_existente(self) -> None:
-        if escolher_banco_existente(self) is not None:
-            self.accept()
-
-    def _criar_novo(self) -> None:
-        if criar_banco_novo(self) is not None:
-            self.accept()
-
-    def _so_neste(self) -> None:
-        db.definir_banco(None)
-        self.accept()
+    def _alterar_conexao(self) -> None:
+        if DialogoConexao(self).exec() == QDialog.Accepted:
+            self.done(self.OUTRA_CONEXAO)

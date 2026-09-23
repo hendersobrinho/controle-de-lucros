@@ -1,19 +1,8 @@
-import sqlite3
 
 import pytest
 
-from controle_lucros import db, repositories as repo
+from controle_lucros import repositories as repo
 from controle_lucros.models import Empresa, Socio
-
-
-@pytest.fixture()
-def conn():
-    connection = sqlite3.connect(":memory:")
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = ON;")
-    db.init_schema(connection)
-    yield connection
-    connection.close()
 
 
 def _empresa(conn, nome="ACME LTDA", capital_social=10000, quantidade_cotas=1000) -> int:

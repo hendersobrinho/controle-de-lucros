@@ -1,13 +1,14 @@
 import atexit
 import faulthandler
-import sqlite3
 import sys
+
+import psycopg
 
 from PySide6.QtWidgets import QApplication, QDialog
 
 from controle_lucros import backup, db, relatorio_erro, repositories as repo, sessao, traducao
 from controle_lucros.ui.icones import icone_app
-from controle_lucros.ui.local_banco import DialogoBancoInacessivel, DialogoConfigurarBanco
+from controle_lucros.ui.local_banco import DialogoBancoInacessivel, DialogoConexao
 from controle_lucros.ui.login import DialogoLogin, DialogoPrimeiroUsuario
 from controle_lucros.ui.main_window import MainWindow
 from controle_lucros.ui.reportar_erro import CapturaDeErros, abrir_para_fechamento
@@ -43,21 +44,19 @@ def _preparar_registro_de_falhas(pasta) -> str:
     return detalhes
 
 
-def _abrir_banco() -> sqlite3.Connection:
+def _abrir_banco() -> db.Conexao:
     """Conecta e prepara o banco, insistindo enquanto a pessoa quiser.
 
     Com o banco no servidor, não abrir é coisa do dia a dia — servidor
     reiniciando, PC que ainda não entrou na rede. Em vez de o programa cair
-    com erro técnico, a pessoa tenta de novo ou aponta pra outro banco."""
+    com erro técnico, a pessoa tenta de novo ou corrige a conexão."""
     while True:
         conn = None
         try:
-            db.verificar_banco_configurado()
             conn = db.connect()
             db.init_schema(conn)
-            db.banco_aberto_com_sucesso()
             return conn
-        except (OSError, sqlite3.Error) as erro:
+        except psycopg.Error as erro:
             if conn is not None:
                 conn.close()
             if DialogoBancoInacessivel(erro).exec() == QDialog.Rejected:
@@ -65,19 +64,7 @@ def _abrir_banco() -> sqlite3.Connection:
 
 
 def main() -> None:
-    # Antes de abrir o banco: numa máquina que já rodou a versão anterior, o
-    # cadastro está na conta do Windows de quem usou, e o compartilhado ainda
-    # não existe. Sem isto, atualizar o programa daria a impressão de ter
-    # apagado tudo.
-    try:
-        db.migrar_banco_por_usuario()
-    except (OSError, sqlite3.Error):
-        # Migração que falha não pode impedir o programa de abrir: o banco
-        # antigo continua intacto no lugar dele, e o novo nasce vazio.
-        pass
-
-    # Na pasta deste PC, não na do banco: com o banco no servidor, os PCs
-    # ficariam lendo a marca de sessão uns dos outros como se fosse tombo.
+    # Na pasta deste PC: cada computador tem a sua marca de sessão.
     fechamento_anterior = _preparar_registro_de_falhas(db.pasta_local())
 
     app = QApplication(sys.argv)
@@ -88,9 +75,8 @@ def main() -> None:
     captura = CapturaDeErros()
     captura.instalar()
 
-    # Instalação nova: antes de abrir (e com isso criar um banco local vazio),
-    # saber se este PC cria o banco no servidor ou usa o que já está lá.
-    if db.precisa_configurar() and DialogoConfigurarBanco().exec() != QDialog.Accepted:
+    # Instalação nova: antes de tudo, saber em que servidor está o banco.
+    if db.precisa_configurar() and DialogoConexao(primeira_vez=True).exec() != QDialog.Accepted:
         sys.exit(0)
 
     conn = _abrir_banco()
@@ -103,8 +89,8 @@ def main() -> None:
 
         if dialogo.exec() != QDialog.Accepted:
             if getattr(dialogo, "trocou_banco", False):
-                # PC novo apontado pro banco do servidor: os usuários estão
-                # lá, então volta pro começo já com a tela de login.
+                # PC que estava no banco errado, apontado pro do escritório:
+                # os usuários estão lá, então volta pro começo já com o login.
                 conn.close()
                 conn = _abrir_banco()
                 continue
@@ -115,7 +101,7 @@ def main() -> None:
 
         try:
             backup.backup_automatico_se_necessario(conn)
-        except OSError:
+        except (OSError, psycopg.Error):
             pass
 
         janela = MainWindow(conn, usuario)

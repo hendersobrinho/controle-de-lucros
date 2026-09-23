@@ -8,12 +8,11 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-import sqlite3
 
 import pytest
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 
-from controle_lucros import db, repositories as repo
+from controle_lucros import repositories as repo
 from controle_lucros.models import AlteracaoContratual, Empresa, Socio, VinculoSocietario
 from controle_lucros.ui import alteracao_card as mod
 from controle_lucros.ui import importacao_cadastro_view as vista_importacao
@@ -24,16 +23,6 @@ from controle_lucros.ui.alteracao_card import AlteracaoCard
 def app():
     aplicativo = QApplication.instance() or QApplication([])
     yield aplicativo
-
-
-@pytest.fixture()
-def conn():
-    connection = sqlite3.connect(":memory:")
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = ON;")
-    db.init_schema(connection)
-    yield connection
-    connection.close()
 
 
 TEXTO_DUAS_EMPRESAS = (
