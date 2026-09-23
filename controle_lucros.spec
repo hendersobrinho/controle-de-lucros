@@ -106,6 +106,23 @@ EXCLUIDOS = [
 
 _versao_para_o_instalador()
 
+
+def _libs_do_psycopg() -> list[tuple[str, str]]:
+    """O libpq e as DLLs de que ele depende (OpenSSL etc.) moram numa pasta
+    psycopg_binary.libs AO LADO do pacote, não dentro dele — é assim que o
+    delvewheel monta a wheel do Windows, e o collect_dynamic_libs só olha
+    dentro. Sem elas, o programa empacotado não acha o libpq num PC que não
+    tem PostgreSQL instalado: "no pq wrapper available"."""
+    import importlib.util
+    from pathlib import Path
+
+    pacote = Path(importlib.util.find_spec("psycopg_binary").origin).parent
+    pasta = pacote.parent / "psycopg_binary.libs"
+    if not pasta.is_dir():
+        return []
+    return [(str(arquivo), "psycopg_binary.libs") for arquivo in pasta.iterdir()]
+
+
 a = Analysis(
     ["main.py"],
     pathex=[],
@@ -113,7 +130,7 @@ a = Analysis(
     # PostgreSQL, compilado) por import feito em tempo de execução, que o
     # PyInstaller não enxerga. Sem ele o programa empacotado não conecta:
     # "no pq wrapper available".
-    binaries=collect_dynamic_libs("psycopg_binary"),
+    binaries=collect_dynamic_libs("psycopg_binary") + _libs_do_psycopg(),
     datas=[("controle_lucros/ui/assets", "controle_lucros/ui/assets")],
     # QtSvgWidgets entra na mão porque só é usado dentro da tela "Sobre", por
     # import indireto que o PyInstaller não enxerga sozinho.

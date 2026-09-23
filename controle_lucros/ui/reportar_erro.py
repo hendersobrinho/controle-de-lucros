@@ -247,6 +247,8 @@ class CapturaDeErros:
             return
         self._ja_mostrados.add(assinatura)
 
+        self._desfazer_gravacao_pela_metade()
+
         self._dentro = True
         try:
             # Rede que caiu ou banco ocupado por outro PC não é defeito do
@@ -261,6 +263,19 @@ class CapturaDeErros:
             pass
         finally:
             self._dentro = False
+
+    def _desfazer_gravacao_pela_metade(self) -> None:
+        """Erro que escapou no meio de uma gravação deixa a transação aberta
+        no servidor, segurando trava nas linhas que ela mexeu: os outros PCs
+        que tocassem nelas ficariam recebendo "tente de novo", e o próximo
+        commit, de outra ação qualquer, gravaria o trabalho pela metade."""
+        conn = getattr(self.janela_principal, "conn", None)
+        if conn is None:
+            return
+        try:
+            conn.rollback()
+        except Exception:  # noqa: BLE001 — conexão caída: não há o que desfazer
+            pass
 
     @staticmethod
     def _assinatura(tipo, tb) -> str:

@@ -10,6 +10,7 @@ import datetime as dt
 import json
 import os
 import sys
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -431,6 +432,7 @@ class Conexao:
     def __init__(self, parametros: ParametrosConexao):
         self.parametros = parametros
         self._conn = self._abrir()
+        self._cache: dict | None = None
 
     def _abrir(self) -> psycopg.Connection:
         conn = psycopg.connect(
@@ -446,7 +448,38 @@ class Conexao:
     def em_transacao(self) -> bool:
         return self._conn.info.transaction_status != TransactionStatus.IDLE
 
-    def execute(self, sql: str, parametros=None) -> psycopg.Cursor:
+    @contextmanager
+    def leituras_repetidas_em_cache(self):
+        """Dentro do bloco, a mesma consulta com os mesmos parâmetros vai ao
+        servidor uma vez só. Pra relatórios que só leem e repetem muito a
+        mesma pergunta (a visão geral pede a lista de sócios uma vez por
+        empresa por ano). Gravar dentro do bloco esvazia o cache, pra
+        ninguém ler o que já mudou."""
+        self._cache = {}
+        try:
+            yield
+        finally:
+            self._cache = None
+
+    def execute(self, sql: str, parametros=None):
+        if self._cache is not None:
+            comando = sql.lstrip().split(None, 1)[0].upper() if sql.strip() else ""
+            if comando != "SELECT":
+                self._cache.clear()
+            else:
+                try:
+                    chave = (sql, tuple(parametros or ()))
+                    hash(chave)
+                except TypeError:
+                    chave = None
+                if chave is not None:
+                    if chave not in self._cache:
+                        cur = self._executar(sql, parametros)
+                        self._cache[chave] = (cur.description, cur.fetchall())
+                    return _ResultadoGuardado(*self._cache[chave])
+        return self._executar(sql, parametros)
+
+    def _executar(self, sql: str, parametros=None) -> psycopg.Cursor:
         if self._conn.broken:
             self._conn = self._abrir()
         comando = sql.lstrip().split(None, 1)[0].upper() if sql.strip() else ""
@@ -489,6 +522,24 @@ class Conexao:
     @property
     def closed(self) -> bool:
         return self._conn.closed
+
+
+class _ResultadoGuardado:
+    """O que o cursor devolveria, lido de novo do cache — só o que o código
+    usa de um cursor: fetchone, fetchall, iteração e description."""
+
+    def __init__(self, description, linhas):
+        self.description = description
+        self._linhas = iter(linhas)
+
+    def fetchone(self):
+        return next(self._linhas, None)
+
+    def fetchall(self):
+        return list(self._linhas)
+
+    def __iter__(self):
+        return self._linhas
 
 
 def connect(parametros: ParametrosConexao | None = None) -> Conexao:
@@ -538,7 +589,7 @@ def explicar_erro(erro: BaseException) -> str:
     # Erro ao conectar não chega com código (sqlstate): só o texto do
     # servidor diz o que foi. E o PostgreSQL instalado num Windows em
     # português responde em português — por isso as duas línguas.
-    texto = str(erro).lower()
+    texto = str(erro).lower() if isinstance(erro, psycopg.OperationalError) else ""
     if isinstance(erro, errors.InvalidPassword) or _contem(
         texto, "password authentication failed", "senha falhou", "role \"", "papel \""
     ):

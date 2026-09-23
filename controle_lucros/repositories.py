@@ -925,12 +925,30 @@ def panorama_distribuicao_anual(conn: Conexao, empresa_id: int, ano_base: int) -
     "manual")."""
     inicio, fim = f"{ano_base}-01-01", f"{ano_base}-12-31"
 
-    socios_no_ano = conn.execute(
-        """SELECT DISTINCT socio_id FROM vinculo_societario
-           WHERE empresa_id=%s AND data_entrada <= %s
-             AND (data_saida IS NULL OR data_saida >= %s)""",
-        (empresa_id, fim, inicio),
-    ).fetchall()
+    # Vínculos e empréstimos da empresa inteira de uma vez, separados por
+    # sócio aqui: com o banco no servidor, uma consulta por sócio vira uma
+    # ida e volta pela rede por sócio — e a visão geral chama isto pra cada
+    # empresa em cada ano.
+    vinculos_por_socio: dict[int, list[Linha]] = {}
+    for v in conn.execute(
+        "SELECT * FROM vinculo_societario WHERE empresa_id=%s ORDER BY data_entrada, id",
+        (empresa_id,),
+    ).fetchall():
+        vinculos_por_socio.setdefault(v["socio_id"], []).append(v)
+    socios_no_ano = [
+        socio_id
+        for socio_id, vinculos in vinculos_por_socio.items()
+        if any(v["data_entrada"] <= fim and (v["data_saida"] is None or v["data_saida"] >= inicio) for v in vinculos)
+    ]
+    emprestimos = {
+        r["socio_id"]: r["total"]
+        for r in conn.execute(
+            """SELECT socio_id, SUM(valor) AS total FROM movimentacao
+               WHERE empresa_id=%s AND tipo='emprestimo_empresa_para_socio' AND left(data, 4)=%s
+               GROUP BY socio_id""",
+            (empresa_id, str(ano_base)),
+        ).fetchall()
+    }
 
     distribuicoes = {d.socio_id: d for d in listar_distribuicoes(conn, empresa_id, ano_base)}
     total_distribuido = total_distribuido_empresa_ano(conn, empresa_id, ano_base)
@@ -938,12 +956,8 @@ def panorama_distribuicao_anual(conn: Conexao, empresa_id: int, ano_base: int) -
     acumulado = acumulado_trimestral(conn, empresa_id, ano_base)
 
     linhas = []
-    for row in socios_no_ano:
-        socio_id = row["socio_id"]
-        todos = conn.execute(
-            "SELECT * FROM vinculo_societario WHERE empresa_id=%s AND socio_id=%s ORDER BY data_entrada",
-            (empresa_id, socio_id),
-        ).fetchall()
+    for socio_id in socios_no_ano:
+        todos = vinculos_por_socio[socio_id]
 
         vinculo_atual = next(
             (
@@ -967,7 +981,7 @@ def panorama_distribuicao_anual(conn: Conexao, empresa_id: int, ano_base: int) -
         distribuicao = distribuicoes.get(socio_id)
         valor_distribuido = distribuicao.valor_distribuido if distribuicao else 0.0
         percentual_distribuido = (100 * valor_distribuido / total_distribuido) if total_distribuido else 0.0
-        emprestimo = soma_movimentacoes(conn, empresa_id, socio_id, ano_base, "emprestimo_empresa_para_socio")
+        emprestimo = emprestimos.get(socio_id, 0.0)
 
         # De onde veio o valor anual. Em vez de guardar a origem numa coluna
         # (que ficaria mentindo assim que alguém editasse o outro lado), ela é
@@ -1564,6 +1578,11 @@ def visao_geral(conn: Conexao, ano_de: int, ano_ate: int, tolerancia: float) -> 
     """Panorama de todas as empresas no período: quanto foi distribuído
     proporcional/desproporcionalmente, quanto foi emprestado, e quais
     empresas não distribuíram nada no período."""
+    with conn.leituras_repetidas_em_cache():
+        return _visao_geral(conn, ano_de, ano_ate, tolerancia)
+
+
+def _visao_geral(conn: Conexao, ano_de: int, ano_ate: int, tolerancia: float) -> dict:
     empresas = listar_empresas(conn)
     linhas_todas: list[dict] = []
     resumo_empresas: list[dict] = []

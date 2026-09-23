@@ -21,6 +21,8 @@ from controle_lucros import db, preferencias, repositories as repo
 from controle_lucros.models import Empresa
 from controle_lucros.ui import local_banco
 
+from conftest import esvaziar_banco as conftest_esvaziar
+
 PROJETO = pathlib.Path(__file__).resolve().parent.parent
 
 
@@ -368,3 +370,67 @@ def test_manual_ensina_a_preparar_o_servidor():
     (topico,) = [t for t in TOPICOS if t.id == "sistema.servidor"]
     for trecho in ("PostgreSQL 15", "Windows Server", "OWNER", "pg_hba.conf", "5432"):
         assert trecho in topico.corpo
+
+
+# ------------------------------------------------ cache de leitura --
+
+
+def _contar_idas_ao_servidor(conn, monkeypatch) -> dict:
+    contagem = {"idas": 0}
+    original = conn._executar
+
+    def contar(*a, **k):
+        contagem["idas"] += 1
+        return original(*a, **k)
+
+    monkeypatch.setattr(conn, "_executar", contar)
+    return contagem
+
+
+def test_cache_de_leitura_pergunta_uma_vez_so(conn, monkeypatch):
+    repo.salvar_empresa(conn, Empresa(None, "001", "ACME LTDA", "", 1000, 100))
+    contagem = _contar_idas_ao_servidor(conn, monkeypatch)
+    with conn.leituras_repetidas_em_cache():
+        primeira = repo.listar_empresas(conn)
+        segunda = repo.listar_empresas(conn)
+        linha = conn.execute("SELECT nome FROM empresa ORDER BY nome").fetchone()
+    assert primeira == segunda
+    assert linha["nome"] == "ACME LTDA"
+    assert contagem["idas"] == 2  # a lista de empresas e a consulta do nome
+
+
+def test_gravar_dentro_do_cache_nao_deixa_ler_dado_velho(conn):
+    with conn.leituras_repetidas_em_cache():
+        assert repo.listar_empresas(conn) == []
+        repo.salvar_empresa(conn, Empresa(None, "001", "ACME LTDA", "", 1000, 100))
+        assert [e.nome for e in repo.listar_empresas(conn)] == ["ACME LTDA"]
+
+
+def test_fora_do_bloco_nao_ha_cache(conn, monkeypatch):
+    with conn.leituras_repetidas_em_cache():
+        repo.listar_empresas(conn)
+    contagem = _contar_idas_ao_servidor(conn, monkeypatch)
+    repo.listar_empresas(conn)
+    repo.listar_empresas(conn)
+    assert contagem["idas"] == 2
+
+
+def test_visao_geral_nao_faz_uma_consulta_por_socio(conn, monkeypatch):
+    """Com o banco no servidor cada consulta é uma ida e volta pela rede:
+    a visão geral de um escritório de verdade (160 empresas) fazia mais de
+    dez mil. O número de consultas não pode crescer com os sócios."""
+    from controle_lucros.models import Socio, VinculoSocietario
+
+    def montar(n_socios):
+        conftest_esvaziar(conn)
+        empresa_id = repo.salvar_empresa(conn, Empresa(None, "001", "ACME LTDA", "", 1000, 100))
+        for i in range(n_socios):
+            socio_id = repo.salvar_socio(conn, Socio(None, f"Sócio {i}", f"{i:011d}"))
+            repo.salvar_vinculo(conn, VinculoSocietario(
+                None, empresa_id, socio_id, 100 / n_socios, 1, "2020-01-01", None))
+        contagem = _contar_idas_ao_servidor(conn, monkeypatch)
+        repo.visao_geral(conn, 2020, 2024, 0.01)
+        monkeypatch.undo()
+        return contagem["idas"]
+
+    assert montar(2) == montar(20)

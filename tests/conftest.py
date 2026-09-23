@@ -66,9 +66,16 @@ def servidor_pg(tmp_path_factory):
          "--no-sync"],
         check=True, capture_output=True,
     )
+    # No postgresql.conf, e não na linha de comando do pg_ctl: as aspas do
+    # valor vazio não sobrevivem ao cmd do Windows. Sem socket Unix porque o
+    # caminho da pasta temporária passa do limite de 107 caracteres dele.
+    with open(dados / "postgresql.conf", "a", encoding="utf-8") as conf:
+        conf.write(
+            f"\nport = {porta}\nlisten_addresses = '127.0.0.1'\n"
+            "unix_socket_directories = ''\nfsync = off\n"
+        )
     subprocess.run(
-        [binarios / "pg_ctl", "-D", dados, "-l", pasta / "log.txt", "-w", "start", "-o",
-         f"-p {porta} -c listen_addresses=127.0.0.1 -c unix_socket_directories='' -c fsync=off"],
+        [binarios / "pg_ctl", "-D", dados, "-l", pasta / "log.txt", "-w", "start"],
         check=True, capture_output=True,
     )
     try:

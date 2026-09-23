@@ -744,8 +744,16 @@ exemplo:<br>
 <b>postgresql-x64-15</b> → Reiniciar.</li>
 <li>Libere a porta no firewall do servidor. No Prompt de Comando como
 administrador:<br>
-<code>netsh advfirewall firewall add rule name="PostgreSQL" dir=in action=allow protocol=TCP localport=5432 remoteip=localsubnet</code></li>
+<code>netsh advfirewall firewall add rule name="PostgreSQL" dir=in action=allow protocol=TCP localport=5432 remoteip=localsubnet</code><br>
+Se os computadores estiverem numa faixa de rede diferente da do servidor,
+troque <code>localsubnet</code> pela faixa deles (a mesma do
+<code>pg_hba.conf</code>). Nunca libere a porta para a internet: acesso de
+fora do escritório, só por VPN.</li>
 </ol>
+<p>Para conferir, num dos computadores abra o <b>PowerShell</b> e rode
+<code>Test-NetConnection 192.168.0.10 -Port 5432</code> (com o IP do
+servidor). Tem que aparecer <code>TcpTestSucceeded : True</code>; se não,
+o problema está no firewall ou na rede, não no sistema.</p>
 <p>Dê ao servidor um <b>IP fixo</b>: é por ele que os computadores o acham.
 No Prompt de Comando do servidor, <code>ipconfig</code> mostra o IP atual.</p>
 

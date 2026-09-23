@@ -204,3 +204,41 @@ def test_a_captura_preserva_o_hook_anterior(monkeypatch):
         captura.desinstalar()
 
     assert [str(e) for e in vistos] == ["vai pros dois lugares"]
+
+
+def test_erro_solto_no_meio_de_uma_gravacao_desfaz_a_gravacao(monkeypatch, conn):
+    """Com o banco no servidor, a gravação pela metade seguraria trava nas
+    linhas pros outros PCs, e o próximo commit a gravaria assim mesmo."""
+    from types import SimpleNamespace
+
+    from controle_lucros import db
+
+    monkeypatch.setattr(reportar_erro, "abrir_para_erro", lambda *a, **k: None)
+    captura = reportar_erro.CapturaDeErros()
+    captura.janela_principal = SimpleNamespace(conn=conn)
+    conn.execute("INSERT INTO empresa (numero_chamada, nome) VALUES ('001', 'PELA METADE LTDA')")
+
+    erro = _erro("estourou entre duas gravações")
+    captura._tratar(type(erro), erro, erro.__traceback__)
+
+    assert not conn.em_transacao
+    outro_pc = db.connect()
+    try:
+        assert outro_pc.execute("SELECT COUNT(*) FROM empresa").fetchone()[0] == 0
+    finally:
+        outro_pc.close()
+
+
+def test_erro_de_programacao_no_sql_vira_relatorio_e_nao_aviso_de_rede(monkeypatch, conn):
+    """Coluna que não existe é defeito do programa: tem que chegar como
+    relatório, não como "confira a rede"."""
+    import psycopg
+
+    abertos = []
+    monkeypatch.setattr(reportar_erro, "abrir_para_erro", lambda erro, **k: abertos.append(erro))
+    try:
+        conn.execute("SELECT coluna_que_nao_existe FROM empresa")
+    except psycopg.Error as erro:
+        reportar_erro.CapturaDeErros()._tratar(type(erro), erro, erro.__traceback__)
+
+    assert len(abertos) == 1
