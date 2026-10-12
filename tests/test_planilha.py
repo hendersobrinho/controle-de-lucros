@@ -284,7 +284,7 @@ def test_importar_cadastro_ano_base_invalido_da_erro_claro(tmp_path):
     with open(caminho, "w", newline="", encoding="utf-8") as f:
         escritor = csv.writer(f, delimiter=";")
         escritor.writerow(COLUNAS_CADASTRO)
-        escritor.writerow(["001", "ACME LTDA", "", "1000", "100", "Fulano", "111.111.111-11", "fisica", "100", "100", "", "", "não é ano", "0", "0", "0"])
+        escritor.writerow(["001", "ACME LTDA", "", "1000", "100", "Fulano", "111.111.111-11", "fisica", "100", "100", "", "", "", "não é ano", "0", "0", "0"])
 
     with pytest.raises(ValueError, match="ano base"):
         importar_cadastro(caminho)

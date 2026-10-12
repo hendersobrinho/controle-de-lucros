@@ -624,10 +624,23 @@ class AlteracaoCard(QWidget):
     def _excluir(self) -> None:
         if self.alteracao is None:
             return
-        resposta = QMessageBox.question(
-            self,
-            "Excluir alteração contratual",
-            f"Excluir a alteração contratual Nº {self.alteracao.numero}? Isso não pode ser desfeito.",
+        # Excluir desfaz o que a alteração registrou (ver repo.excluir_alteracao):
+        # a pergunta diz quem entra e sai disso, pra ninguém ser pego de surpresa.
+        afetados = repo.resumo_exclusao_alteracao(self.conn, self.alteracao.id)
+        texto = f"Excluir a alteração contratual Nº {self.alteracao.numero}?"
+        if afetados["entradas"]:
+            texto += (
+                "\n\nEntraram por ela — o vínculo é apagado:\n"
+                + "\n".join(f"• {nome}" for nome in afetados["entradas"])
+            )
+        if afetados["saidas"]:
+            texto += (
+                "\n\nSaíram por ela — voltam a ficar ativos:\n"
+                + "\n".join(f"• {nome}" for nome in afetados["saidas"])
+            )
+        texto += "\n\nIsso não pode ser desfeito. Confirma?"
+        resposta = QMessageBox.warning(
+            self, "Excluir alteração contratual", texto, QMessageBox.Yes | QMessageBox.No, QMessageBox.No
         )
         if resposta != QMessageBox.Yes:
             return

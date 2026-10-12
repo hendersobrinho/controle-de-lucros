@@ -160,6 +160,7 @@ def test_importar_relatorio_pdf_alimenta_o_cadastro(conn, monkeypatch, tmp_path)
     arquivo.write_bytes(b"%PDF-falso")
 
     view = vista.ImportacaoCadastroView(conn)
+    monkeypatch.setattr(repo, "_ano_corrente", lambda: 2026)  # o relatório é de 2026
     monkeypatch.setattr(vista, "extrair_texto", lambda caminho: texto)
     monkeypatch.setattr(
         vista.QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(arquivo), ""))
@@ -189,11 +190,13 @@ def test_importar_relatorio_pdf_alimenta_o_cadastro(conn, monkeypatch, tmp_path)
     # Quem saiu entra já com a saída registrada, que é o ponto do relatório.
     assert vinculos[socios["LUIZA DIAS TORRES"].id].data_saida == "2026-05-20"
 
-    # Movimentação de sócio é alteração contratual: a empresa tocada pelo
-    # relatório ganha uma automática, e todo vínculo criado/encerrado por
-    # ele fica amarrado a ela.
+    # Entradas de anos anteriores ficam com a data certa e SEM alteração —
+    # criar uma datada em 2007 inventaria um evento que o escritório nunca
+    # registrou; ela é associada depois, na edição do vínculo. Só a saída
+    # deste ano (a da LUIZA) ganha a alteração automática.
     (alteracao,) = repo.listar_alteracoes(conn, empresa.id)
-    assert all(v.alteracao_entrada_id == alteracao.id for v in vinculos.values())
+    assert alteracao.data == "2026-05-20"
+    assert all(v.alteracao_entrada_id is None for v in vinculos.values())
     assert vinculos[socios["LUIZA DIAS TORRES"].id].alteracao_saida_id == alteracao.id
 
 

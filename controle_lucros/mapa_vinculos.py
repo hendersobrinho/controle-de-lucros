@@ -33,7 +33,10 @@ from dataclasses import dataclass
 LARGURA_PADRAO = 1180
 
 CAIXA_LARGURA = 290
-CAIXA_ALTURA = 58
+# Três linhas: nome, período e capital do sócio. A do capital só é escrita
+# quando o valor foi informado, mas a altura é a mesma pra todas as caixas —
+# caixas de alturas diferentes desalinhariam as duas colunas.
+CAIXA_ALTURA = 74
 ESPACO_VERTICAL = 16
 MARGEM = 26
 
@@ -94,6 +97,7 @@ class No:
     data_saida: str | None
     lado: str  # "esquerda" ou "direita"
     caixa: Caixa
+    capital: float | None = None
 
     @property
     def periodo(self) -> str:
@@ -174,8 +178,9 @@ def montar_mapa(
     `papel` diz o que é o centro: com PAPEL_SOCIO (o padrão) as caixas são as
     empresas do sócio e o nome de cada uma vem de "empresa_nome"; com
     PAPEL_EMPRESA são os sócios da empresa, e o nome vem de "socio_nome". O
-    resto do vínculo — percentual, data_entrada e data_saida (None = ativo) —
-    é igual nos dois sentidos, e a geometria não muda.
+    resto do vínculo — percentual, data_entrada e data_saida (None = ativo),
+    e "capital" (o capital do sócio em reais, opcional) — é igual nos dois
+    sentidos, e a geometria não muda.
 
     `vinculos` são dicts, de propósito, e não os objetos do banco: o desenho
     não precisa saber de id nem de cotas, e assim dá pra montar um mapa de
@@ -219,6 +224,7 @@ def montar_mapa(
                     data_saida=vinculo.get("data_saida") or None,
                     lado=lado,
                     caixa=Caixa(x, y, CAIXA_LARGURA, CAIXA_ALTURA),
+                    capital=float(vinculo["capital"]) if vinculo.get("capital") else None,
                 )
             )
 

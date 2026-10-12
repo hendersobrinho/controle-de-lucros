@@ -129,6 +129,8 @@ def test_excluir_volta_pro_estado_bloqueado(empresas, monkeypatch):
     from controle_lucros.ui import common as common_mod
 
     monkeypatch.setattr(common_mod.QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+    # A empresa pergunta com warning: a exclusão leva junto o que é dela.
+    monkeypatch.setattr(common_mod.QMessageBox, "warning", lambda *a, **k: QMessageBox.Yes)
     empresas.tabela.selectRow(0)
     empresas.excluir()
 
@@ -304,3 +306,29 @@ def test_socios_cancelar_so_aparece_com_o_formulario_aberto(socios):
     assert not socios.btn_cancelar.isVisibleTo(socios)
     socios._novo_socio()
     assert socios.btn_cancelar.isVisibleTo(socios)
+
+
+def test_excluir_empresa_diz_o_que_vai_junto_e_ja_vem_em_nao(empresas, monkeypatch):
+    """A empresa leva junto tudo o que é dela: a pergunta diz o quê, e
+    responder "Não" (o padrão) não apaga nada."""
+    from controle_lucros.models import Socio
+    from controle_lucros.ui import common as common_mod
+
+    empresa_id = repo.listar_empresas(empresas.conn)[0].id  # a primeira da tabela, por nome
+    socio_id = repo.salvar_socio(empresas.conn, Socio(None, "Fulano", "111.111.111-11"))
+    repo.associar_socio_a_empresa(empresas.conn, empresa_id, socio_id, 100, 100, "2020-01-01")
+
+    perguntas = []
+    def responder(parent, titulo, texto, botoes=None, padrao=None):
+        perguntas.append((texto, padrao))
+        return QMessageBox.No
+    monkeypatch.setattr(common_mod.QMessageBox, "warning", responder)
+
+    empresas.tabela.selectRow(0)
+    empresas.excluir()
+
+    texto, padrao = perguntas[0]
+    assert "1 vínculo(s) de sócio" in texto
+    assert "sócios continuam cadastrados" in texto
+    assert padrao == QMessageBox.No
+    assert any(e.id == empresa_id for e in repo.listar_empresas(empresas.conn))

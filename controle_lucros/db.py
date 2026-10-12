@@ -100,7 +100,8 @@ CREATE TABLE IF NOT EXISTS vinculo_societario (
     data_saida TEXT,
     alteracao_entrada_id INTEGER REFERENCES alteracao_contratual(id),
     alteracao_saida_id INTEGER REFERENCES alteracao_contratual(id),
-    observacao TEXT
+    observacao TEXT,
+    valor_capital DOUBLE PRECISION
 );
 
 CREATE TABLE IF NOT EXISTS distribuicao_lucro (
@@ -232,6 +233,11 @@ CREATE TABLE IF NOT EXISTS log_atividade (
     entidade_id INTEGER,
     detalhes TEXT
 );
+
+-- Colunas que entraram depois da 2.0.0. CREATE TABLE IF NOT EXISTS não mexe
+-- em tabela que já existe, então um banco criado antes nunca as ganharia;
+-- ADD COLUMN IF NOT EXISTS é inofensivo num banco que já as tem.
+ALTER TABLE vinculo_societario ADD COLUMN IF NOT EXISTS valor_capital DOUBLE PRECISION;
 """
 
 # Na ordem em que podem ser preenchidas sem ferir chave estrangeira — é a

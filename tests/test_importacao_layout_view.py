@@ -303,7 +303,7 @@ def test_ciclo_completo_exporta_reimporta_e_nao_duplica(tela, conn, tmp_path, mo
     assert len(repo.listar_empresas(conn)) == 1
     assert len(repo.listar_socios(conn)) == 1
     assert len(repo.listar_vinculos_empresa(conn, empresa_id)) == 1
-    assert "1 já existiam (ignorados)" in tela.resultado.text()
+    assert "1 já estavam cadastrados, sem mudança" in tela.resultado.text()
 
 
 # ---------------------------------------------------- reaproveitar o layout --

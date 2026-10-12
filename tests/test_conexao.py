@@ -183,9 +183,9 @@ def test_erro_no_meio_da_gravacao_nao_trava_a_conexao(conn):
     conn.commit()
 
     with pytest.raises(ValueError, match="Não é possível excluir"):
-        repo.excluir_empresa(conn, empresa_id)
+        repo.excluir_socio(conn, 1)  # tem vínculo: a chave estrangeira recusa
 
-    assert [e.nome for e in repo.listar_empresas(conn)] == ["ACME LTDA"]
+    assert [s.nome for s in repo.listar_socios(conn)] == ["Fulano"]
     repo.salvar_empresa(conn, Empresa(None, "002", "OUTRA LTDA", "", 1, 1))
     assert len(repo.listar_empresas(conn)) == 2
 

@@ -577,6 +577,7 @@ def linhas_para_importacao(empresas: list[EmpresaDoRelatorio]) -> list[dict]:
                     "tipo_pessoa": socio.tipo_pessoa,
                     "percentual_capital": socio.percentual,
                     "cotas_socio": 0.0,
+                    "valor_capital_socio": 0.0,
                     "data_entrada": socio.data_entrada,
                     "data_saida": socio.data_saida,
                     "ano_base": None,

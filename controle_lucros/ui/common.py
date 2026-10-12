@@ -690,14 +690,20 @@ class CrudTab(QWidget):
         self.limpar_form()
         self._definir_modo(MODO_SALVO)
 
+    def confirmar_exclusao(self, id_) -> bool:
+        """A pergunta antes de excluir. Tela cuja exclusão leva mais coisa
+        junto (a empresa leva vínculos, alterações, distribuições...)
+        sobrescreve pra dizer o quê."""
+        resposta = QMessageBox.question(
+            self, "Excluir", "Confirma a exclusão do registro selecionado?"
+        )
+        return resposta == QMessageBox.Yes
+
     def excluir(self) -> None:
         if self._registro_atual_id is None:
             QMessageBox.information(self, "Excluir", "Selecione um registro na tabela.")
             return
-        resposta = QMessageBox.question(
-            self, "Excluir", "Confirma a exclusão do registro selecionado?"
-        )
-        if resposta != QMessageBox.Yes:
+        if not self.confirmar_exclusao(self._registro_atual_id):
             return
         try:
             self.excluir_registro(self._registro_atual_id)

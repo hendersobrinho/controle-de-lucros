@@ -75,7 +75,7 @@ def test_topico_da_pagina_cai_no_inicio_quando_nao_conhece():
         ("distribuicao", ["Trancar o período", "Importar planilha", "Movimentações"]),
         ("dashboard", ["proporcional", "tolerância"]),
         ("sistema.importar", ["CPF", "CNPJ", "nº da empresa"]),
-        ("socios", ["Encerrar vínculo", "Excluir vínculo"]),
+        ("socios", ["Editar vínculo", "Saiu da sociedade", "Excluir vínculo", "Capital (R$)"]),
         ("sistema", ["backup", "log"]),
     ],
 )

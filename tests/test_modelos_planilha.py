@@ -175,8 +175,8 @@ def test_modelo_empresas_socios_cria_empresa_e_vinculo(tmp_path, conn):
     caminho = tmp_path / "es.xlsx"
     exportar_modelo_cadastro(caminho, modelo="empresas_socios")
     _preencher(caminho, [
-        ["020", "GAMA LTDA", "", 100000, 1000, "Fulano de Tal", "111.111.111-11", "Física", 60, 600, "01/01/2020"],
-        ["020", "GAMA LTDA", "", 100000, 1000, "Beltrano da Silva", "222.222.222-22", "Física", 40, 400, "01/01/2020"],
+        ["020", "GAMA LTDA", "", 100000, 1000, "Fulano de Tal", "111.111.111-11", "Física", 60, 600, 60000, "01/01/2020"],
+        ["020", "GAMA LTDA", "", 100000, 1000, "Beltrano da Silva", "222.222.222-22", "Física", 40, 400, 40000, "01/01/2020"],
     ])
 
     linhas = importar_cadastro(caminho)

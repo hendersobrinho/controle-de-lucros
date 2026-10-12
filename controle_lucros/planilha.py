@@ -16,7 +16,7 @@ COLUNAS_DISTRIBUICAO = ["CPF", "Sócio", "Valor Distribuído", "Pró-labore", "I
 COLUNAS_CADASTRO = [
     "Nº Empresa", "Empresa", "CNPJ", "Capital Social", "Qtd. Cotas da Empresa",
     "Sócio", "CPF/CNPJ do Sócio", "Tipo (física/jurídica)",
-    "% Capital do Sócio", "Cotas do Sócio", "Data de Entrada", "Data de Saída",
+    "% Capital do Sócio", "Cotas do Sócio", "Capital do Sócio (R$)", "Data de Entrada", "Data de Saída",
     "Ano Base", "Valor Distribuído", "Pró-labore", "IRRF",
 ]
 
@@ -27,14 +27,15 @@ COLUNAS_CADASTRO = [
 CAMPOS_CADASTRO = [
     "numero_chamada", "empresa_nome", "cnpj", "capital_social", "quantidade_cotas",
     "socio_nome", "socio_cpf", "tipo_pessoa",
-    "percentual_capital", "cotas_socio", "data_entrada", "data_saida",
+    "percentual_capital", "cotas_socio", "valor_capital_socio", "data_entrada", "data_saida",
     "ano_base", "valor_distribuido", "pro_labore", "irrf",
 ]
 
 LARGURAS_CADASTRO = {
     "numero_chamada": 11, "empresa_nome": 30, "cnpj": 21, "capital_social": 16,
     "quantidade_cotas": 20, "socio_nome": 30, "socio_cpf": 21, "tipo_pessoa": 19,
-    "percentual_capital": 17, "cotas_socio": 15, "data_entrada": 15, "data_saida": 14,
+    "percentual_capital": 17, "cotas_socio": 15, "valor_capital_socio": 20,
+    "data_entrada": 15, "data_saida": 14,
     "ano_base": 10, "valor_distribuido": 17, "pro_labore": 14, "irrf": 12,
 }
 
@@ -57,7 +58,10 @@ class ModeloCadastro:
 
 
 _CAMPOS_EMPRESA = ("numero_chamada", "empresa_nome", "cnpj", "capital_social", "quantidade_cotas")
-_CAMPOS_VINCULO = ("socio_nome", "socio_cpf", "tipo_pessoa", "percentual_capital", "cotas_socio", "data_entrada")
+_CAMPOS_VINCULO = (
+    "socio_nome", "socio_cpf", "tipo_pessoa", "percentual_capital", "cotas_socio",
+    "valor_capital_socio", "data_entrada",
+)
 
 MODELOS_CADASTRO = (
     ModeloCadastro(
@@ -105,7 +109,7 @@ LINHAS_EXEMPLO_CADASTRO = [
         "numero_chamada": "001", "empresa_nome": "PADARIA MODELO LTDA",
         "cnpj": "11.111.111/0001-11", "capital_social": 100000, "quantidade_cotas": 100000,
         "socio_nome": "MARIA EXEMPLO DA SILVA", "socio_cpf": "111.111.111-11",
-        "tipo_pessoa": "Física", "percentual_capital": 60, "cotas_socio": 60000,
+        "tipo_pessoa": "Física", "percentual_capital": 60, "cotas_socio": 60000, "valor_capital_socio": 60000,
         "data_entrada": "01/01/2020", "data_saida": "",
         "ano_base": 2025, "valor_distribuido": 60000, "pro_labore": 24000, "irrf": 1500,
     },
@@ -113,7 +117,7 @@ LINHAS_EXEMPLO_CADASTRO = [
         "numero_chamada": "001", "empresa_nome": "PADARIA MODELO LTDA",
         "cnpj": "11.111.111/0001-11", "capital_social": 100000, "quantidade_cotas": 100000,
         "socio_nome": "JOAO EXEMPLO SOUZA", "socio_cpf": "222.222.222-22",
-        "tipo_pessoa": "Física", "percentual_capital": 40, "cotas_socio": 40000,
+        "tipo_pessoa": "Física", "percentual_capital": 40, "cotas_socio": 40000, "valor_capital_socio": 40000,
         "data_entrada": "01/01/2020", "data_saida": "",
         "ano_base": 2025, "valor_distribuido": 40000, "pro_labore": 18000, "irrf": 900,
     },
@@ -122,7 +126,7 @@ LINHAS_EXEMPLO_CADASTRO = [
         "numero_chamada": "002", "empresa_nome": "TRANSPORTES EXEMPLO ME",
         "cnpj": "22.222.222/0001-22", "capital_social": 50000, "quantidade_cotas": 50000,
         "socio_nome": "MARIA EXEMPLO DA SILVA", "socio_cpf": "111.111.111-11",
-        "tipo_pessoa": "Física", "percentual_capital": 100, "cotas_socio": 50000,
+        "tipo_pessoa": "Física", "percentual_capital": 100, "cotas_socio": 50000, "valor_capital_socio": 50000,
         "data_entrada": "15/03/2021", "data_saida": "",
         "ano_base": 2025, "valor_distribuido": 30000, "pro_labore": 0, "irrf": 0,
     },
@@ -132,7 +136,7 @@ LINHAS_EXEMPLO_CADASTRO = [
         "numero_chamada": "003", "empresa_nome": "CLINICA EXEMPLO LTDA",
         "cnpj": "33.333.333/0001-33", "capital_social": 200000, "quantidade_cotas": 200000,
         "socio_nome": "HOLDING EXEMPLO PARTICIPACOES LTDA", "socio_cpf": "44.444.444/0001-44",
-        "tipo_pessoa": "Jurídica", "percentual_capital": 70, "cotas_socio": 140000,
+        "tipo_pessoa": "Jurídica", "percentual_capital": 70, "cotas_socio": 140000, "valor_capital_socio": 140000,
         "data_entrada": "01/01/2019", "data_saida": "",
         "ano_base": "", "valor_distribuido": "", "pro_labore": "", "irrf": "",
     },
@@ -140,7 +144,7 @@ LINHAS_EXEMPLO_CADASTRO = [
         "numero_chamada": "003", "empresa_nome": "CLINICA EXEMPLO LTDA",
         "cnpj": "33.333.333/0001-33", "capital_social": 200000, "quantidade_cotas": 200000,
         "socio_nome": "JOAO EXEMPLO SOUZA", "socio_cpf": "222.222.222-22",
-        "tipo_pessoa": "Física", "percentual_capital": 30, "cotas_socio": 60000,
+        "tipo_pessoa": "Física", "percentual_capital": 30, "cotas_socio": 60000, "valor_capital_socio": 60000,
         "data_entrada": "01/01/2019", "data_saida": "30/06/2025",
         "ano_base": "", "valor_distribuido": "", "pro_labore": "", "irrf": "",
     },
@@ -150,7 +154,7 @@ LINHAS_EXEMPLO_CADASTRO = [
         "numero_chamada": "004", "empresa_nome": "CONSULTORIA EXEMPLO ASSOCIADOS",
         "cnpj": "55.555.555/0001-55", "capital_social": 90000, "quantidade_cotas": 90000,
         "socio_nome": "RENATO EXEMPLO ALVES", "socio_cpf": "555.555.555-55",
-        "tipo_pessoa": "Física", "percentual_capital": 33.3334, "cotas_socio": 30000,
+        "tipo_pessoa": "Física", "percentual_capital": 33.3334, "cotas_socio": 30000, "valor_capital_socio": 30000,
         "data_entrada": "01/06/2022", "data_saida": "",
         "ano_base": 2025, "valor_distribuido": 20000, "pro_labore": 9000, "irrf": 220,
     },
@@ -158,7 +162,7 @@ LINHAS_EXEMPLO_CADASTRO = [
         "numero_chamada": "004", "empresa_nome": "CONSULTORIA EXEMPLO ASSOCIADOS",
         "cnpj": "55.555.555/0001-55", "capital_social": 90000, "quantidade_cotas": 90000,
         "socio_nome": "BEATRIZ EXEMPLO LIMA", "socio_cpf": "666.666.666-66",
-        "tipo_pessoa": "Física", "percentual_capital": 33.3333, "cotas_socio": 30000,
+        "tipo_pessoa": "Física", "percentual_capital": 33.3333, "cotas_socio": 30000, "valor_capital_socio": 30000,
         "data_entrada": "01/06/2022", "data_saida": "",
         "ano_base": 2025, "valor_distribuido": 20000, "pro_labore": 0, "irrf": 0,
     },
@@ -166,7 +170,7 @@ LINHAS_EXEMPLO_CADASTRO = [
         "numero_chamada": "004", "empresa_nome": "CONSULTORIA EXEMPLO ASSOCIADOS",
         "cnpj": "55.555.555/0001-55", "capital_social": 90000, "quantidade_cotas": 90000,
         "socio_nome": "CARLOS EXEMPLO ROCHA", "socio_cpf": "777.777.777-77",
-        "tipo_pessoa": "Física", "percentual_capital": 33.3333, "cotas_socio": 30000,
+        "tipo_pessoa": "Física", "percentual_capital": 33.3333, "cotas_socio": 30000, "valor_capital_socio": 30000,
         "data_entrada": "01/06/2022", "data_saida": "",
         "ano_base": 2025, "valor_distribuido": 20000, "pro_labore": 0, "irrf": 0,
     },
@@ -176,7 +180,7 @@ LINHAS_EXEMPLO_CADASTRO = [
         "numero_chamada": "005", "empresa_nome": "TECH EXEMPLO SOLUCOES LTDA",
         "cnpj": "12.ABC.345/01DE-35", "capital_social": 15000, "quantidade_cotas": 15000,
         "socio_nome": "DIEGO EXEMPLO FREITAS", "socio_cpf": "888.888.888-88",
-        "tipo_pessoa": "Física", "percentual_capital": 100, "cotas_socio": 15000,
+        "tipo_pessoa": "Física", "percentual_capital": 100, "cotas_socio": 15000, "valor_capital_socio": 15000,
         "data_entrada": "01/03/2026", "data_saida": "",
         "ano_base": "", "valor_distribuido": "", "pro_labore": "", "irrf": "",
     },
@@ -201,6 +205,10 @@ NOTAS_EXEMPLO_CADASTRO = [
     "é criada. Sócio nunca é criado sem você confirmar na tela.",
     "Data de Saída só para quem já saiu da sociedade. Ano Base, Valor Distribuído, "
     "Pró-labore e IRRF só se for lançar a distribuição daquele ano junto.",
+    "Capital do Sócio (R$) é o capital que ele tem naquela empresa, em reais. Em "
+    "branco, o sistema mostra uma estimativa pelas cotas.",
+    "Importar de novo a mesma planilha atualiza % do capital, cotas e capital de "
+    "quem já é sócio — coluna em branco não apaga o que já está cadastrado.",
 ]
 
 
@@ -408,7 +416,7 @@ def _ler_xlsx(caminho: Path) -> list[list]:
 
 _NUMERICOS_CADASTRO = frozenset(
     {"capital_social", "quantidade_cotas", "percentual_capital", "cotas_socio",
-     "valor_distribuido", "pro_labore", "irrf"}
+     "valor_capital_socio", "valor_distribuido", "pro_labore", "irrf"}
 )
 
 
@@ -525,6 +533,11 @@ def importar_cadastro(caminho: Path) -> list[dict]:
         "tipo_pessoa": _indice_coluna(cabecalho, ["tipo (física/jurídica)", "tipo (fisica/juridica)", "tipo"]),
         "percentual_capital": _indice_coluna(cabecalho, ["% capital do sócio", "% capital do socio", "percentual capital", "% capital"]),
         "cotas_socio": _indice_coluna(cabecalho, ["cotas do sócio", "cotas do socio"]),
+        "valor_capital_socio": _indice_coluna(
+            cabecalho,
+            ["capital do sócio (r$)", "capital do socio (r$)", "capital do sócio", "capital do socio",
+             "valor do capital do sócio", "valor do capital do socio"],
+        ),
         "data_entrada": _indice_coluna(cabecalho, ["data de entrada", "data entrada"]),
         "data_saida": _indice_coluna(cabecalho, ["data de saída", "data de saida", "data saída", "data saida"]),
         "ano_base": _indice_coluna(cabecalho, ["ano base", "ano_base", "ano"]),
@@ -587,6 +600,9 @@ def montar_linhas_cadastro(
             quantidade_cotas = numero_opcional(linha, "quantidade_cotas", numero_linha, "quantidade de cotas")
             percentual_capital = numero_opcional(linha, "percentual_capital", numero_linha, "percentual de capital")
             cotas_socio = numero_opcional(linha, "cotas_socio", numero_linha, "cotas do sócio")
+            valor_capital_socio = numero_opcional(
+                linha, "valor_capital_socio", numero_linha, "capital do sócio"
+            )
             valor_distribuido = numero_opcional(linha, "valor_distribuido", numero_linha, "valor distribuído")
             pro_labore = numero_opcional(linha, "pro_labore", numero_linha, "pró-labore")
             irrf = numero_opcional(linha, "irrf", numero_linha, "IRRF")
@@ -639,6 +655,7 @@ def montar_linhas_cadastro(
                 "pro_labore": pro_labore,
                 "irrf": irrf,
                 "cotas_socio": cotas_socio,
+                "valor_capital_socio": valor_capital_socio,
                 "data_entrada": data_entrada,
             }
         )

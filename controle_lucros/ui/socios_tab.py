@@ -1,8 +1,10 @@
 """Aba de Sócios: cadastro básico (nome/cpf) + o painel de vínculos
-societários do sócio selecionado — associar a empresas, atualizar cotas e
-encerrar vínculo. Qualquer mudança feita por aqui gera automaticamente uma
-alteração contratual na empresa correspondente, então o histórico da empresa
-sempre reflete o que foi feito na aba de Sócios, e vice-versa."""
+societários do sócio selecionado — associar a empresas e editar o vínculo
+(participação, capital, datas, alterações contratuais).
+
+Associar gera a alteração contratual automática quando a entrada é do ano
+corrente; entrada mais antiga fica sem ela, pra ser associada depois na
+edição do vínculo. Editar corrige o registro como está, sem alteração nova."""
 from __future__ import annotations
 
 import datetime as dt
@@ -11,6 +13,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QComboBox,
     QDateEdit,
     QDialog,
@@ -22,7 +25,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMenu,
     QMessageBox,
     QPushButton,
     QSplitter,
@@ -61,12 +63,58 @@ def _hairline() -> QFrame:
     return linha
 
 
+def _campo_data(valor_iso: str | None = None) -> QDateEdit:
+    campo = QDateEdit(calendarPopup=True)
+    campo.setDisplayFormat("dd/MM/yyyy")
+    campo.setDate(dt.date.fromisoformat(valor_iso) if valor_iso else dt.date.today())
+    return campo
+
+
+def _campo_numero(maximo: float, casas: int, valor: float | None = None) -> QDoubleSpinBox:
+    campo = QDoubleSpinBox()
+    campo.setMaximum(maximo)
+    campo.setDecimals(casas)
+    formatar_numero(campo)
+    if valor:
+        campo.setValue(valor)
+    return campo
+
+
+def _valor_ou_nada(campo: QDoubleSpinBox) -> float | None:
+    """Capital em branco (zero) é "não informado", não "zero reais": é o que
+    deixa a tela mostrar a estimativa pelas cotas no lugar."""
+    return campo.value() or None
+
+
+def _estimativa_por_cotas(conn, empresa_id: int | None, cotas: float) -> str:
+    """O capital proporcional às cotas, pelo capital e cotas vigentes da
+    empresa — o que se mostra enquanto ninguém informou o capital do sócio."""
+    if empresa_id is None:
+        return ""
+    estado = repo.estado_atual_empresa(conn, empresa_id)
+    total_cotas = estado["quantidade_cotas"]
+    if not total_cotas:
+        return "Sem capital e cotas da empresa cadastrados, não há como estimar pelas cotas."
+    return f"Estimativa pelas cotas: R$ {formatar_valor_br(cotas * estado['capital_social'] / total_cotas)}"
+
+
+def _aviso_alteracao(data_iso: str) -> str:
+    """O que acontece com a alteração contratual de um movimento nessa data
+    (ver repo.alteracao_automatica_cabe)."""
+    if repo.alteracao_automatica_cabe(data_iso):
+        return ""
+    return (
+        f"Entrada anterior a {repo._ano_corrente()}: não é criada alteração contratual "
+        "automática. Se houver uma, associe depois em \"Editar vínculo\"."
+    )
+
+
 class _DialogoAssociarEmpresa(QDialog):
     def __init__(self, conn, socio_id: int, parent=None):
         super().__init__(parent)
         self.conn = conn
         self.setWindowTitle("Associar sócio a uma empresa")
-        self.setMinimumWidth(360)
+        self.setMinimumWidth(400)
 
         vinculadas_ativas = {
             v.empresa_id
@@ -78,34 +126,35 @@ class _DialogoAssociarEmpresa(QDialog):
         for e in repo.listar_empresas(conn):
             if e.id not in vinculadas_ativas:
                 self.empresa.addItem(f"{e.nome} (nº {e.numero_chamada})", e.id)
-        self.empresa.currentIndexChanged.connect(self._recalcular_valor)
+        self.empresa.currentIndexChanged.connect(self._recalcular_estimativa)
 
-        self.percentual = QDoubleSpinBox()
-        self.percentual.setMaximum(100)
-        self.percentual.setDecimals(4)
-        formatar_numero(self.percentual)
+        self.percentual = _campo_numero(100, 4)
+        self.cotas = _campo_numero(1_000_000_000, 2)
+        self.cotas.valueChanged.connect(self._recalcular_estimativa)
+        self.capital = _campo_numero(1_000_000_000_000, 2)
 
-        self.cotas = QDoubleSpinBox()
-        self.cotas.setMaximum(1_000_000_000)
-        formatar_numero(self.cotas)
-        self.cotas.valueChanged.connect(self._recalcular_valor)
+        self.estimativa = QLabel()
+        self.estimativa.setProperty("role", "subtitulo")
+        self.estimativa.setWordWrap(True)
 
-        self.data_entrada = QDateEdit(calendarPopup=True)
-        self.data_entrada.setDisplayFormat("dd/MM/yyyy")
-        self.data_entrada.setDate(dt.date.today())
+        self.data_entrada = _campo_data()
+        self.data_entrada.dateChanged.connect(self._atualizar_aviso_alteracao)
 
         self.descricao = QLineEdit("Inclusão de sócio (registrado pela aba de Sócios)")
-
-        self.valor_participacao = QLabel("R$ 0,00")
-        self.valor_participacao.setProperty("role", "subtitulo")
+        self.descricao.setCursorPosition(0)  # senão o começo do texto fica escondido
+        self.aviso_alteracao = QLabel()
+        self.aviso_alteracao.setProperty("role", "subtitulo")
+        self.aviso_alteracao.setWordWrap(True)
 
         form = QFormLayout()
         form.addRow("Empresa", self.empresa)
         form.addRow("% do capital", self.percentual)
         form.addRow("Qtde de cotas", self.cotas)
-        form.addRow("Valor da participação (hoje)", self.valor_participacao)
+        form.addRow("Capital do sócio (R$)", self.capital)
+        form.addRow("", self.estimativa)
         form.addRow("Data de entrada", self.data_entrada)
         form.addRow("Alteração contratual (descrição)", self.descricao)
+        form.addRow("", self.aviso_alteracao)
 
         botoes = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         botoes.accepted.connect(self.accept)
@@ -115,159 +164,194 @@ class _DialogoAssociarEmpresa(QDialog):
         layout.addLayout(form)
         layout.addWidget(botoes)
 
-        self._recalcular_valor()
+        self._recalcular_estimativa()
+        self._atualizar_aviso_alteracao()
 
-    def _recalcular_valor(self, *_args) -> None:
-        empresa_id = self.empresa.currentData()
-        if empresa_id is None:
-            self.valor_participacao.setText("R$ 0,00")
-            return
-        estado = repo.estado_atual_empresa(self.conn, empresa_id)
-        total_cotas = estado["quantidade_cotas"]
-        valor_por_cota = (estado["capital_social"] / total_cotas) if total_cotas else 0
-        self.valor_participacao.setText(f"R$ {formatar_valor_br(self.cotas.value() * valor_por_cota)}")
+    def _recalcular_estimativa(self, *_args) -> None:
+        self.estimativa.setText(_estimativa_por_cotas(self.conn, self.empresa.currentData(), self.cotas.value()))
 
-    def dados(self) -> tuple[int | None, float, float, str, str]:
+    def _atualizar_aviso_alteracao(self, *_args) -> None:
+        aviso = _aviso_alteracao(self.data_entrada.date().toString("yyyy-MM-dd"))
+        self.aviso_alteracao.setText(aviso)
+        self.aviso_alteracao.setVisible(bool(aviso))
+        self.descricao.setEnabled(not aviso)
+
+    def dados(self) -> tuple[int | None, float, float, str, str, float | None]:
         return (
             self.empresa.currentData(),
             self.percentual.value(),
             self.cotas.value(),
             self.data_entrada.date().toString("yyyy-MM-dd"),
             self.descricao.text().strip(),
+            _valor_ou_nada(self.capital),
         )
-
-
-class _DialogoAtualizarCotas(QDialog):
-    def __init__(self, conn, vinculo: VinculoSocietario, empresa_nome: str, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle(f"Atualizar cotas — {empresa_nome}")
-        self.setMinimumWidth(360)
-
-        self.percentual = QDoubleSpinBox()
-        self.percentual.setMaximum(100)
-        self.percentual.setDecimals(4)
-        formatar_numero(self.percentual)
-        self.percentual.setValue(vinculo.percentual_capital)
-
-        self.cotas = QDoubleSpinBox()
-        self.cotas.setMaximum(1_000_000_000)
-        formatar_numero(self.cotas)
-        self.cotas.setValue(vinculo.quantidade_cotas or 0)
-
-        self.data = QDateEdit(calendarPopup=True)
-        self.data.setDisplayFormat("dd/MM/yyyy")
-        self.data.setDate(dt.date.today())
-
-        self.descricao = QLineEdit("Atualização de cotas (registrado pela aba de Sócios)")
-
-        form = QFormLayout()
-        form.addRow("Novo % do capital", self.percentual)
-        form.addRow("Nova qtde de cotas", self.cotas)
-        form.addRow("Data da atualização", self.data)
-        form.addRow("Alteração contratual (descrição)", self.descricao)
-
-        botoes = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        botoes.accepted.connect(self.accept)
-        botoes.rejected.connect(self.reject)
-
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Isto encerra o vínculo atual e abre um novo com os valores informados, preservando o histórico."))
-        layout.addLayout(form)
-        layout.addWidget(botoes)
-
-    def dados(self) -> tuple[float, float, str, str]:
-        return (
-            self.percentual.value(),
-            self.cotas.value(),
-            self.data.date().toString("yyyy-MM-dd"),
-            self.descricao.text().strip(),
-        )
-
-
-class _DialogoEncerrarVinculo(QDialog):
-    def __init__(self, empresa_nome: str, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle(f"Encerrar vínculo — {empresa_nome}")
-        self.setMinimumWidth(360)
-
-        self.data_saida = QDateEdit(calendarPopup=True)
-        self.data_saida.setDisplayFormat("dd/MM/yyyy")
-        self.data_saida.setDate(dt.date.today())
-
-        self.descricao = QLineEdit("Saída de sócio (registrado pela aba de Sócios)")
-
-        form = QFormLayout()
-        form.addRow("Data de saída", self.data_saida)
-        form.addRow("Alteração contratual (descrição)", self.descricao)
-
-        botoes = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        botoes.accepted.connect(self.accept)
-        botoes.rejected.connect(self.reject)
-
-        layout = QVBoxLayout(self)
-        layout.addLayout(form)
-        layout.addWidget(botoes)
-
-    def dados(self) -> tuple[str, str]:
-        return self.data_saida.date().toString("yyyy-MM-dd"), self.descricao.text().strip()
 
 
 class _DialogoEditarVinculo(QDialog):
-    """Corrige as datas (e observação) de um vínculo já existente — não é um
-    evento societário novo, então não gera alteração contratual."""
+    """Todos os dados do vínculo numa tela só: participação, capital, datas,
+    alterações contratuais e observação — e o botão de excluir.
 
-    def __init__(self, vinculo: VinculoSocietario, empresa_nome: str, parent=None):
+    Substitui as quatro ações separadas que existiam (editar datas,
+    atualizar cotas, encerrar, excluir), que obrigavam a saber de antemão
+    qual delas fazia o quê. Aqui tudo é correção do próprio registro: não
+    abre vínculo novo nem cria alteração contratual. A alteração de entrada
+    e de saída é escolhida entre as que a empresa já tem — é como se
+    associa depois a alteração que a importação não criou."""
+
+    EXCLUIDO = 2
+
+    def __init__(self, conn, vinculo: VinculoSocietario, empresa_nome: str, parent=None):
         super().__init__(parent)
+        self.conn = conn
+        self.vinculo = vinculo
         self.setWindowTitle(f"Editar vínculo — {empresa_nome}")
-        self.setMinimumWidth(360)
+        self.setMinimumWidth(460)
 
-        self.data_entrada = QDateEdit(calendarPopup=True)
-        self.data_entrada.setDisplayFormat("dd/MM/yyyy")
-        self.data_entrada.setDate(dt.datetime.strptime(vinculo.data_entrada, "%Y-%m-%d").date())
+        self.percentual = _campo_numero(100, 4, vinculo.percentual_capital)
+        self.cotas = _campo_numero(1_000_000_000, 2, vinculo.quantidade_cotas)
+        self.cotas.valueChanged.connect(self._recalcular_estimativa)
+        self.capital = _campo_numero(1_000_000_000_000, 2, vinculo.valor_capital)
+        self.estimativa = QLabel()
+        self.estimativa.setProperty("role", "subtitulo")
+        self.estimativa.setWordWrap(True)
 
-        self.tem_saida = vinculo.data_saida is not None
-        self.data_saida = QDateEdit(calendarPopup=True)
-        self.data_saida.setDisplayFormat("dd/MM/yyyy")
-        if self.tem_saida:
-            self.data_saida.setDate(dt.datetime.strptime(vinculo.data_saida, "%Y-%m-%d").date())
+        self.data_entrada = _campo_data(vinculo.data_entrada)
+        self.saiu = QCheckBox("Saiu da sociedade")
+        self.saiu.setChecked(vinculo.data_saida is not None)
+        self.data_saida = _campo_data(vinculo.data_saida)
+        self.saiu.toggled.connect(self._ajustar_saida)
+
+        alteracoes = repo.listar_alteracoes(conn, vinculo.empresa_id)
+        self.alteracao_entrada = self._combo_alteracoes(alteracoes, vinculo.alteracao_entrada_id)
+        self.alteracao_saida = self._combo_alteracoes(alteracoes, vinculo.alteracao_saida_id)
 
         self.observacao = QLineEdit(vinculo.observacao or "")
 
         form = QFormLayout()
+        form.addRow("% do capital", self.percentual)
+        form.addRow("Qtde de cotas", self.cotas)
+        form.addRow("Capital do sócio (R$)", self.capital)
+        form.addRow("", self.estimativa)
         form.addRow("Data de entrada", self.data_entrada)
-        if self.tem_saida:
-            form.addRow("Data de saída", self.data_saida)
+        form.addRow("Alteração de entrada", self.alteracao_entrada)
+        form.addRow("", self.saiu)
+        form.addRow("Data de saída", self.data_saida)
+        form.addRow("Alteração de saída", self.alteracao_saida)
         form.addRow("Observação", self.observacao)
 
-        botoes = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        botoes.accepted.connect(self.accept)
-        botoes.rejected.connect(self.reject)
-
-        layout = QVBoxLayout(self)
         aviso = QLabel(
-            "Isto corrige o registro existente (não abre uma nova alteração contratual)."
-            if not self.tem_saida
-            else "Este vínculo já está encerrado; a saída só pode ser editada aqui."
+            "Corrige este registro como está — não abre um vínculo novo nem cria alteração "
+            "contratual. Para registrar uma mudança com histórico, cadastre a alteração na "
+            "aba Alterações contratuais e associe-a aqui."
         )
         aviso.setProperty("role", "subtitulo")
         aviso.setWordWrap(True)
+
+        self.btn_excluir = QPushButton("Excluir vínculo")
+        self.btn_excluir.setProperty("role", "perigo")
+        self.btn_excluir.clicked.connect(self._excluir)
+        btn_cancelar = QPushButton("Cancelar")
+        btn_cancelar.clicked.connect(self.reject)
+        btn_salvar = QPushButton("Salvar")
+        btn_salvar.setProperty("role", "primario")
+        btn_salvar.setDefault(True)
+        btn_salvar.clicked.connect(self._salvar)
+
+        botoes = QHBoxLayout()
+        botoes.addWidget(self.btn_excluir)
+        botoes.addStretch()
+        botoes.addWidget(btn_cancelar)
+        botoes.addWidget(btn_salvar)
+
+        layout = QVBoxLayout(self)
         layout.addWidget(aviso)
         layout.addLayout(form)
-        layout.addWidget(botoes)
+        layout.addLayout(botoes)
 
-    def dados(self) -> tuple[str, str | None, str]:
-        data_saida = self.data_saida.date().toString("yyyy-MM-dd") if self.tem_saida else None
-        return self.data_entrada.date().toString("yyyy-MM-dd"), data_saida, self.observacao.text().strip()
+        self._recalcular_estimativa()
+        self._ajustar_saida()
+
+    @staticmethod
+    def _combo_alteracoes(alteracoes: list, atual_id: int | None) -> QComboBox:
+        combo = QComboBox()
+        combo.addItem("Nenhuma (associar depois)", None)
+        for a in alteracoes:
+            data = dt.date.fromisoformat(a.data).strftime("%d/%m/%Y")
+            descricao = (a.descricao or "").strip()
+            if len(descricao) > 40:
+                descricao = descricao[:39] + "…"
+            rotulo = f"Nº {a.numero} — {data}" + (f" — {descricao}" if descricao else "")
+            if a.fechada:
+                rotulo += " (trancada)"
+            combo.addItem(rotulo, a.id)
+        indice = combo.findData(atual_id)
+        combo.setCurrentIndex(indice if indice >= 0 else 0)
+        return combo
+
+    def _recalcular_estimativa(self, *_args) -> None:
+        self.estimativa.setText(_estimativa_por_cotas(self.conn, self.vinculo.empresa_id, self.cotas.value()))
+
+    def _ajustar_saida(self, *_args) -> None:
+        saiu = self.saiu.isChecked()
+        self.data_saida.setEnabled(saiu)
+        self.alteracao_saida.setEnabled(saiu)
+
+    def vinculo_editado(self) -> VinculoSocietario:
+        saiu = self.saiu.isChecked()
+        return VinculoSocietario(
+            id=self.vinculo.id,
+            empresa_id=self.vinculo.empresa_id,
+            socio_id=self.vinculo.socio_id,
+            percentual_capital=self.percentual.value(),
+            quantidade_cotas=self.cotas.value() or None,
+            data_entrada=self.data_entrada.date().toString("yyyy-MM-dd"),
+            data_saida=self.data_saida.date().toString("yyyy-MM-dd") if saiu else None,
+            alteracao_entrada_id=self.alteracao_entrada.currentData(),
+            alteracao_saida_id=self.alteracao_saida.currentData() if saiu else None,
+            observacao=self.observacao.text().strip(),
+            valor_capital=_valor_ou_nada(self.capital),
+        )
+
+    def _salvar(self) -> None:
+        """Grava daqui mesmo, e só fecha se deu certo: com erro (período
+        fechado, alteração trancada, saída antes da entrada) a pessoa corrige
+        na tela em vez de perder tudo o que tinha digitado."""
+        try:
+            repo.salvar_vinculo(self.conn, self.vinculo_editado())
+        except ValueError as exc:
+            QMessageBox.warning(self, "Não foi possível salvar", str(exc))
+            return
+        self.accept()
+
+    def _excluir(self) -> None:
+        resposta = QMessageBox.question(
+            self,
+            "Excluir vínculo",
+            "Excluir de vez este vínculo? O registro é apagado, sem deixar histórico.\n\n"
+            "Se o sócio saiu da sociedade, marque \"Saiu da sociedade\" com a data em vez de "
+            "excluir — assim os anos em que ele participou continuam aparecendo.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if resposta != QMessageBox.Yes:
+            return
+        try:
+            repo.excluir_vinculo(self.conn, self.vinculo.id)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Não foi possível excluir", str(exc))
+            return
+        self.done(self.EXCLUIDO)
 
 
 class SociosTab(QWidget):
+    COLUNA_CAPITAL = 4
     COLUNA_SITUACAO = 7
     COLUNAS_VINCULOS = [
         "Empresa",
         "% registrado",
         "% atual",
         "Cotas",
-        "Valor da participação",
+        "Capital (R$)",
         "Entrada",
         "Saída",
         "Situação",
@@ -441,27 +525,23 @@ class SociosTab(QWidget):
         self.tabela_vinculos.setSelectionMode(QAbstractItemView.SingleSelection)
         self.tabela_vinculos.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.tabela_vinculos.itemSelectionChanged.connect(self._atualizar_disponibilidade_botoes)
+        self.tabela_vinculos.itemDoubleClicked.connect(lambda _item: self._editar_vinculo())
         col.addWidget(self.tabela_vinculos, 1)
 
         self.btn_associar = QPushButton("Associar a uma empresa")
         self.btn_associar.setProperty("role", "primario")
         self.btn_associar.clicked.connect(self._associar_empresa)
 
-        # As quatro ações sobre o vínculo selecionado ficam num menu só:
-        # todas dependem da mesma seleção e nenhuma é de uso frequente, então
-        # como botões soltos só enchiam a barra. "Associar" fica de fora
-        # porque é a única que não precisa de vínculo selecionado — é a ação
-        # com que se começa.
-        self.btn_acoes_vinculo = QPushButton("Ações do vínculo")
-        menu = QMenu(self.btn_acoes_vinculo)
-        self.acao_editar = menu.addAction("Editar datas", self._editar_vinculo)
-        self.acao_atualizar_cotas = menu.addAction("Atualizar cotas", self._atualizar_cotas)
-        # As duas de baixo mexem no histórico; a separação é o aviso visual
-        # que o vermelho dos botões dava antes.
-        menu.addSeparator()
-        self.acao_encerrar = menu.addAction("Encerrar vínculo", self._encerrar_vinculo)
-        self.acao_excluir = menu.addAction("Excluir vínculo", self._excluir_vinculo)
-        self.btn_acoes_vinculo.setMenu(menu)
+        # Uma ação só pro vínculo selecionado: a tela de edição tem todos os
+        # campos (inclusive a saída) e o botão de excluir. Antes eram quatro
+        # ações — editar datas, atualizar cotas, encerrar, excluir — e era
+        # preciso saber de antemão qual delas mexia em quê.
+        self.btn_editar_vinculo = QPushButton("Editar vínculo")
+        self.btn_editar_vinculo.setToolTip(
+            "Participação, capital, datas de entrada e saída, alterações contratuais e "
+            "observação. Também dá para abrir com dois cliques no vínculo."
+        )
+        self.btn_editar_vinculo.clicked.connect(self._editar_vinculo)
 
         self.btn_informe = QPushButton("Informe de rendimentos")
         self.btn_informe.setToolTip(
@@ -470,11 +550,9 @@ class SociosTab(QWidget):
         )
         self.btn_informe.clicked.connect(self._emitir_informe)
 
-        # Com as quatro ações no menu, tudo volta a caber numa linha só na
-        # largura padrão da janela.
         botoes = QHBoxLayout()
         botoes.addWidget(self.btn_associar)
-        botoes.addWidget(self.btn_acoes_vinculo)
+        botoes.addWidget(self.btn_editar_vinculo)
         botoes.addStretch()
         botoes.addWidget(self.btn_informe)
         col.addLayout(botoes)
@@ -693,12 +771,23 @@ class SociosTab(QWidget):
 
             ativo = v.data_saida is None
             situacao = "Ativo" if ativo else "Encerrado"
+            # Capital informado vale como está; sem ele, o vínculo ativo mostra
+            # a estimativa pelas cotas, marcada com "≈" pra não passar por
+            # valor informado. Vínculo encerrado sem capital não tem o que
+            # estimar: o capital de hoje não diz nada sobre quem já saiu.
+            estimado = v.valor_capital is None and ativo
+            if v.valor_capital is not None:
+                capital = formatar_valor_br(v.valor_capital)
+            elif estimado:
+                capital = f"≈ {formatar_valor_br(repo.valor_participacao(self.conn, v))}"
+            else:
+                capital = "—"
             valores = [
                 empresa.nome if empresa else "?",
                 formatar_valor_br(v.percentual_capital, 4),
                 percentual_atual,
                 formatar_valor_br(v.quantidade_cotas or 0, 0),
-                f"R$ {formatar_valor_br(repo.valor_participacao(self.conn, v))}" if ativo else "—",
+                capital,
                 v.data_entrada,
                 v.data_saida or "—",
                 situacao,
@@ -706,6 +795,11 @@ class SociosTab(QWidget):
             for col, valor in enumerate(valores):
                 item = QTableWidgetItem(valor)
                 item.setData(Qt.UserRole, v.id)
+                if col == self.COLUNA_CAPITAL and estimado:
+                    item.setToolTip(
+                        "Estimativa pelas cotas (capital social ÷ cotas da empresa × cotas do "
+                        "sócio). Informe o capital do sócio em \"Editar vínculo\" para gravar o valor."
+                    )
                 if col == self.COLUNA_SITUACAO:
                     # A situação é a única coluna que é um julgamento, não um
                     # dado: em verde e vermelho ela se lê antes de ser lida.
@@ -724,25 +818,13 @@ class SociosTab(QWidget):
         self.btn_associar.setEnabled(tem_socio)
         self.btn_mapa.setEnabled(tem_socio)
         self.btn_informe.setEnabled(tem_socio)
-        tem_vinculo = self._vinculo_selecionado() is not None
-        vinculo_ativo_selecionado = self._vinculo_ativo_selecionado() is not None
-        # Sem vínculo selecionado nenhuma das ações do menu vale, então o
-        # botão inteiro trava — abrir um menu com tudo apagado não ajuda.
-        self.btn_acoes_vinculo.setEnabled(tem_vinculo)
-        self.acao_editar.setEnabled(tem_vinculo)
-        self.acao_atualizar_cotas.setEnabled(vinculo_ativo_selecionado)
-        self.acao_encerrar.setEnabled(vinculo_ativo_selecionado)
-        self.acao_excluir.setEnabled(tem_vinculo)
+        self.btn_editar_vinculo.setEnabled(self._vinculo_selecionado() is not None)
 
     def _vinculo_selecionado(self) -> VinculoSocietario | None:
         linhas = self.tabela_vinculos.selectionModel().selectedRows() if self.tabela_vinculos.selectionModel() else []
         if not linhas:
             return None
         return self._vinculos_exibidos[linhas[0].row()]
-
-    def _vinculo_ativo_selecionado(self) -> VinculoSocietario | None:
-        vinculo = self._vinculo_selecionado()
-        return vinculo if vinculo is not None and vinculo.data_saida is None else None
 
     def _associar_empresa(self) -> None:
         if self._socio_atual_id is None:
@@ -755,10 +837,11 @@ class SociosTab(QWidget):
             return
         if dialogo.exec() != QDialog.Accepted:
             return
-        empresa_id, percentual, cotas, data_entrada, descricao = dialogo.dados()
+        empresa_id, percentual, cotas, data_entrada, descricao, capital = dialogo.dados()
         try:
             repo.associar_socio_a_empresa(
-                self.conn, empresa_id, self._socio_atual_id, percentual, cotas, data_entrada, descricao or "Inclusão de sócio"
+                self.conn, empresa_id, self._socio_atual_id, percentual, cotas, data_entrada,
+                descricao or "Inclusão de sócio", valor_capital=capital,
             )
         except ValueError as exc:
             QMessageBox.warning(self, "Erro ao associar", str(exc))
@@ -770,51 +853,11 @@ class SociosTab(QWidget):
         if vinculo is None:
             return
         empresa = repo.buscar_empresa(self.conn, vinculo.empresa_id)
-        dialogo = _DialogoEditarVinculo(vinculo, empresa.nome if empresa else "?", self)
-        if dialogo.exec() != QDialog.Accepted:
-            return
-        data_entrada, data_saida, observacao = dialogo.dados()
-        vinculo.data_entrada = data_entrada
-        vinculo.data_saida = data_saida
-        vinculo.observacao = observacao
-        try:
-            repo.salvar_vinculo(self.conn, vinculo)
-        except ValueError as exc:
-            QMessageBox.warning(self, "Erro ao editar vínculo", str(exc))
-            return
-        self._atualizar_painel_vinculos()
-
-    def _atualizar_cotas(self) -> None:
-        vinculo = self._vinculo_ativo_selecionado()
-        if vinculo is None:
-            return
-        empresa = repo.buscar_empresa(self.conn, vinculo.empresa_id)
-        dialogo = _DialogoAtualizarCotas(self.conn, vinculo, empresa.nome if empresa else "?", self)
-        if dialogo.exec() != QDialog.Accepted:
-            return
-        percentual, cotas, data, descricao = dialogo.dados()
-        try:
-            repo.atualizar_cotas_vinculo(self.conn, vinculo, percentual, cotas, data, descricao or "Atualização de cotas")
-        except ValueError as exc:
-            QMessageBox.warning(self, "Erro ao atualizar cotas", str(exc))
-            return
-        self._atualizar_painel_vinculos()
-
-    def _encerrar_vinculo(self) -> None:
-        vinculo = self._vinculo_ativo_selecionado()
-        if vinculo is None:
-            return
-        empresa = repo.buscar_empresa(self.conn, vinculo.empresa_id)
-        dialogo = _DialogoEncerrarVinculo(empresa.nome if empresa else "?", self)
-        if dialogo.exec() != QDialog.Accepted:
-            return
-        data_saida, descricao = dialogo.dados()
-        try:
-            repo.encerrar_vinculo_registrando_alteracao(self.conn, vinculo, data_saida, descricao or "Saída de sócio")
-        except ValueError as exc:
-            QMessageBox.warning(self, "Erro ao encerrar vínculo", str(exc))
-            return
-        self._atualizar_painel_vinculos()
+        dialogo = _DialogoEditarVinculo(self.conn, vinculo, empresa.nome if empresa else "?", self)
+        # A tela grava (ou exclui) por conta própria e só fecha se deu certo;
+        # aqui é só redesenhar quando algo mudou.
+        if dialogo.exec() != QDialog.Rejected:
+            self._atualizar_painel_vinculos()
 
     def _emitir_informe(self) -> None:
         """Abre a conferência e emissão do informe de rendimentos do sócio
@@ -849,32 +892,8 @@ class SociosTab(QWidget):
                 "percentual": v.percentual_capital,
                 "data_entrada": v.data_entrada,
                 "data_saida": v.data_saida,
+                "capital": v.valor_capital,
             }
             for v in repo.listar_vinculos_socio(self.conn, socio.id)
         ]
         DialogoMapaVinculos(socio.nome, socio.cpf or "", vinculos, self).exec()
-
-    def _excluir_vinculo(self) -> None:
-        """Apaga o vínculo de vez — diferente de "Encerrar", que só marca a
-        saída preservando o histórico. Serve pra corrigir um vínculo criado
-        por engano (empresa errada, sócio errado, etc.), não pra registrar
-        uma saída de verdade."""
-        vinculo = self._vinculo_selecionado()
-        if vinculo is None:
-            return
-        empresa = repo.buscar_empresa(self.conn, vinculo.empresa_id)
-        resposta = QMessageBox.question(
-            self,
-            "Excluir vínculo",
-            f"Excluir de vez o vínculo com {empresa.nome if empresa else '?'}? Isso apaga o registro, "
-            "diferente de \"Encerrar vínculo\" (que preserva o histórico marcando a saída). Use isso só "
-            "pra corrigir um vínculo cadastrado por engano.",
-        )
-        if resposta != QMessageBox.Yes:
-            return
-        try:
-            repo.excluir_vinculo(self.conn, vinculo.id)
-        except ValueError as exc:
-            QMessageBox.warning(self, "Erro ao excluir vínculo", str(exc))
-            return
-        self._atualizar_painel_vinculos()

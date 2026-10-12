@@ -920,6 +920,7 @@ class ImportacaoCadastroView(QWidget):
                         "tipo_pessoa": socio.tipo_pessoa if socio else "fisica",
                         "percentual_capital": v.percentual_capital,
                         "cotas_socio": v.quantidade_cotas,
+                        "valor_capital_socio": v.valor_capital,
                         "data_entrada": v.data_entrada,
                     }
                 )
@@ -1188,16 +1189,20 @@ class ImportacaoCadastroView(QWidget):
         resumo = (
             f"{aplicado['empresas_criadas']} empresa(s) nova(s) · "
             f"{aplicado['vinculos_criados']} vínculo(s) criado(s) · "
-            f"{aplicado['vinculos_ja_existentes']} já existiam (ignorados) · "
+            f"{aplicado['vinculos_ja_existentes']} já estavam cadastrados, sem mudança · "
             f"{aplicado['vinculos_encerrados']} vínculo(s) com saída registrada · "
             f"{aplicado['distribuicoes_lancadas']} distribuição(ões) lançada(s)."
         )
         if aplicado.get("participacoes_atualizadas"):
-            resumo += f"\n{aplicado['participacoes_atualizadas']} participação(ões) atualizada(s) pelo relatório."
+            resumo += (
+                f"\n{aplicado['participacoes_atualizadas']} sócio(s) já cadastrado(s) com % do capital, "
+                "cotas ou capital atualizados."
+            )
         if aplicado.get("participacoes_nao_atualizadas"):
             resumo += (
                 f"\n⚠ {aplicado['participacoes_nao_atualizadas']} participação(ões) não foram atualizadas: "
-                "a data da alteração é anterior à entrada desses sócios."
+                "o vínculo está num período fechado ou numa alteração trancada, ou a alteração "
+                "escolhida é anterior à entrada do sócio."
             )
         if aplicado.get("alteracoes_criadas"):
             qtd = aplicado["alteracoes_criadas"]

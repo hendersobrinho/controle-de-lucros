@@ -284,6 +284,15 @@ def _desenhar_no(painter: QPainter, no: No, fundo: QColor, fio: QColor, tinta: Q
         f"{situacao}{no.periodo}",
     )
 
+    # Só o capital informado: a estimativa por cotas que a tabela mostra com
+    # "≈" ficaria fácil de ler como valor oficial num PDF anexado a processo.
+    if no.capital is not None:
+        painter.drawText(
+            QRectF(caixa.x + 12, caixa.y + 48, caixa.largura - 24, 18),
+            Qt.AlignLeft | Qt.AlignVCenter,
+            f"Capital: R$ {formatar_valor_br(no.capital)}",
+        )
+
 
 class DiagramaVinculos(QWidget):
     """O mapa na tela. Só desenha — quem monta os dados é a tela que abre."""

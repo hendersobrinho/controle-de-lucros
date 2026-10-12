@@ -54,6 +54,20 @@ def test_svg_sai_vetorial_com_o_texto_dentro(tmp_path):
     assert "base64" not in conteudo
 
 
+def test_capital_informado_aparece_no_desenho(tmp_path):
+    """O capital do sócio entra na caixa quando foi informado; vínculo sem
+    capital não ganha linha nenhuma — nem a estimativa por cotas, que num PDF
+    anexado a processo seria lida como valor oficial."""
+    vinculos = [
+        {**VINCULOS[0], "capital": 46940.0},
+        VINCULOS[1],  # sem capital informado
+    ]
+    conteudo = exportar_svg(tmp_path / "mapa.svg", _mapa(vinculos)).read_text(encoding="utf-8")
+
+    assert "Capital: R$ 46.940,00" in conteudo
+    assert conteudo.count("Capital: R$") == 1
+
+
 def test_pdf_sai_com_conteudo(tmp_path):
     caminho = exportar_pdf(tmp_path / "mapa.pdf", _mapa())
 
@@ -209,6 +223,32 @@ def test_a_geometria_nao_muda_com_o_papel_do_centro(conn):
 
     assert (do_socio.largura, do_socio.altura) == (da_empresa.largura, da_empresa.altura)
     assert [n.caixa for n in do_socio.nos] == [n.caixa for n in da_empresa.nos]
+
+
+def test_as_duas_abas_levam_o_capital_do_socio_ao_mapa(conn, monkeypatch):
+    """O mapa do sócio (aba Sócios) e o quadro societário (aba Empresas)
+    mostram a mesma participação vista dos dois lados — o capital também."""
+    from controle_lucros.ui import diagrama_vinculos as dv
+    from controle_lucros.ui.empresas_tab import EmpresasTab
+    from controle_lucros.ui.socios_tab import SociosTab
+
+    empresa_id = repo.salvar_empresa(conn, Empresa(None, "91", "ENDOGASTRO LTDA", "", 100000, 1000))
+    socio_id = repo.salvar_socio(conn, Socio(None, "ANDRE FRANZOTTI", "076.925.727-55"))
+    repo.salvar_vinculo(conn, VinculoSocietario(
+        id=None, empresa_id=empresa_id, socio_id=socio_id, percentual_capital=46.94,
+        quantidade_cotas=469, data_entrada="2007-03-23", data_saida=None, valor_capital=46940.0))
+
+    abertos = []
+    monkeypatch.setattr(dv.DialogoMapaVinculos, "exec", lambda self: abertos.append(self) or 0)
+
+    socios = SociosTab(conn)
+    socios.tabela.selectRow(0)
+    socios.btn_mapa.click()
+    empresas = EmpresasTab(conn)
+    empresas.tabela.selectRow(0)
+    empresas.btn_quadro.click()
+
+    assert [d.mapa().nos[0].capital for d in abertos] == [46940.0, 46940.0]
 
 
 def test_botao_da_aba_empresas_abre_o_quadro_societario(conn, monkeypatch):

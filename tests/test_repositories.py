@@ -150,7 +150,14 @@ def test_vinculo_entrada_e_saida_rastreiam_alteracao(conn):
     assert [v.id for v in movimentados_alt2] == [vinculo_id]
 
 
-def test_associar_socio_a_empresa_gera_alteracao_contratual(conn):
+@pytest.fixture()
+def ano_2024(monkeypatch):
+    """Fixa o "ano corrente" da regra de alteração automática: movimento do
+    ano corrente gera alteração, de anos anteriores não."""
+    monkeypatch.setattr(repo, "_ano_corrente", lambda: 2024)
+
+
+def test_associar_socio_a_empresa_gera_alteracao_contratual(conn, ano_2024):
     empresa_id = _nova_empresa(conn, capital_social=10000, quantidade_cotas=1000)
     socio_id = repo.salvar_socio(conn, Socio(None, "Fulano", "111.111.111-11"))
 
@@ -169,7 +176,7 @@ def test_associar_socio_a_empresa_gera_alteracao_contratual(conn):
     assert vinculo.data_saida is None
 
 
-def test_encerrar_vinculo_pela_aba_de_socios_gera_alteracao(conn):
+def test_encerrar_vinculo_pela_aba_de_socios_gera_alteracao(conn, ano_2024):
     empresa_id = _nova_empresa(conn, capital_social=10000, quantidade_cotas=1000)
     socio_id = repo.salvar_socio(conn, Socio(None, "Fulano", "111.111.111-11"))
     repo.associar_socio_a_empresa(conn, empresa_id, socio_id, 50, 500, "2024-03-01")
@@ -185,7 +192,7 @@ def test_encerrar_vinculo_pela_aba_de_socios_gera_alteracao(conn):
     assert vinculo_atualizado.alteracao_saida_id == alteracoes[1].id
 
 
-def test_atualizar_cotas_fecha_vinculo_antigo_e_abre_novo(conn):
+def test_atualizar_cotas_fecha_vinculo_antigo_e_abre_novo(conn, ano_2024):
     empresa_id = _nova_empresa(conn, capital_social=10000, quantidade_cotas=1000)
     socio_id = repo.salvar_socio(conn, Socio(None, "Fulano", "111.111.111-11"))
     repo.associar_socio_a_empresa(conn, empresa_id, socio_id, 50, 500, "2024-03-01")
@@ -205,6 +212,66 @@ def test_atualizar_cotas_fecha_vinculo_antigo_e_abre_novo(conn):
     assert novo.data_saida is None
 
     assert len(repo.listar_alteracoes(conn, empresa_id)) == 2
+
+
+def test_associar_com_entrada_de_ano_anterior_nao_inventa_alteracao_antiga(conn, ano_2024):
+    """Entrada de anos atrás é história com contrato próprio: o vínculo fica
+    com a data certa e sem alteração, pra ela ser associada depois."""
+    empresa_id = _nova_empresa(conn, capital_social=10000, quantidade_cotas=1000)
+    socio_id = repo.salvar_socio(conn, Socio(None, "Fulano", "111.111.111-11"))
+
+    repo.associar_socio_a_empresa(conn, empresa_id, socio_id, 50, 500, "2015-03-01", valor_capital=5000)
+
+    assert repo.listar_alteracoes(conn, empresa_id) == []
+    (vinculo,) = repo.listar_vinculos_socio(conn, socio_id)
+    assert vinculo.data_entrada == "2015-03-01"
+    assert vinculo.alteracao_entrada_id is None
+    assert vinculo.valor_capital == 5000
+
+
+def test_alteracao_pode_ser_associada_depois(conn, ano_2024):
+    empresa_id = _nova_empresa(conn)
+    socio_id = repo.salvar_socio(conn, Socio(None, "Fulano", "111.111.111-11"))
+    repo.associar_socio_a_empresa(conn, empresa_id, socio_id, 50, 500, "2015-03-01")
+    alteracao_id = repo.salvar_alteracao(conn, AlteracaoContratual(
+        None, empresa_id, 1, "2015-03-01", "ACME LTDA", 10000, 1000, "Contrato de 2015"))
+
+    (vinculo,) = repo.listar_vinculos_socio(conn, socio_id)
+    vinculo.alteracao_entrada_id = alteracao_id
+    repo.salvar_vinculo(conn, vinculo)
+
+    (vinculo,) = repo.listar_vinculos_socio(conn, socio_id)
+    assert vinculo.alteracao_entrada_id == alteracao_id
+
+
+def test_vinculo_nao_aceita_alteracao_de_outra_empresa(conn):
+    empresa_id = _nova_empresa(conn)
+    outra_id = _nova_empresa(conn, numero_chamada="002", nome="OUTRA LTDA", cnpj="")
+    socio_id = repo.salvar_socio(conn, Socio(None, "Fulano", "111.111.111-11"))
+    alteracao_da_outra = repo.salvar_alteracao(conn, AlteracaoContratual(
+        None, outra_id, 1, "2024-01-01", "OUTRA LTDA", 1, 1, ""))
+
+    with pytest.raises(ValueError, match="outra empresa"):
+        repo.salvar_vinculo(conn, VinculoSocietario(
+            None, empresa_id, socio_id, 50, 500, "2024-01-01", None,
+            alteracao_entrada_id=alteracao_da_outra))
+
+
+def test_tirar_vinculo_de_alteracao_trancada_e_bloqueado(conn):
+    """Só a alteração NOVA era conferida: trocar a de entrada por "nenhuma"
+    tirava o vínculo de uma alteração trancada sem ninguém perceber."""
+    empresa_id = _nova_empresa(conn)
+    socio_id = repo.salvar_socio(conn, Socio(None, "Fulano", "111.111.111-11"))
+    alteracao_id = repo.salvar_alteracao(conn, AlteracaoContratual(
+        None, empresa_id, 1, "2024-01-01", "ACME LTDA", 10000, 1000, ""))
+    vinculo_id = repo.salvar_vinculo(conn, VinculoSocietario(
+        None, empresa_id, socio_id, 50, 500, "2024-01-01", None, alteracao_entrada_id=alteracao_id))
+    repo.fechar_alteracao(conn, alteracao_id)
+
+    vinculo = repo.buscar_vinculo(conn, vinculo_id)
+    vinculo.alteracao_entrada_id = None
+    with pytest.raises(ValueError, match="fechada"):
+        repo.salvar_vinculo(conn, vinculo)
 
 
 def test_valor_participacao_usa_estado_atual_da_empresa(conn):
@@ -406,6 +473,7 @@ def _linha_cadastro(**overrides) -> dict:
         valor_distribuido=0.0,
         pro_labore=0.0,
         irrf=0.0,
+        valor_capital_socio=0.0,
     )
     dados.update(overrides)
     return dados
@@ -583,13 +651,36 @@ def test_importacao_cadastro_reconhece_cpf_sem_pontuacao_na_planilha(conn):
     assert pronta["socio_id"] == socio_id
 
 
-def test_excluir_empresa_com_vinculo_da_mensagem_clara(conn):
-    """Antes: excluir uma empresa com sócios vinculados estourava um
-    sqlite3.IntegrityError cru ("FOREIGN KEY constraint failed") direto na
-    tela. Agora vira um ValueError com mensagem que explica o que fazer."""
+def test_excluir_empresa_leva_tudo_dela_junto(conn, ano_2024):
+    """Antes era preciso desfazer vínculo por vínculo na aba Sócios: a
+    exclusão recusava enquanto houvesse qualquer coisa ligada à empresa.
+    Confirmada na tela, ela apaga a empresa com tudo o que é dela."""
     empresa_id, s1, s2 = _empresa_com_dois_socios(conn)
-    with pytest.raises(ValueError, match="[Nn]ão é possível excluir"):
-        repo.excluir_empresa(conn, empresa_id)
+    outra_id = _nova_empresa(conn, numero_chamada="002", nome="OUTRA LTDA", cnpj="")
+    repo.associar_socio_a_empresa(conn, outra_id, s1, 100, 1000, "2020-01-01")
+    repo.salvar_distribuicao(conn, empresa_id, 2024, s1, 6000)
+    repo.salvar_movimentacao(conn, Movimentacao(None, empresa_id, s1, "adiantamento_lucro", 100, "2024-05-01"))
+    repo.fechar_periodo(conn, empresa_id, 2023)
+
+    resumo = repo.resumo_exclusao_empresa(conn, empresa_id)
+    assert "2 vínculo(s) de sócio" in resumo
+    assert any("FECHADO" in item for item in resumo)
+
+    repo.excluir_empresa(conn, empresa_id)
+
+    assert [e.nome for e in repo.listar_empresas(conn)] == ["OUTRA LTDA"]
+    for tabela, _ in repo._DADOS_DA_EMPRESA:
+        assert conn.execute(f"SELECT COUNT(*) FROM {tabela} WHERE empresa_id=%s", (empresa_id,)).fetchone()[0] == 0
+    # Sócios são do escritório: continuam, e com o vínculo da outra empresa.
+    assert {s.id for s in repo.listar_socios(conn)} == {s1, s2}
+    assert len(repo.listar_vinculos_empresa(conn, outra_id)) == 1
+
+
+def test_excluir_empresa_sem_nada_ligado(conn):
+    empresa_id = _nova_empresa(conn)
+    assert repo.resumo_exclusao_empresa(conn, empresa_id) == []
+    repo.excluir_empresa(conn, empresa_id)
+    assert repo.listar_empresas(conn) == []
 
 
 def test_excluir_socio_com_vinculo_da_mensagem_clara(conn):
@@ -598,7 +689,7 @@ def test_excluir_socio_com_vinculo_da_mensagem_clara(conn):
         repo.excluir_socio(conn, s1)
 
 
-def test_excluir_alteracao_com_vinculo_da_mensagem_clara(conn):
+def test_excluir_alteracao_desfaz_a_entrada_que_ela_registrou(conn):
     empresa_id = _nova_empresa(conn)
     socio_id = repo.salvar_socio(conn, Socio(id=None, nome="Fulano", cpf="111.111.111-11"))
     alteracao_id = repo.salvar_alteracao(
@@ -614,8 +705,57 @@ def test_excluir_alteracao_com_vinculo_da_mensagem_clara(conn):
             data_entrada="2024-01-01", data_saida=None, alteracao_entrada_id=alteracao_id,
         ),
     )
-    with pytest.raises(ValueError, match="[Nn]ão é possível excluir"):
+    assert repo.resumo_exclusao_alteracao(conn, alteracao_id) == {"entradas": ["Fulano"], "saidas": []}
+
+    repo.excluir_alteracao(conn, alteracao_id)
+
+    # A entrada que ela registrou é desfeita junto: o sócio deixa a empresa.
+    assert repo.listar_alteracoes(conn, empresa_id) == []
+    assert repo.listar_vinculos_empresa(conn, empresa_id) == []
+
+
+def test_excluir_alteracao_de_saida_devolve_o_socio(conn, ano_2024):
+    empresa_id = _nova_empresa(conn)
+    socio_id = repo.salvar_socio(conn, Socio(None, "Fulano", "111.111.111-11"))
+    repo.associar_socio_a_empresa(conn, empresa_id, socio_id, 50, 500, "2024-03-01")
+    (vinculo,) = repo.listar_vinculos_socio(conn, socio_id)
+    repo.encerrar_vinculo_registrando_alteracao(conn, vinculo, "2024-09-01")
+    alteracao_saida = repo.listar_alteracoes(conn, empresa_id)[-1]
+
+    assert repo.resumo_exclusao_alteracao(conn, alteracao_saida.id) == {"entradas": [], "saidas": ["Fulano"]}
+    repo.excluir_alteracao(conn, alteracao_saida.id)
+
+    (vinculo,) = repo.listar_vinculos_socio(conn, socio_id)
+    assert vinculo.data_saida is None
+    assert vinculo.alteracao_saida_id is None
+
+
+def test_excluir_alteracao_de_cotas_volta_as_cotas_de_antes(conn, ano_2024):
+    """Atualizar cotas fecha o vínculo antigo e abre outro na mesma
+    alteração: excluí-la tem que devolver o sócio às cotas de antes, e não
+    deixá-lo sem vínculo nenhum."""
+    empresa_id = _nova_empresa(conn)
+    socio_id = repo.salvar_socio(conn, Socio(None, "Fulano", "111.111.111-11"))
+    repo.associar_socio_a_empresa(conn, empresa_id, socio_id, 50, 500, "2024-03-01")
+    (antigo,) = repo.listar_vinculos_socio(conn, socio_id)
+    repo.atualizar_cotas_vinculo(conn, antigo, 70, 700, "2024-07-01")
+    alteracao_cotas = repo.listar_alteracoes(conn, empresa_id)[-1]
+
+    repo.excluir_alteracao(conn, alteracao_cotas.id)
+
+    (vinculo,) = repo.listar_vinculos_socio(conn, socio_id)
+    assert vinculo.id == antigo.id
+    assert (vinculo.quantidade_cotas, vinculo.data_saida) == (500, None)
+
+
+def test_excluir_alteracao_trancada_continua_bloqueado(conn):
+    empresa_id = _nova_empresa(conn)
+    alteracao_id = repo.salvar_alteracao(conn, AlteracaoContratual(
+        None, empresa_id, 1, "2024-01-01", "ACME LTDA", 10000, 1000, ""))
+    repo.fechar_alteracao(conn, alteracao_id)
+    with pytest.raises(ValueError, match="fechada"):
         repo.excluir_alteracao(conn, alteracao_id)
+    assert len(repo.listar_alteracoes(conn, empresa_id)) == 1
 
 
 def test_estado_atual_empresa_usa_data_nao_numero(conn):
@@ -911,7 +1051,7 @@ def test_importacao_cadastro_com_alteracao_id_amarra_vinculo_a_ela(conn):
     assert repo.listar_alteracoes(conn, empresa_id) == [repo.buscar_alteracao(conn, alteracao_id)]
 
 
-def test_importacao_cadastro_criar_alteracao_por_empresa_abre_uma_por_empresa(conn):
+def test_importacao_cadastro_criar_alteracao_por_empresa_abre_uma_por_empresa(conn, ano_2024):
     """Sem alteração já escolhida (import pela tela geral), cada empresa
     tocada por um vínculo novo ganha sua própria alteração automática —
     linhas da mesma empresa reaproveitam a mesma, não uma por linha."""
@@ -937,6 +1077,22 @@ def test_importacao_cadastro_criar_alteracao_por_empresa_abre_uma_por_empresa(co
 
     (vinculo_b,) = repo.listar_vinculos_empresa(conn, empresa_b.id)
     assert vinculo_b.alteracao_entrada_id == alteracao_b.id
+
+
+def test_importacao_com_entrada_antiga_nao_cria_alteracao_antiga(conn, ano_2024):
+    """O caso que motivou a regra: relatório com sócios que entraram há anos
+    criava uma alteração "nova" datada lá atrás. A data de entrada fica, a
+    alteração não é inventada."""
+    repo.salvar_socio(conn, Socio(id=None, nome="Fulano de Tal", cpf="111.111.111-11"))
+    resultado = repo.preparar_importacao_cadastro(conn, [_linha_cadastro(data_entrada="2015-08-10")])
+    aplicado = repo.aplicar_importacao_cadastro(conn, resultado["prontas"], criar_alteracao_por_empresa=True)
+
+    assert aplicado["alteracoes_criadas"] == 0
+    (empresa,) = repo.listar_empresas(conn)
+    assert repo.listar_alteracoes(conn, empresa.id) == []
+    (vinculo,) = repo.listar_vinculos_empresa(conn, empresa.id)
+    assert vinculo.data_entrada == "2015-08-10"
+    assert vinculo.alteracao_entrada_id is None
 
 
 def test_importacao_cadastro_sem_flags_nao_cria_nem_amarra_alteracao(conn):
@@ -1292,19 +1448,75 @@ def test_importacao_nao_mexe_em_participacao_igual(conn):
     assert len(repo.listar_vinculos_empresa(conn, empresa_id)) == 1
 
 
-def test_importacao_sem_a_opcao_continua_ignorando_o_que_ja_existe(conn):
-    """Planilha de cadastro pode trazer só parte do quadro; reescrever
-    participação a partir dela seria perigoso, então o comportamento de
-    sempre é preservado quando a opção não é pedida."""
+def test_reimportar_planilha_atualiza_cotas_do_socio(conn):
+    """O bug relatado: reimportar a planilha com as cotas corrigidas não
+    mudava nada — o sócio "já existia" e a linha era ignorada. Sem alteração
+    escolhida, o vínculo é corrigido no lugar, sem abrir outro."""
     empresa_id, _socio_id, _alteracao_id = _empresa_com_socio_ativo(conn, percentual=84.55)
 
-    resultado = repo.preparar_importacao_cadastro(conn, [_linha_cadastro(percentual_capital=46.94)])
+    resultado = repo.preparar_importacao_cadastro(
+        conn, [_linha_cadastro(percentual_capital=46.94, cotas_socio=4694, valor_capital_socio=4694.0)]
+    )
+    aplicado = repo.aplicar_importacao_cadastro(conn, resultado["prontas"])
+
+    assert aplicado["participacoes_atualizadas"] == 1
+    assert aplicado["vinculos_ja_existentes"] == 0
+    (vinculo,) = repo.listar_vinculos_empresa(conn, empresa_id)
+    assert (vinculo.percentual_capital, vinculo.quantidade_cotas, vinculo.valor_capital) == (46.94, 4694, 4694.0)
+    assert vinculo.data_entrada == "2023-01-01"
+
+
+def test_reimportar_so_com_cotas_diferentes_tambem_atualiza(conn):
+    """Só o percentual era comparado: mudança só nas cotas passava batido."""
+    empresa_id, _socio_id, _alt = _empresa_com_socio_ativo(conn, percentual=100.0)
+
+    resultado = repo.preparar_importacao_cadastro(conn, [_linha_cadastro(percentual_capital=100.0, cotas_socio=2500)])
+    aplicado = repo.aplicar_importacao_cadastro(conn, resultado["prontas"])
+
+    assert aplicado["participacoes_atualizadas"] == 1
+    (vinculo,) = repo.listar_vinculos_empresa(conn, empresa_id)
+    assert vinculo.quantidade_cotas == 2500
+
+
+def test_reimportar_com_coluna_em_branco_nao_apaga_o_que_ja_existe(conn):
+    """Layout sem a coluna de cotas (ou célula em branco) chega como zero: não
+    pode zerar as cotas de todo mundo a cada importação."""
+    empresa_id, _socio_id, _alt = _empresa_com_socio_ativo(conn, percentual=100.0)
+
+    resultado = repo.preparar_importacao_cadastro(
+        conn, [_linha_cadastro(percentual_capital=0.0, cotas_socio=0.0, valor_capital_socio=0.0)]
+    )
     aplicado = repo.aplicar_importacao_cadastro(conn, resultado["prontas"])
 
     assert aplicado["participacoes_atualizadas"] == 0
     assert aplicado["vinculos_ja_existentes"] == 1
     (vinculo,) = repo.listar_vinculos_empresa(conn, empresa_id)
-    assert vinculo.percentual_capital == 84.55
+    assert (vinculo.percentual_capital, vinculo.quantidade_cotas) == (100.0, 1000)
+
+
+def test_importacao_grava_o_capital_do_socio(conn):
+    repo.salvar_socio(conn, Socio(id=None, nome="Fulano de Tal", cpf="111.111.111-11"))
+    resultado = repo.preparar_importacao_cadastro(conn, [_linha_cadastro(valor_capital_socio=12345.67)])
+    repo.aplicar_importacao_cadastro(conn, resultado["prontas"])
+
+    (empresa,) = repo.listar_empresas(conn)
+    (vinculo,) = repo.listar_vinculos_empresa(conn, empresa.id)
+    assert vinculo.valor_capital == 12345.67
+
+
+def test_reimportar_participacao_de_vinculo_trancado_avisa_e_nao_mexe(conn):
+    empresa_id, socio_id, alteracao_id = _empresa_com_socio_ativo(conn, percentual=84.55)
+    (vinculo,) = repo.listar_vinculos_empresa(conn, empresa_id)
+    vinculo.alteracao_entrada_id = alteracao_id
+    repo.salvar_vinculo(conn, vinculo)
+    repo.fechar_alteracao(conn, alteracao_id)
+
+    resultado = repo.preparar_importacao_cadastro(conn, [_linha_cadastro(cotas_socio=2500)])
+    aplicado = repo.aplicar_importacao_cadastro(conn, resultado["prontas"])
+
+    assert aplicado["participacoes_nao_atualizadas"] == 1
+    (vinculo,) = repo.listar_vinculos_empresa(conn, empresa_id)
+    assert vinculo.quantidade_cotas == 1000
 
 
 def test_importacao_avisa_participacao_que_nao_pode_ser_atualizada(conn):

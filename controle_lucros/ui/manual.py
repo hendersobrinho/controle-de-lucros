@@ -98,10 +98,14 @@ e é um dos campos usados para reconhecer a empresa na importação em massa —
 por isso vale manter único e sem repetição.</p>
 
 <h3>Excluir</h3>
-<p>Só é possível excluir uma empresa que não tenha nada pendurada nela — sem
-sócios vinculados, alterações contratuais, distribuições ou movimentações. Se
-tiver, o sistema recusa e explica o motivo. Isso é proposital: apagar a
-empresa apagaria o histórico junto.</p>
+<p>Excluir a empresa apaga <b>tudo o que é dela, de uma vez</b>: vínculos de
+sócio, alterações contratuais, distribuições anuais e trimestrais,
+movimentações, informes de rendimentos e períodos — inclusive os fechados.
+Antes de apagar, o sistema lista o que vai junto e pede confirmação (o botão já
+vem em <b>Não</b>).</p>
+<p>Os <b>sócios continuam cadastrados</b>: eles são do escritório e podem
+estar em outras empresas. Na dúvida, faça um backup antes — a exclusão não tem
+volta.</p>
 """
 
 _ALTERACOES = """
@@ -130,10 +134,21 @@ resolve ali mesmo, sem precisar sair para a aba Sócios e voltar — o
 recém-cadastrado já fica selecionado.</p>
 
 <h3>Alterações criadas automaticamente</h3>
-<p>Mexer nos sócios pela aba <b>Sócios</b> (associar a uma empresa, atualizar
-cotas, encerrar vínculo) <b>gera uma alteração contratual sozinha</b>, com a
-data que você informar. Por isso o histórico da empresa reflete o que foi feito
-na tela de Sócios, e vice-versa — não são dois cadastros separados.</p>
+<p><b>Associar a uma empresa</b> pela aba Sócios, e importar o relatório de
+sócios, geram uma alteração contratual sozinhos — <b>só para movimento do ano
+corrente</b>. Sócio que entrou em anos anteriores fica com a data de entrada
+certa e <b>sem alteração</b>: criar uma "nova" datada lá atrás inventaria um
+evento que o escritório não registrou.</p>
+<p>Para ligar depois o vínculo à alteração certa: cadastre a alteração aqui (se
+ainda não existir) e, na aba Sócios, abra <b>Editar vínculo</b> e escolha-a em
+<b>Alteração de entrada</b> (ou de saída).</p>
+
+<h3>Excluir alteração</h3>
+<p>Excluir uma alteração <b>desfaz o que ela registrou</b>: o vínculo de quem
+entrou por ela é apagado, e quem saiu por ela volta a ficar ativo. Assim,
+excluir uma atualização de cotas devolve o sócio às cotas de antes. A pergunta
+de confirmação lista os sócios afetados.</p>
+<p>Alteração <b>fechada</b> não pode ser excluída — destranque antes.</p>
 """
 
 _IMPORTACAO = """
@@ -175,9 +190,10 @@ os dados para outro sistema.</p>
 cabeçalho, então um modelo menor é só uma planilha com menos colunas — não um
 formato diferente. Escolha pelo que você vai cadastrar:</p>
 <ul>
-<li><b>Completo</b> (16 colunas) — empresas, sócios, participações, saída de
-sócio e a distribuição de um ano, tudo de uma vez.</li>
-<li><b>Empresas e sócios</b> (11 colunas) — o quadro societário, sem saída nem
+<li><b>Completo</b> (17 colunas) — empresas, sócios, participações (inclusive o
+capital do sócio em reais), saída de sócio e a distribuição de um ano, tudo de
+uma vez.</li>
+<li><b>Empresas e sócios</b> (12 colunas) — o quadro societário, sem saída nem
 distribuição. É o recorte do dia a dia.</li>
 <li><b>Só empresas</b> (5 colunas) — uma linha por empresa, sem sócios. Os
 sócios entram depois.</li>
@@ -222,12 +238,22 @@ diferentes</b>, o sistema não escolhe nenhuma: avisa qual é a divergência e
 deixa a linha de fora. Isso é quase sempre erro de digitação, e aplicar em cima
 de uma das duas lançaria distribuição na empresa errada sem ninguém notar.</p>
 
+<h3>Importar de novo</h3>
+<p>Sócio que já tem vínculo ativo com a empresa <b>não é duplicado</b>. Se a
+planilha trouxer % do capital, cotas ou capital do sócio <b>diferentes</b> do
+cadastro, o vínculo é atualizado com os valores da planilha — é assim que se
+corrige o quadro em massa: ajusta a planilha e importa de novo. Coluna em
+branco (ou que o layout não tem) <b>não apaga</b> o que já está cadastrado.</p>
+<p>A data de entrada vem da planilha como está, mesmo antiga. Alteração
+contratual automática só é criada para movimento do ano corrente (veja
+<i>Alterações criadas automaticamente</i>).</p>
+
 <h3>O que a importação nunca faz</h3>
 <ul>
-<li>Não duplica empresa nem vínculo: se o sócio já tem vínculo ativo com a
-empresa, a linha é contada como "já existia" e ignorada.</li>
+<li>Não duplica empresa nem vínculo.</li>
 <li>Não cria sócio sem confirmação.</li>
-<li>Não altera período trancado.</li>
+<li>Não altera período trancado nem vínculo de alteração fechada — o resumo
+avisa quantos ficaram como estavam.</li>
 </ul>
 <p>O nome tem que bater <b>exatamente</b> (só maiúsculas/minúsculas e espaços
 são ignorados). "João" e "Joao" não se encontram — cai na revisão.</p>
@@ -372,24 +398,27 @@ ali porque sócio duplicado se espalha por todas as empresas dele e costuma
 aparecer só na hora de emitir o informe, quando desfazer já dá trabalho.</p>
 
 <h3>Vínculos com empresas</h3>
-<p><b>Associar a uma empresa</b> fica solto porque é a única ação que não
-precisa de um vínculo selecionado. As outras quatro estão no menu <b>Ações do
-vínculo</b>, que só destrava depois de clicar numa linha da tabela. A
-diferença entre elas importa:</p>
 <ul>
-<li><b>Associar a uma empresa</b> — cria o vínculo e abre uma alteração
-contratual na empresa.</li>
-<li><b>Editar datas</b> — corrige as datas de um vínculo existente.
-<b>Não</b> gera alteração contratual: serve para consertar um registro errado,
-não para registrar um evento novo.</li>
-<li><b>Atualizar cotas</b> — encerra o vínculo atual e abre outro com os novos
-valores, preservando o histórico. Gera alteração contratual.</li>
-<li><b>Encerrar vínculo</b> — marca a data de saída. O sócio continua no
-histórico e nos anos em que participou.</li>
-<li><b>Excluir vínculo</b> — apaga o registro de vez. Use <b>só</b> para
-corrigir um vínculo cadastrado por engano (empresa errada, sócio errado). Para
-registrar uma saída de verdade, use <b>Encerrar vínculo</b>.</li>
+<li><b>Associar a uma empresa</b> — cria o vínculo: % do capital, cotas,
+capital do sócio em reais e data de entrada. Se a entrada for do ano corrente,
+abre uma alteração contratual na empresa; se for mais antiga, não (veja
+<i>Alterações criadas automaticamente</i>).</li>
+<li><b>Editar vínculo</b> (ou dois cliques na linha) — <b>todos os campos</b>
+numa tela só: % do capital, cotas, capital do sócio, data de entrada, saída
+(marque <b>Saiu da sociedade</b> e informe a data), alteração contratual de
+entrada e de saída, e observação. Corrige o registro como está: não abre
+vínculo novo nem cria alteração.</li>
+<li><b>Excluir vínculo</b> fica dentro da tela de edição. Apaga o registro de
+vez — use <b>só</b> para corrigir um vínculo cadastrado por engano. Se o sócio
+saiu da sociedade, marque a saída em vez de excluir: assim os anos em que ele
+participou continuam aparecendo.</li>
 </ul>
+
+<h3>Capital do sócio</h3>
+<p>A coluna <b>Capital (R$)</b> mostra o capital que o sócio tem naquela
+empresa, em reais, como foi informado (na edição do vínculo ou na importação).
+Sem valor informado, aparece uma <b>estimativa</b> marcada com "≈": capital
+social da empresa ÷ total de cotas × cotas do sócio.</p>
 
 <h3>Mapa de vínculos</h3>
 <p>O botão <b>Mapa de vínculos</b>, no alto do painel da direita, desenha num

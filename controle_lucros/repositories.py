@@ -91,16 +91,52 @@ def salvar_empresa(conn: Conexao, e: Empresa) -> int:
     return e.id
 
 
+# Tudo o que pertence a uma empresa, na ordem em que pode ser apagado sem
+# ferir chave estrangeira: o vínculo aponta pra alteração, então sai antes dela.
+_DADOS_DA_EMPRESA = (
+    ("informe_rendimento", "informe(s) de rendimentos"),
+    ("distribuicao_trimestral", "lançamento(s) trimestral(is)"),
+    ("distribuicao_lucro", "distribuição(ões) anual(is)"),
+    ("periodo_distribuicao", "período(s) de distribuição"),
+    ("movimentacao", "movimentação(ões)"),
+    ("vinculo_societario", "vínculo(s) de sócio"),
+    ("alteracao_contratual", "alteração(ões) contratual(is)"),
+)
+
+
+def resumo_exclusao_empresa(conn: Conexao, empresa_id: int) -> list[str]:
+    """O que vai junto ao excluir a empresa, em frases pra tela de
+    confirmação ("3 vínculo(s) de sócio") — só o que existe."""
+    resumo = []
+    for tabela, rotulo in _DADOS_DA_EMPRESA:
+        total = conn.execute(f"SELECT COUNT(*) FROM {tabela} WHERE empresa_id=%s", (empresa_id,)).fetchone()[0]
+        if total:
+            resumo.append(f"{total} {rotulo}")
+    fechados = conn.execute(
+        "SELECT COUNT(*) FROM periodo_distribuicao WHERE empresa_id=%s AND fechado=1", (empresa_id,)
+    ).fetchone()[0]
+    if fechados:
+        resumo.append(f"inclusive {fechados} ano(s) com período FECHADO")
+    return resumo
+
+
 def excluir_empresa(conn: Conexao, empresa_id: int) -> None:
+    """Apaga a empresa com tudo o que é dela (ver _DADOS_DA_EMPRESA), numa
+    transação só: ou some tudo, ou nada muda. Os sócios ficam — o cadastro
+    deles é do escritório, e podem estar em outras empresas.
+
+    Quem chama confirma antes, mostrando resumo_exclusao_empresa: sem a
+    cascata, apagar uma empresa exigia desfazer vínculo por vínculo na aba
+    Sócios, e o erro de chave estrangeira não dizia nem por onde começar."""
     empresa = buscar_empresa(conn, empresa_id)
-    try:
-        conn.execute("DELETE FROM empresa WHERE id=%s", (empresa_id,))
-    except psycopg.IntegrityError:
-        raise ValueError(
-            "Não é possível excluir esta empresa: há sócios vinculados, alterações contratuais, "
-            "distribuições ou movimentações registradas para ela. Remova-os primeiro."
-        ) from None
-    _registrar_log(conn, "excluir", "empresa", empresa_id, empresa.nome if empresa else "")
+    resumo = resumo_exclusao_empresa(conn, empresa_id)
+    for tabela, _rotulo in _DADOS_DA_EMPRESA:
+        conn.execute(f"DELETE FROM {tabela} WHERE empresa_id=%s", (empresa_id,))
+    conn.execute("DELETE FROM empresa WHERE id=%s", (empresa_id,))
+    detalhes = empresa.nome if empresa else ""
+    if resumo:
+        detalhes += " — junto: " + ", ".join(resumo)
+    _registrar_log(conn, "excluir", "empresa", empresa_id, detalhes)
     conn.commit()
 
 
@@ -283,20 +319,87 @@ def reabrir_alteracao(conn: Conexao, alteracao_id: int) -> None:
     conn.commit()
 
 
+def _movimentos_da_alteracao(conn: Conexao, alteracao_id: int) -> tuple[list[Linha], list[Linha]]:
+    """Vínculos que entraram e que saíram por esta alteração, com o nome do sócio."""
+    def buscar(coluna: str) -> list[Linha]:
+        return conn.execute(
+            f"""SELECT v.*, s.nome AS socio_nome FROM vinculo_societario v
+                JOIN socio s ON s.id = v.socio_id
+                WHERE v.{coluna}=%s ORDER BY s.nome""",
+            (alteracao_id,),
+        ).fetchall()
+
+    entradas = buscar("alteracao_entrada_id")
+    ids_entrada = {v["id"] for v in entradas}
+    # Vínculo que entrou E saiu pela mesma alteração já some como entrada.
+    saidas = [v for v in buscar("alteracao_saida_id") if v["id"] not in ids_entrada]
+    return entradas, saidas
+
+
+def resumo_exclusao_alteracao(conn: Conexao, alteracao_id: int) -> dict:
+    """Quem é afetado ao excluir a alteração: os nomes dos sócios cujo
+    vínculo entrou por ela (e será apagado) e dos que saíram por ela (e
+    voltam a ficar ativos)."""
+    entradas, saidas = _movimentos_da_alteracao(conn, alteracao_id)
+    return {
+        "entradas": [v["socio_nome"] for v in entradas],
+        "saidas": [v["socio_nome"] for v in saidas],
+    }
+
+
 def excluir_alteracao(conn: Conexao, alteracao_id: int) -> None:
+    """Exclui a alteração DESFAZENDO o que ela registrou, numa transação só:
+    vínculo que entrou por ela é apagado, e sócio que saiu por ela volta a
+    ficar ativo. Assim excluir uma "atualização de cotas" (que fecha o
+    vínculo antigo e abre um novo na mesma alteração) devolve o sócio às
+    cotas de antes, em vez de deixá-lo sem vínculo nenhum.
+
+    Alteração trancada, ou movimento em período fechado, continua
+    protegido: é preciso destrancar antes."""
     existente = buscar_alteracao(conn, alteracao_id)
-    if existente is not None and existente.fechada:
+    if existente is None:
+        return
+    if existente.fechada:
         raise ValueError("Esta alteração contratual está fechada. Destranque-a para excluir.")
-    if existente is not None:
-        _garantir_periodo_aberto(conn, existente.empresa_id, existente.data)
-    try:
-        conn.execute("DELETE FROM alteracao_contratual WHERE id=%s", (alteracao_id,))
-    except psycopg.IntegrityError:
-        raise ValueError(
-            "Não é possível excluir esta alteração contratual: há vínculos societários (entrada ou saída "
-            "de sócio) registrados nela. Remova esses movimentos primeiro."
-        ) from None
-    _registrar_log(conn, "excluir", "alteracao_contratual", alteracao_id, f"Nº {existente.numero}" if existente else "")
+    _garantir_periodo_aberto(conn, existente.empresa_id, existente.data)
+
+    entradas, saidas = _movimentos_da_alteracao(conn, alteracao_id)
+    for v in entradas:
+        _garantir_periodo_aberto(conn, v["empresa_id"], v["data_entrada"])
+        if v["data_saida"] is not None:
+            _garantir_periodo_aberto(conn, v["empresa_id"], v["data_saida"])
+        # Saída registrada por OUTRA alteração some junto com o vínculo:
+        # se aquela estiver trancada, não dá pra mexer nela por aqui.
+        if v["alteracao_saida_id"] != alteracao_id:
+            _garantir_alteracao_editavel(conn, v["alteracao_saida_id"])
+    for v in saidas:
+        _garantir_periodo_aberto(conn, v["empresa_id"], v["data_saida"])
+        _garantir_alteracao_editavel(conn, v["alteracao_entrada_id"])
+
+    for v in entradas:
+        conn.execute("DELETE FROM vinculo_societario WHERE id=%s", (v["id"],))
+    for v in saidas:
+        outro_ativo = conn.execute(
+            """SELECT 1 FROM vinculo_societario
+               WHERE empresa_id=%s AND socio_id=%s AND data_saida IS NULL AND id <> %s""",
+            (v["empresa_id"], v["socio_id"], v["id"]),
+        ).fetchone()
+        if outro_ativo is None:
+            conn.execute(
+                "UPDATE vinculo_societario SET data_saida=NULL, alteracao_saida_id=NULL WHERE id=%s",
+                (v["id"],),
+            )
+        else:
+            # O sócio já voltou à empresa por outro vínculo: reabrir este
+            # deixaria dois ativos. A saída fica, só sem a alteração.
+            conn.execute("UPDATE vinculo_societario SET alteracao_saida_id=NULL WHERE id=%s", (v["id"],))
+    conn.execute("DELETE FROM alteracao_contratual WHERE id=%s", (alteracao_id,))
+    detalhes = f"Nº {existente.numero}"
+    if entradas:
+        detalhes += f" — {len(entradas)} entrada(s) desfeita(s)"
+    if saidas:
+        detalhes += f" — {len(saidas)} saída(s) desfeita(s)"
+    _registrar_log(conn, "excluir", "alteracao_contratual", alteracao_id, detalhes)
     conn.commit()
 
 
@@ -383,20 +486,45 @@ def _garantir_alteracao_editavel(conn: Conexao, alteracao_id: int | None) -> Non
         raise ValueError("A alteração contratual associada está fechada. Destranque-a para editar.")
 
 
+def _garantir_alteracao_da_empresa(conn: Conexao, alteracao_id: int | None, empresa_id: int) -> None:
+    """Alteração escolhida pra um vínculo tem que ser da empresa dele — senão
+    o sócio apareceria entrando numa empresa pela alteração de outra."""
+    if alteracao_id is None:
+        return
+    alteracao = buscar_alteracao(conn, alteracao_id)
+    if alteracao is None:
+        raise ValueError("A alteração contratual escolhida não existe mais.")
+    if alteracao.empresa_id != empresa_id:
+        raise ValueError("A alteração contratual escolhida é de outra empresa.")
+
+
 def salvar_vinculo(conn: Conexao, v: VinculoSocietario) -> int:
     if v.data_saida is not None and v.data_saida < v.data_entrada:
         raise ValueError("A data de saída não pode ser anterior à data de entrada.")
     _garantir_periodo_aberto(conn, v.empresa_id, v.data_entrada)
     if v.data_saida is not None:
         _garantir_periodo_aberto(conn, v.empresa_id, v.data_saida)
+    _garantir_alteracao_da_empresa(conn, v.alteracao_entrada_id, v.empresa_id)
+    _garantir_alteracao_da_empresa(conn, v.alteracao_saida_id, v.empresa_id)
     _garantir_alteracao_editavel(conn, v.alteracao_entrada_id)
     _garantir_alteracao_editavel(conn, v.alteracao_saida_id)
+    if v.id is not None:
+        # Tirar o vínculo de uma alteração trancada também é mexer nela: sem
+        # isto, trocar a alteração de entrada por "nenhuma" passava, porque só
+        # a alteração NOVA era conferida.
+        anterior = buscar_vinculo(conn, v.id)
+        if anterior is not None:
+            _garantir_periodo_aberto(conn, anterior.empresa_id, anterior.data_entrada)
+            if anterior.data_saida is not None:
+                _garantir_periodo_aberto(conn, anterior.empresa_id, anterior.data_saida)
+            _garantir_alteracao_editavel(conn, anterior.alteracao_entrada_id)
+            _garantir_alteracao_editavel(conn, anterior.alteracao_saida_id)
     if v.id is None:
         cur = conn.execute(
             """INSERT INTO vinculo_societario
                (empresa_id, socio_id, percentual_capital, quantidade_cotas, data_entrada,
-                data_saida, alteracao_entrada_id, alteracao_saida_id, observacao)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                data_saida, alteracao_entrada_id, alteracao_saida_id, observacao, valor_capital)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
             (
                 v.empresa_id,
                 v.socio_id,
@@ -407,6 +535,7 @@ def salvar_vinculo(conn: Conexao, v: VinculoSocietario) -> int:
                 v.alteracao_entrada_id,
                 v.alteracao_saida_id,
                 v.observacao,
+                v.valor_capital,
             ),
         )
         novo_id = cur.fetchone()[0]
@@ -416,7 +545,7 @@ def salvar_vinculo(conn: Conexao, v: VinculoSocietario) -> int:
     conn.execute(
         """UPDATE vinculo_societario SET empresa_id=%s, socio_id=%s, percentual_capital=%s,
            quantidade_cotas=%s, data_entrada=%s, data_saida=%s, alteracao_entrada_id=%s,
-           alteracao_saida_id=%s, observacao=%s WHERE id=%s""",
+           alteracao_saida_id=%s, observacao=%s, valor_capital=%s WHERE id=%s""",
         (
             v.empresa_id,
             v.socio_id,
@@ -427,6 +556,7 @@ def salvar_vinculo(conn: Conexao, v: VinculoSocietario) -> int:
             v.alteracao_entrada_id,
             v.alteracao_saida_id,
             v.observacao,
+            v.valor_capital,
             v.id,
         ),
     )
@@ -491,6 +621,22 @@ def valor_participacao(conn: Conexao, vinculo: VinculoSocietario) -> float:
     return (vinculo.quantidade_cotas or 0) * valor_por_cota
 
 
+def _ano_corrente() -> int:
+    """Separado pra os testes fixarem o "ano corrente" da regra abaixo."""
+    return dt.date.today().year
+
+
+def alteracao_automatica_cabe(data: str) -> bool:
+    """Se um movimento de sócio nesta data ainda ganha alteração contratual
+    automática: só do ano corrente em diante.
+
+    Entrada de sócio de anos atrás é história que já tem contrato próprio —
+    criar uma alteração "nova" datada lá atrás inventaria um evento que o
+    escritório não registrou, e bagunçaria a numeração. O vínculo fica sem
+    alteração, e ela é associada (ou criada) depois, na edição do vínculo."""
+    return bool(data) and int(data[:4]) >= _ano_corrente()
+
+
 def _abrir_alteracao_automatica(conn: Conexao, empresa_id: int, data: str, descricao: str) -> int:
     """Cria uma alteração contratual já aberta, herdando nome/capital/cotas
     vigentes da empresa — usada quando o movimento de sócio é registrado pela
@@ -520,12 +666,19 @@ def associar_socio_a_empresa(
     quantidade_cotas: float,
     data_entrada: str,
     descricao: str = "Inclusão de sócio (registrado pela aba de Sócios)",
+    valor_capital: float | None = None,
 ) -> int:
     """Associa o sócio à empresa e registra automaticamente a alteração
     contratual correspondente, para que o histórico da empresa reflita o
-    movimento feito por aqui."""
+    movimento feito por aqui — se a entrada for do ano corrente (ver
+    alteracao_automatica_cabe). Entrada mais antiga fica sem alteração,
+    pra ser associada depois."""
     _garantir_periodo_aberto(conn, empresa_id, data_entrada)
-    alteracao_id = _abrir_alteracao_automatica(conn, empresa_id, data_entrada, descricao)
+    alteracao_id = (
+        _abrir_alteracao_automatica(conn, empresa_id, data_entrada, descricao)
+        if alteracao_automatica_cabe(data_entrada)
+        else None
+    )
     return salvar_vinculo(
         conn,
         VinculoSocietario(
@@ -537,6 +690,7 @@ def associar_socio_a_empresa(
             data_entrada=data_entrada,
             data_saida=None,
             alteracao_entrada_id=alteracao_id,
+            valor_capital=valor_capital,
         ),
     )
 
@@ -599,12 +753,32 @@ def encerrar_vinculos_fora_da_lista(
     return encerrados
 
 
-def _participacao_mudou(vinculo: VinculoSocietario, linha: dict) -> bool:
-    """Quatro casas é a precisão com que a participação é mostrada e guardada;
-    comparar além disso faria toda importação "mudar" tudo por ruído de float."""
-    atual = round(float(vinculo.percentual_capital or 0.0), 4)
-    novo = round(float(linha.get("percentual_capital") or 0.0), 4)
-    return atual != novo
+# Campo da linha importada -> (atributo do vínculo, casas comparadas). As
+# casas são a precisão com que cada valor é mostrado e guardado; comparar
+# além disso faria toda importação "mudar" tudo por ruído de float.
+_CAMPOS_DA_PARTICIPACAO = (
+    ("percentual_capital", "percentual_capital", 4),
+    ("cotas_socio", "quantidade_cotas", 4),
+    ("valor_capital_socio", "valor_capital", 2),
+)
+
+
+def _mudancas_de_participacao(vinculo: VinculoSocietario, linha: dict) -> dict:
+    """O que a linha traz de diferente do vínculo: atributo -> valor novo.
+
+    Campo vazio (ou zero) na linha é campo que a planilha não informou — a
+    leitura não distingue um do outro —, e não "zere a participação": sem
+    esta regra, um layout sem a coluna de cotas apagaria as cotas de todo
+    mundo a cada importação."""
+    mudancas = {}
+    for campo, atributo, casas in _CAMPOS_DA_PARTICIPACAO:
+        novo = linha.get(campo)
+        if not novo:
+            continue
+        atual = getattr(vinculo, atributo)
+        if atual is None or round(float(atual), casas) != round(float(novo), casas):
+            mudancas[atributo] = float(novo)
+    return mudancas
 
 
 def _registrar_nova_participacao(
@@ -624,10 +798,11 @@ def _registrar_nova_participacao(
             id=None,
             empresa_id=vinculo.empresa_id,
             socio_id=vinculo.socio_id,
-            percentual_capital=linha["percentual_capital"],
-            # O relatório de sócios não traz cotas: sem esta retaguarda, cada
-            # importação zeraria a quantidade de cotas de todo o quadro.
+            percentual_capital=linha.get("percentual_capital") or vinculo.percentual_capital,
+            # O relatório de sócios não traz cotas nem capital: sem esta
+            # retaguarda, cada importação zeraria os dois de todo o quadro.
             quantidade_cotas=linha.get("cotas_socio") or vinculo.quantidade_cotas,
+            valor_capital=linha.get("valor_capital_socio") or vinculo.valor_capital,
             data_entrada=data_mudanca,
             data_saida=None,
             alteracao_entrada_id=alteracao_id,
@@ -1373,12 +1548,17 @@ def aplicar_importacao_cadastro(
     _abrir_alteracao_automatica. Nenhum dos dois é passado por quem importa
     planilha de cadastro comum, que não é movimentação societária.
 
-    `atualizar_participacao` trata o arquivo como o retrato vigente da
-    sociedade: sócio que já tem vínculo e vem com participação diferente tem o
-    vínculo atual fechado e outro aberto com o valor novo (ver
-    _registrar_nova_participacao), em vez de ser ignorado por "já existir".
-    Também é do relatório de sócios: planilha de cadastro pode trazer só parte
-    do quadro, e reescrever participação a partir dela seria perigoso."""
+    Alteração automática só é aberta pra movimento do ano corrente em diante
+    (ver alteracao_automatica_cabe): sócio que entrou há anos fica com a data
+    de entrada certa e sem alteração, pra ela ser associada depois.
+
+    Sócio que já tem vínculo ativo e vem com percentual, cotas ou capital
+    diferentes tem o vínculo atualizado — reimportar a planilha corrigida é
+    como se corrige o quadro. Com `atualizar_participacao` E uma alteração
+    escolhida (`alteracao_id`), a mudança é registrada como movimentação: o
+    vínculo atual é fechado na data da alteração e outro é aberto com os
+    valores novos (ver _registrar_nova_participacao), preservando o
+    histórico. Sem alteração escolhida, o vínculo é corrigido no lugar."""
     empresas_criadas = 0
     vinculos_criados = 0
     vinculos_ja_existentes = 0
@@ -1392,7 +1572,7 @@ def aplicar_importacao_cadastro(
     def alteracao_para(empresa_id: int, data_referencia: str) -> int | None:
         if alteracao_id is not None:
             return alteracao_id
-        if not criar_alteracao_por_empresa:
+        if not criar_alteracao_por_empresa or not alteracao_automatica_cabe(data_referencia):
             return None
         existente = alteracoes_automaticas.get(empresa_id)
         if existente is None:
@@ -1466,6 +1646,7 @@ def aplicar_importacao_cadastro(
                     socio_id=linha["socio_id"],
                     percentual_capital=linha["percentual_capital"],
                     quantidade_cotas=linha["cotas_socio"] or None,
+                    valor_capital=linha.get("valor_capital_socio") or None,
                     data_entrada=linha["data_entrada"],
                     data_saida=None,
                     alteracao_entrada_id=alteracao_para(empresa_id, linha["data_entrada"]),
@@ -1473,28 +1654,34 @@ def aplicar_importacao_cadastro(
             )
             vinculos_criados += 1
             vinculo_ativo = buscar_vinculo(conn, novo_id)
-        elif (
-            atualizar_participacao
-            and not linha.get("data_saida")
-            and _participacao_mudou(vinculo_ativo, linha)
-        ):
-            # A mudança é datada na alteração que está recebendo a importação
-            # — é ela que está registrando a nova divisão do capital —, e não
-            # na data de ingresso do sócio, que é história antiga.
-            alteracao_da_mudanca = alteracao_para(empresa_id, linha["data_entrada"])
-            alteracao = buscar_alteracao(conn, alteracao_da_mudanca) if alteracao_da_mudanca else None
-            data_mudanca = alteracao.data if alteracao else linha["data_entrada"]
-            if data_mudanca < vinculo_ativo.data_entrada:
-                # Fechar um vínculo antes de ele começar não existe: a
-                # alteração é anterior ao ingresso deste sócio, e quem importou
-                # precisa saber que a participação dele ficou como estava.
-                participacoes_nao_atualizadas += 1
+        elif not linha.get("data_saida") and (mudancas := _mudancas_de_participacao(vinculo_ativo, linha)):
+            if atualizar_participacao and alteracao_id is not None:
+                # A mudança é datada na alteração que está recebendo a
+                # importação — é ela que registra a nova divisão do capital —,
+                # e não na data de ingresso do sócio, que é história antiga.
+                data_mudanca = buscar_alteracao(conn, alteracao_id).data
+                if data_mudanca < vinculo_ativo.data_entrada:
+                    # Fechar um vínculo antes de ele começar não existe: a
+                    # alteração é anterior ao ingresso deste sócio, e quem
+                    # importou precisa saber que a participação ficou como estava.
+                    participacoes_nao_atualizadas += 1
+                else:
+                    novo_id = _registrar_nova_participacao(
+                        conn, vinculo_ativo, linha, data_mudanca, alteracao_id
+                    )
+                    participacoes_atualizadas += 1
+                    vinculo_ativo = buscar_vinculo(conn, novo_id)
             else:
-                novo_id = _registrar_nova_participacao(
-                    conn, vinculo_ativo, linha, data_mudanca, alteracao_da_mudanca
-                )
-                participacoes_atualizadas += 1
-                vinculo_ativo = buscar_vinculo(conn, novo_id)
+                for atributo, valor in mudancas.items():
+                    setattr(vinculo_ativo, atributo, valor)
+                try:
+                    salvar_vinculo(conn, vinculo_ativo)
+                    participacoes_atualizadas += 1
+                except ValueError:
+                    # Período fechado ou alteração trancada: o vínculo é
+                    # histórico protegido, e o resumo avisa que ficou como estava.
+                    participacoes_nao_atualizadas += 1
+                    vinculo_ativo = buscar_vinculo(conn, vinculo_ativo.id)
         else:
             vinculos_ja_existentes += 1
 

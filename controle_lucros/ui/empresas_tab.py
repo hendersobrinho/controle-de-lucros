@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QDoubleSpinBox, QFormLayout, QLineEdit, QPushButton
+from PySide6.QtWidgets import QDoubleSpinBox, QFormLayout, QLineEdit, QMessageBox, QPushButton
 
 from .. import repositories as repo
 from ..mapa_vinculos import PAPEL_EMPRESA
@@ -66,6 +66,7 @@ class EmpresasTab(CrudTab):
                 "percentual": v.percentual_capital,
                 "data_entrada": v.data_entrada,
                 "data_saida": v.data_saida,
+                "capital": v.valor_capital,
             }
             for v in repo.listar_vinculos_empresa(self.conn, empresa.id)
         ]
@@ -149,6 +150,24 @@ class EmpresasTab(CrudTab):
         if not registro.numero_chamada:
             raise ValueError("Informe o número da empresa.")
         repo.salvar_empresa(self.conn, registro)
+
+    def confirmar_exclusao(self, id_) -> bool:
+        """Excluir a empresa leva junto tudo o que é dela, de uma vez — por
+        isso a pergunta diz exatamente o quê, e o botão já vem em "Não"."""
+        empresa = repo.buscar_empresa(self.conn, id_)
+        nome = empresa.nome if empresa else "esta empresa"
+        resumo = repo.resumo_exclusao_empresa(self.conn, id_)
+        texto = f"Excluir a empresa {nome}?"
+        if resumo:
+            texto += "\n\nVão junto, sem volta:\n" + "\n".join(f"• {item}" for item in resumo)
+        texto += (
+            "\n\nOs sócios continuam cadastrados (podem estar em outras empresas). "
+            "Faça um backup antes se tiver dúvida.\n\nConfirma a exclusão?"
+        )
+        resposta = QMessageBox.warning(
+            self, "Excluir empresa", texto, QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        return resposta == QMessageBox.Yes
 
     def excluir_registro(self, id_) -> None:
         repo.excluir_empresa(self.conn, id_)

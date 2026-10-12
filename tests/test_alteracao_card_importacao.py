@@ -255,3 +255,27 @@ def test_marcar_a_opcao_da_baixa_em_quem_nao_esta_no_relatorio(conn, monkeypatch
     )
     assert vinculo.data_saida == cenario["alteracao"].data
     assert vinculo.alteracao_saida_id == cenario["alteracao"].id
+
+
+def test_excluir_alteracao_diz_quem_entra_e_sai_e_ja_vem_em_nao(conn, monkeypatch):
+    """Excluir a alteração desfaz o que ela registrou: a pergunta diz quais
+    vínculos somem e quais sócios voltam, e "Não" (o padrão) não mexe em nada."""
+    cenario = _cenario(conn)
+    andre = next(s for s in repo.listar_socios(conn) if s.nome.startswith("ANDRE"))
+    repo.salvar_vinculo(conn, VinculoSocietario(
+        None, cenario["empresa_a"], andre.id, 100, 1000, "2025-01-01", None,
+        alteracao_entrada_id=cenario["alteracao"].id))
+
+    perguntas = []
+    def responder(parent, titulo, texto, botoes=None, padrao=None):
+        perguntas.append((texto, padrao))
+        return QMessageBox.No
+    monkeypatch.setattr(mod.QMessageBox, "warning", responder)
+
+    card = AlteracaoCard(conn, cenario["empresa_a"], cenario["alteracao"], lambda _c: None)
+    card._excluir()
+
+    texto, padrao = perguntas[0]
+    assert "Entraram por ela" in texto and "ANDRE FRANZOTTI CARDOSO" in texto
+    assert padrao == QMessageBox.No
+    assert repo.listar_alteracoes(conn, cenario["empresa_a"]) != []

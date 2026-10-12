@@ -53,7 +53,12 @@ class AlteracaoContratual:
 class VinculoSocietario:
     """Histórico de participação de um sócio numa empresa. alteracao_entrada_id
     e alteracao_saida_id rastreiam qual alteração contratual trouxe/tirou o
-    sócio — nulo quando o vínculo é anterior ao controle por alteração."""
+    sócio — nulo quando o vínculo é anterior ao controle por alteração, ou
+    quando a alteração ainda vai ser associada depois.
+
+    valor_capital é o capital do sócio naquela empresa, em reais, como
+    informado (contrato, planilha). None quando ninguém informou — aí a tela
+    mostra a estimativa por cotas (ver repositories.valor_participacao)."""
 
     id: int | None
     empresa_id: int
@@ -65,6 +70,7 @@ class VinculoSocietario:
     alteracao_entrada_id: int | None = None
     alteracao_saida_id: int | None = None
     observacao: str = ""
+    valor_capital: float | None = None
 
 
 @dataclass

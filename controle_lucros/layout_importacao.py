@@ -59,7 +59,7 @@ GRUPOS_CAMPOS = (
     GrupoCampos(
         "Participação",
         "O vínculo do sócio com aquela empresa, com entrada e saída.",
-        ("percentual_capital", "cotas_socio", "data_entrada", "data_saida"),
+        ("percentual_capital", "cotas_socio", "valor_capital_socio", "data_entrada", "data_saida"),
     ),
     GrupoCampos(
         "Distribuição do ano",
