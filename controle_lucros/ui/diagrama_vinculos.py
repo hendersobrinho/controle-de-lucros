@@ -45,7 +45,7 @@ from PySide6.QtWidgets import (
 
 from ..mapa_vinculos import PAPEL_SOCIO, MapaVinculos, No, montar_mapa, nome_de_arquivo
 from . import theme
-from .common import formatar_valor_br, pintura_segura
+from .common import formatar_percentual, formatar_valor_br, pintura_segura
 
 RAIO_CAIXA = 8
 RAIO_COTOVELO = 10
@@ -243,7 +243,7 @@ def _desenhar_etiqueta_percentual(painter: QPainter, no: No, centro: QPointF,
                                   fundo: QColor, fio: QColor, cor_texto: QColor) -> None:
     """A participação em cima da linha, numa pastilha com fundo, pra ficar
     legível mesmo quando passa por cima do traço."""
-    texto = f"{formatar_valor_br(no.percentual, 2)}%"
+    texto = formatar_percentual(no.percentual)
     fonte = _fonte(10, negrito=True)
     largura = QFontMetricsF(fonte).horizontalAdvance(texto) + 12
     altura = 18

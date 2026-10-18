@@ -97,10 +97,10 @@ class EditorLayout(QWidget):
 
         cabecalho = QHBoxLayout()
         cabecalho.setSpacing(8)
-        cabecalho.addWidget(QLabel("Nome do layout:"))
+        cabecalho.addWidget(QLabel("Nome do layout"))
         cabecalho.addWidget(self.nome, 1)
         cabecalho.addSpacing(12)
-        cabecalho.addWidget(QLabel("Dados começam na linha:"))
+        cabecalho.addWidget(QLabel("Os dados começam na linha"))
         cabecalho.addWidget(self.linha_inicial)
 
         grade = QGridLayout()
@@ -112,10 +112,8 @@ class EditorLayout(QWidget):
         grade.setColumnStretch(1, 1)
 
         self.dica = QLabel(
-            "Digite em cada campo a <b>letra da coluna</b> onde a informação está na planilha "
-            "(A, B, C… como no topo do Excel). Campo em branco é informação que aquela planilha "
-            "não traz — ela simplesmente não é importada. O campo marcado com <b>*</b> é o único "
-            "obrigatório: sem o nome da empresa não há a que ligar a linha."
+            "Em cada campo, a <b>letra da coluna</b> do Excel (A, B, C…) onde a informação está. "
+            "Em branco = a planilha não traz. <b>*</b> = obrigatório."
         )
         self.dica.setWordWrap(True)
         self.dica.setProperty("role", "subtitulo")

@@ -136,3 +136,108 @@ def test_log_sobrevive_a_exclusao_do_usuario(conn):
 
     logs = [l for l in repo.listar_log_atividade(conn) if l.entidade == "empresa"]
     assert logs[0].usuario_nome == "Fulano"
+
+
+def _nova_senha_confirmada(dialogo):
+    """Dublê do exec() da tela de redefinir: digita "nova1234" duas vezes e
+    confirma, passando pela mesma validação da tela de verdade."""
+    dialogo.senha.setText("nova1234")
+    dialogo.confirmar.setText("nova1234")
+    dialogo._validar()
+    return dialogo.result()
+
+
+def test_admin_redefine_a_senha_de_outro_e_ele_entra_com_a_nova(conn, monkeypatch):
+    """O caso relatado: o primeiro administrador esqueceu a senha, outro
+    administrador a redefine pela aba Usuários, e o primeiro tem que entrar
+    com a senha nova — e não mais com a antiga. A confirmação diz com que
+    LOGIN entrar, que é o outro esquecimento comum."""
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from controle_lucros.ui import usuarios_tab as mod
+
+    QApplication.instance() or QApplication([])
+    repo.criar_usuario(conn, "Henderson Pereira", "henderson", "esquecida", admin=True)
+    repo.criar_usuario(conn, "Outro Admin", "outro", "senha123", admin=True)
+    sessao.definir_usuario_atual(repo.autenticar(conn, "outro", "senha123"))
+
+    aba = mod.UsuariosTab(conn)
+    linha = next(r for r in range(aba.tabela.count()) if aba.tabela.item(r).text() == "Henderson Pereira")
+    aba.tabela.selectRow(linha)
+
+    avisos = []
+    monkeypatch.setattr(mod._DialogoNovaSenha, "exec", _nova_senha_confirmada)
+    monkeypatch.setattr(mod.QMessageBox, "information", lambda *a, **k: avisos.append(a[2]))
+    aba._redefinir_senha()
+
+    assert repo.autenticar(conn, "henderson", "nova1234") is not None
+    assert repo.autenticar(conn, "henderson", "esquecida") is None
+    assert repo.autenticar(conn, "outro", "senha123") is not None  # a do outro não muda
+    assert "login: henderson" in avisos[0]
+
+
+def test_redefinir_senha_de_usuario_desativado_avisa(conn, monkeypatch):
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from controle_lucros.ui import usuarios_tab as mod
+
+    QApplication.instance() or QApplication([])
+    usuario_id = repo.criar_usuario(conn, "Fulano", "fulano", "senha123")
+    repo.definir_ativo(conn, usuario_id, False)
+    aba = mod.UsuariosTab(conn)
+    aba.tabela.selectRow(0)
+
+    avisos = []
+    monkeypatch.setattr(mod._DialogoNovaSenha, "exec", _nova_senha_confirmada)
+    monkeypatch.setattr(mod.QMessageBox, "information", lambda *a, **k: avisos.append(a[2]))
+    aba._redefinir_senha()
+
+    assert "DESATIVADO" in avisos[0]
+
+
+def test_ficha_do_usuario_mostra_acesso_e_atividade(conn):
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication, QLabel
+
+    from controle_lucros.ui import usuarios_tab as mod
+
+    QApplication.instance() or QApplication([])
+    usuario_id = repo.criar_usuario(conn, "Fulano", "fulano", "senha123")
+    repo.criar_acesso_lembrado(conn, usuario_id)
+    aba = mod.UsuariosTab(conn)
+    aba.tabela.selecionar_id(usuario_id)
+    textos = " | ".join(l.text() for l in aba.findChildren(QLabel))
+    assert "1 computador(es)" in textos
+    aba._encerrar_acessos()
+    assert repo.quantidade_acessos_lembrados(conn, usuario_id) == 0
+
+
+def test_dialogo_de_usuario_escolhe_o_nivel_em_cartoes_e_valida(conn):
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from controle_lucros.ui import usuarios_tab as mod
+
+    QApplication.instance() or QApplication([])
+    dialogo = mod.DialogoUsuario(conn)
+    dialogo.nome.setText("Joana")
+    dialogo.login.setText("joana")
+    dialogo.senha.setText("1234")
+    dialogo.confirmar.setText("4321")
+    dialogo._salvar()
+    assert "não são iguais" in dialogo.erro.text()
+    dialogo.confirmar.setText("1234")
+    dialogo.cartao_admin.escolhido.emit(True)
+    dialogo._salvar()
+    criado = repo.buscar_usuario_por_login(conn, "joana")
+    assert criado is not None and criado.admin

@@ -9,7 +9,12 @@ class Empresa:
     """Cadastro-base da empresa. nome/cnpj/capital_social/quantidade_cotas
     aqui são os valores de fundação; o estado *atual* de uma empresa com
     alterações contratuais é o snapshot da alteração mais recente (ver
-    repositories.estado_atual_empresa)."""
+    repositories.estado_atual_empresa).
+
+    valor_cota é o valor nominal de UMA cota (R$ 1,00 na maioria, R$ 0,01 em
+    algumas), informado à parte porque o relatório de sócios não traz capital
+    nem cotas da empresa. None quando ninguém informou — aí vale o capital
+    dividido pelas cotas (ver repositories.valor_da_cota)."""
 
     id: int | None
     numero_chamada: str
@@ -17,6 +22,7 @@ class Empresa:
     cnpj: str
     capital_social: float
     quantidade_cotas: float
+    valor_cota: float | None = None
 
 
 @dataclass

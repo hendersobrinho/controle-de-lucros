@@ -351,3 +351,39 @@ def test_atualizar_repoe_a_lista_sem_perder_a_selecao(conn):
     textos = [tela.formato.itemText(i) for i in range(tela.formato.count())]
     assert "Layout · Contabilidade X" in textos
     assert tela.formato.currentText() == "Layout · Sistema antigo"
+
+
+# ------------------------------------------------------- estado visual --
+def test_formatos_aparecem_como_cartoes_e_o_escolhido_fica_marcado(tela):
+    escolhidos = [c for c in tela._cartoes.values() if c.property("escolhido") == "true"]
+    assert [c.chave for c in escolhidos] == [tela.formato.currentData()]
+    outro = next(chave for chave in tela._cartoes if chave != tela.formato.currentData())
+    tela._cartoes[outro].clicado.emit(outro)
+    assert tela.formato.currentData() == outro
+    assert tela._cartoes[outro].property("escolhido") == "true"
+
+
+def test_editando_layout_os_passos_saem_da_frente(tela):
+    tela._novo_layout()
+    assert tela.card_layout.isVisibleTo(tela)
+    assert not tela.passos.isVisibleTo(tela)
+    tela._fechar_editor()
+    assert tela.passos.isVisibleTo(tela)
+
+
+def test_salvar_mostra_a_confirmacao_e_seleciona_o_cartao(tela):
+    _preencher(tela, "Sistema antigo", empresa_nome="B", socio_nome="D")
+    tela._salvar_layout()
+    assert tela.resultado.isVisibleTo(tela)
+    assert "salvo e selecionado" in tela.resultado.text()
+    assert tela._cartoes["layout:1"].property("escolhido") == "true"
+    assert "Sistema antigo" in tela.btn_importar.text()
+
+
+def test_trocar_de_formato_descarta_o_rascunho_de_layout(tela):
+    tela._novo_layout()
+    tela._fechar_editor()
+    assert "novo:" in tela._cartoes
+    tela._escolher_cartao("modelo:empresas")
+    assert "novo:" not in tela._cartoes
+    assert tela.formato.findData("novo:") < 0

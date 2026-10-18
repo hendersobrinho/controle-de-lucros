@@ -49,7 +49,7 @@ def test_svg_sai_vetorial_com_o_texto_dentro(tmp_path):
 
     assert conteudo.lstrip().startswith("<?xml")
     assert "ENDOGASTRO CLINICA MEDICA LTDA" in conteudo
-    assert "46,94%" in conteudo
+    assert "46,9400%" in conteudo
     # Vetorial de verdade: nada de imagem embutida em base64.
     assert "base64" not in conteudo
 
@@ -151,7 +151,7 @@ def test_botao_da_aba_abre_o_mapa_do_socio_selecionado(conn, monkeypatch):
         quantidade_cotas=469, data_entrada="2007-03-23", data_saida=None))
 
     aba = SociosTab(conn)
-    aba.tabela.selectRow(0)
+    aba.lista.selectRow(0)
     assert aba.btn_mapa.isEnabled()
 
     # Patch só do exec: o construtor de verdade precisa rodar. Trocar a
@@ -242,10 +242,10 @@ def test_as_duas_abas_levam_o_capital_do_socio_ao_mapa(conn, monkeypatch):
     monkeypatch.setattr(dv.DialogoMapaVinculos, "exec", lambda self: abertos.append(self) or 0)
 
     socios = SociosTab(conn)
-    socios.tabela.selectRow(0)
+    socios.lista.selectRow(0)
     socios.btn_mapa.click()
     empresas = EmpresasTab(conn)
-    empresas.tabela.selectRow(0)
+    empresas.lista.selectRow(0)
     empresas.btn_quadro.click()
 
     assert [d.mapa().nos[0].capital for d in abertos] == [46940.0, 46940.0]
@@ -266,7 +266,7 @@ def test_botao_da_aba_empresas_abre_o_quadro_societario(conn, monkeypatch):
     aba = EmpresasTab(conn)
     assert not aba.btn_quadro.isEnabled()  # sem empresa escolhida não há quadro
 
-    aba.tabela.selectRow(0)
+    aba.lista.selectRow(0)
     assert aba.btn_quadro.isEnabled()
 
     abertos = []

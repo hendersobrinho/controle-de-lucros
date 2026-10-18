@@ -1,6 +1,6 @@
-"""Sistema de design: paleta de livro-razão / cartório. Modo claro em papel
-e tinta; modo escuro em azul-marinho com texto azul-claro e acento em
-dourado (a mesma ideia de "documento formal", só na paleta noturna).
+"""Sistema de design nas cores da marca (logo Mfinanceiro): marinho, laranja
+e turquesa. Modo claro em branco-azulado com texto marinho; modo escuro no
+próprio marinho, com o laranja de acento.
 Tipografia: serifada elegante pra títulos, Segoe UI pra corpo — ambas
 nativas do Windows, com fallback razoável em outros SOs para
 desenvolvimento."""
@@ -10,6 +10,7 @@ from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QApplication
 
 from .. import preferencias
+from .icones import pasta_assets
 
 # Uma família só para tudo, humanista e de traço arredondado. A versão
 # anterior usava serifa (Constantia/Cambria) nos títulos, o que dava ao
@@ -33,42 +34,55 @@ FONT_DISPLAY = (
 FONT_BODY = _FAMILIA
 FONT_MONO = 'Consolas, "Cascadia Mono", "Liberation Mono", "DejaVu Sans Mono", monospace'
 
+# Cores da marca (logo Mfinanceiro): azul-marinho #203461, laranja #F9B259 e
+# turquesa #4BBDCD. Os nomes das chaves ficaram os da paleta antiga (tinta,
+# latão, papel) pra não espalhar a troca pelo programa inteiro: BRASS agora é
+# o laranja da marca, SEAL_GREEN o turquesa (escurecido onde vira texto, pra
+# manter contraste de leitura) e INK o marinho.
 PALETA_CLARA = {
-    "INK": "#1B2A41",
-    "INK_MUTED": "#5B6472",
-    "PAPER": "#F7F4EC",
+    "INK": "#203461",
+    "INK_MUTED": "#5A6680",
+    "PAPER": "#F2F5F9",
     "PAPER_RAISED": "#FFFFFF",
-    "BRASS": "#B08D57",
-    "BRASS_DARK": "#8C6C3E",
-    "SEAL_GREEN": "#2F5233",
-    "SEAL_RED": "#7A2E2E",
-    "HAIRLINE": "#D9D3C2",
-    "ALT_ROW": "#FBF9F3",
-    "ENTROU_BG": "#EFE3C8",
-    "ENTROU_FG": "#6B4E1E",
-    "SAIU_BG": "#F0DCD8",
-    "SAIU_FG": "#7A2E2E",
+    "BRASS": "#F9B259",
+    "BRASS_DARK": "#B8660E",
+    "SEAL_GREEN": "#16798A",
+    "SEAL_RED": "#9A3434",
+    "HAIRLINE": "#D7DEE8",
+    "ALT_ROW": "#F7F9FC",
+    "ENTROU_BG": "#FDEBD2",
+    "ENTROU_FG": "#8A4B07",
+    "SAIU_BG": "#F7E0DE",
+    "SAIU_FG": "#9A3434",
+    # O painel de destaque das telas de distribuição: o marinho da marca
+    # cheio, com texto branco por cima.
+    "HERO_BG": "#203461",
+    "HERO_BG_2": "#2B4580",
+    "HERO_FG": "#FFFFFF",
+    "HERO_MUTED": "#B9C6E4",
 }
 
-# Cinza-ardósia em vez de azul-marinho quase preto, e acentos dessaturados: a
-# versão anterior tinha fundo escuro demais e cores vibrantes por cima, o que
-# num programa que se olha o dia inteiro cansa a vista. Todos os pares de
-# texto/fundo daqui ficam acima de 4.5:1 de contraste (o mínimo do WCAG AA).
+# O modo escuro é o marinho da marca, com o laranja e o turquesa claros por
+# cima. Todos os pares de texto/fundo ficam acima de 4.5:1 de contraste.
 PALETA_ESCURA = {
-    "INK": "#DCE1E7",
-    "INK_MUTED": "#9BA5B1",
-    "PAPER": "#262C35",
-    "PAPER_RAISED": "#2F3640",
-    "BRASS": "#CBA971",
-    "BRASS_DARK": "#AC8B55",
-    "SEAL_GREEN": "#8CB897",
-    "SEAL_RED": "#DDA39C",
-    "HAIRLINE": "#434C58",
-    "ALT_ROW": "#2B323B",
-    "ENTROU_BG": "#403A2B",
-    "ENTROU_FG": "#DCC189",
-    "SAIU_BG": "#3F302C",
-    "SAIU_FG": "#DDA39C",
+    "INK": "#E4E9F2",
+    "INK_MUTED": "#9DA9C0",
+    "PAPER": "#17213A",
+    "PAPER_RAISED": "#202C48",
+    "BRASS": "#F9B259",
+    "BRASS_DARK": "#E89A3A",
+    "SEAL_GREEN": "#72D0DD",
+    "SEAL_RED": "#EBA39C",
+    "HAIRLINE": "#33415F",
+    "ALT_ROW": "#1C2742",
+    "ENTROU_BG": "#45361F",
+    "ENTROU_FG": "#FBC983",
+    "SAIU_BG": "#45282B",
+    "SAIU_FG": "#EBA39C",
+    "HERO_BG": "#26365C",
+    "HERO_BG_2": "#30467A",
+    "HERO_FG": "#FFFFFF",
+    "HERO_MUTED": "#AEBBD8",
 }
 
 class _EstadoTema(QObject):
@@ -172,6 +186,8 @@ def _rgb(hex_cor: str) -> str:
 def build_stylesheet() -> str:
     p = _estado.paleta()
     brass_rgb = _rgb(p["BRASS"])
+    # Barra normal mesmo no Windows: o QSS entende "C:/..." e se perde com "\".
+    marcado = (pasta_assets() / "marcado.svg").as_posix()
     return f"""
     * {{
         font-family: {FONT_BODY};
@@ -187,8 +203,42 @@ def build_stylesheet() -> str:
        pinta cada QLabel com o fundo da página — e dentro de um cartão (que é
        mais claro) cada rótulo vira uma tarja visível. Texto não tem fundo
        próprio: acompanha o que estiver atrás dele. */
-    QLabel {{
+    QLabel, QCheckBox, QRadioButton {{
         background: transparent;
+    }}
+
+    /* A caixinha desenhada aqui, e não pelo estilo nativo: com o fundo
+       transparente (sem a tarja bege dentro dos cartões), o desenho nativo
+       sumia com a caixa desmarcada. Marcada: dourado com o "✓" branco. */
+    QCheckBox::indicator, QRadioButton::indicator {{
+        width: 16px;
+        height: 16px;
+        border: 1px solid {p["INK_MUTED"]};
+        background: {p["PAPER_RAISED"]};
+    }}
+    QCheckBox::indicator {{
+        border-radius: 4px;
+    }}
+    QRadioButton::indicator {{
+        border-radius: 9px;
+    }}
+    QCheckBox::indicator:hover, QRadioButton::indicator:hover {{
+        border-color: {p["BRASS"]};
+    }}
+    QCheckBox::indicator:checked {{
+        background: {p["BRASS_DARK"]};
+        border-color: {p["BRASS_DARK"]};
+        image: url("{marcado}");
+    }}
+    /* A bolinha do rádio é uma borda grossa dourada em volta do miolo. */
+    QRadioButton::indicator:checked {{
+        border: 5px solid {p["BRASS_DARK"]};
+        width: 8px;
+        height: 8px;
+    }}
+    QCheckBox::indicator:disabled, QRadioButton::indicator:disabled {{
+        border-color: {p["HAIRLINE"]};
+        background: {p["ALT_ROW"]};
     }}
 
     QToolTip {{
@@ -229,6 +279,352 @@ def build_stylesheet() -> str:
         background: {p["PAPER_RAISED"]};
         border: 1px solid {p["HAIRLINE"]};
         border-radius: 6px;
+    }}
+
+    /* Cartão de participação (aba Sócios): um por empresa do sócio. O latão
+       na borda ao passar o mouse diz que o cartão inteiro abre a edição. */
+    QFrame[role="cartaoParticipacao"] {{
+        background: {p["PAPER_RAISED"]};
+        border: 1px solid {p["HAIRLINE"]};
+        border-radius: 8px;
+    }}
+    QFrame[role="cartaoParticipacao"]:hover {{
+        border: 1px solid {p["BRASS"]};
+    }}
+    QFrame[role="cartaoParticipacao"][encerrado="true"] {{
+        background: {p["ALT_ROW"]};
+    }}
+    QLabel[role="nomeEmpresaCartao"] {{
+        font-family: {FONT_DISPLAY};
+        font-size: 15px;
+        font-weight: 600;
+    }}
+    /* Rótulo pequeno acima de cada valor: diz o que o número é sem disputar
+       atenção com ele. */
+    QLabel[role="rotuloCampo"] {{
+        color: {p["INK_MUTED"]};
+        font-size: 11px;
+        font-weight: 600;
+    }}
+    QLabel[role="valorCampo"] {{
+        font-size: 14px;
+    }}
+    QLabel[role="destaqueParticipacao"] {{
+        font-family: {FONT_DISPLAY};
+        font-size: 18px;
+        font-weight: 600;
+    }}
+    QLabel[role="etiquetaSituacao"] {{
+        font-size: 11px;
+        font-weight: 600;
+        border-radius: 9px;
+        padding: 2px 10px;
+    }}
+    QLabel[role="etiquetaSituacao"][tom="ativo"] {{
+        color: {p["SEAL_GREEN"]};
+        border: 1px solid {p["SEAL_GREEN"]};
+    }}
+    /* A descrição da alteração, entre aspas embaixo do título: é o "do que
+       se trata" escrito por quem cadastrou. */
+    QLabel[role="descricaoAlteracao"] {{
+        font-size: 14px;
+        font-style: italic;
+        padding-top: 4px;
+    }}
+    QLabel[role="descricaoAlteracao"][vazia="true"] {{
+        color: {p["INK_MUTED"]};
+        font-size: 12px;
+    }}
+    QLabel[role="etiquetaSituacao"][tom="mudou"] {{
+        color: {p["BRASS_DARK"]};
+        border: 1px solid {p["BRASS"]};
+    }}
+    QLabel[role="etiquetaSituacao"][tom="neutro"] {{
+        color: {p["INK_MUTED"]};
+        border: 1px solid {p["HAIRLINE"]};
+    }}
+    /* Faixa do ano na distribuição trimestral: um cartão por trimestre, o
+       escolhido com a borda laranja, e o total do ano em laranja-claro. */
+    QFrame[role="cartaoTrimestre"] {{
+        background: {p["PAPER_RAISED"]};
+        border: 1px solid {p["HAIRLINE"]};
+        border-radius: 8px;
+    }}
+    QFrame[role="cartaoTrimestre"]:hover {{
+        border-color: {p["BRASS"]};
+    }}
+    QFrame[role="cartaoTrimestre"][escolhido="true"] {{
+        border: 2px solid {p["BRASS"]};
+        background: {p["PAPER_RAISED"]};
+    }}
+    QFrame[role="cartaoTrimestre"]:disabled {{
+        background: {p["ALT_ROW"]};
+    }}
+    QFrame[role="cartaoAno"] {{
+        background: {p["ENTROU_BG"]};
+        border: 1px solid {p["ENTROU_BG"]};
+        border-radius: 8px;
+    }}
+    /* Painel de destaque das telas de distribuição. */
+    QFrame[role="hero"] {{
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                                    stop:0 {p["HERO_BG"]}, stop:1 {p["HERO_BG_2"]});
+        border: none;
+        border-radius: 12px;
+    }}
+    QFrame[role="hero"] QLabel {{
+        color: {p["HERO_FG"]};
+        background: transparent;
+    }}
+    QFrame[role="hero"] QLabel[role="heroRotulo"] {{
+        color: {p["HERO_MUTED"]};
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.6px;
+    }}
+    QFrame[role="hero"] QLabel[role="heroValor"] {{
+        font-family: {FONT_DISPLAY};
+        font-size: 30px;
+        font-weight: 700;
+    }}
+    QFrame[role="hero"] QLabel[role="heroValorMenor"] {{
+        font-family: {FONT_DISPLAY};
+        font-size: 17px;
+        font-weight: 600;
+    }}
+    QFrame[role="hero"] QLabel[role="heroNota"] {{
+        color: {p["HERO_MUTED"]};
+        font-size: 12px;
+    }}
+    QFrame[role="hero"] QFrame[role="heroDivisor"] {{
+        background: rgba(255, 255, 255, 0.16);
+        max-width: 1px;
+        min-width: 1px;
+        border: none;
+    }}
+    QFrame[role="hero"] QPushButton {{
+        background: rgba(255, 255, 255, 0.10);
+        border: 1px solid rgba(255, 255, 255, 0.28);
+        color: {p["HERO_FG"]};
+        border-radius: 15px;
+        padding: 5px 14px;
+        font-size: 12px;
+    }}
+    QFrame[role="hero"] QPushButton:hover {{
+        background: rgba(255, 255, 255, 0.20);
+    }}
+    QFrame[role="hero"] QPushButton[trancado="true"] {{
+        background: {p["BRASS"]};
+        border-color: {p["BRASS"]};
+        color: #203461;
+        font-weight: 600;
+    }}
+    QFrame[role="hero"] QLabel[role="heroAno"] {{
+        color: #203461;
+        background: {p["BRASS"]};
+        border-radius: 13px;
+        padding: 3px 14px;
+        font-size: 14px;
+        font-weight: 700;
+    }}
+    /* O ano das telas de distribuição: grande, no centro das setas. */
+    QSpinBox[role="anoGrande"] {{
+        font-family: {FONT_DISPLAY};
+        font-size: 20px;
+        font-weight: 700;
+        padding: 4px 6px;
+        color: {p["INK"]};
+        border: 2px solid {p["BRASS"]};
+        border-radius: 8px;
+    }}
+    /* Importação: os formatos como cartões, os passos numerados e os
+       botões grandes de ação. */
+    QFrame[role="cartaoFormato"] {{
+        background: {p["PAPER_RAISED"]};
+        border: 1px solid {p["HAIRLINE"]};
+        border-radius: 8px;
+    }}
+    QFrame[role="cartaoFormato"]:hover {{
+        border-color: {p["BRASS"]};
+    }}
+    QFrame[role="cartaoFormato"][escolhido="true"] {{
+        border: 2px solid {p["BRASS"]};
+        background: {p["ALT_ROW"]};
+    }}
+    QLabel[role="marcaSelecionado"] {{
+        color: {p["BRASS_DARK"]};
+        font-size: 11px;
+        font-weight: 700;
+    }}
+    QLabel[role="numeroPasso"] {{
+        background: {p["INK"]};
+        color: {p["PAPER_RAISED"]};
+        border-radius: 15px;
+        font-weight: 700;
+        font-size: 14px;
+    }}
+    QPushButton[role="acaoGrande"], QPushButton[role="acaoGrandePrimaria"] {{
+        text-align: left;
+        padding: 10px 18px;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 600;
+    }}
+    QPushButton[role="acaoGrandePrimaria"] {{
+        background: {p["INK"]};
+        color: {p["PAPER_RAISED"]};
+        border: 1px solid {p["INK"]};
+    }}
+    QPushButton[role="acaoGrandePrimaria"]:hover {{
+        background: {p["BRASS_DARK"]};
+        border-color: {p["BRASS_DARK"]};
+    }}
+    /* Confirmação do que acabou de dar certo. */
+    QLabel[role="sucesso"] {{
+        background: {p["ALT_ROW"]};
+        color: {p["SEAL_GREEN"]};
+        border: 1px solid {p["SEAL_GREEN"]};
+        border-left: 5px solid {p["SEAL_GREEN"]};
+        border-radius: 6px;
+        padding: 10px 14px;
+        font-weight: 600;
+    }}
+    /* Janelas de cadastro (ui/formulario.py). */
+    QLabel[role="info"] {{
+        color: {p["BRASS_DARK"]};
+        font-size: 11px;
+        font-weight: 700;
+    }}
+    QLabel[role="dicaCampo"] {{
+        color: {p["INK_MUTED"]};
+        font-size: 11px;
+    }}
+    QLabel[role="operador"] {{
+        color: {p["BRASS_DARK"]};
+        font-family: {FONT_DISPLAY};
+        font-size: 22px;
+        font-weight: 700;
+    }}
+    QPushButton[role="segmento"] {{
+        background: {p["PAPER_RAISED"]};
+        border: 1px solid {p["HAIRLINE"]};
+        border-radius: 0;
+        padding: 8px 14px;
+        color: {p["INK_MUTED"]};
+    }}
+    QPushButton[role="segmento"][posicao="inicio"] {{
+        border-top-left-radius: 6px;
+        border-bottom-left-radius: 6px;
+    }}
+    QPushButton[role="segmento"][posicao="fim"] {{
+        border-top-right-radius: 6px;
+        border-bottom-right-radius: 6px;
+        border-left: none;
+    }}
+    QPushButton[role="segmento"][posicao="meio"] {{
+        border-left: none;
+    }}
+    QPushButton[role="segmento"]:checked {{
+        background: {p["INK"]};
+        border-color: {p["INK"]};
+        color: {p["PAPER_RAISED"]};
+        font-weight: 600;
+    }}
+    /* Aviso dentro da tela: faixa clara com borda à esquerda, em vez de um
+       bloco de cor chapada que gritava mais que os próprios números. */
+    QLabel[role="alerta"] {{
+        background: {p["ENTROU_BG"]};
+        color: {p["ENTROU_FG"]};
+        border-left: 4px solid {p["BRASS"]};
+        border-radius: 4px;
+        padding: 9px 12px;
+        font-size: 12px;
+    }}
+    QLabel[role="sinalSoma"] {{
+        color: {p["INK_MUTED"]};
+        font-size: 22px;
+        font-weight: 300;
+    }}
+    QLabel[role="etiquetaSituacao"][tom="saiu"] {{
+        color: {p["SAIU_FG"]};
+        background: {p["SAIU_BG"]};
+        border: 1px solid {p["SAIU_BG"]};
+    }}
+    /* Abas da ficha do sócio: texto solto com sublinhado laranja na
+       escolhida — mesma linguagem da barra lateral, sem caixas em volta. */
+    QWidget[role="faixaAbas"] {{
+        background: transparent;
+    }}
+    QPushButton[role="abaFicha"] {{
+        background: {p["PAPER_RAISED"]};
+        border: 1px solid {p["HAIRLINE"]};
+        border-radius: 13px;
+        padding: 4px 12px;
+        min-height: 16px;
+        font-size: 13px;
+        color: {p["INK"]};
+        font-weight: 500;
+    }}
+    QPushButton[role="abaFicha"]:hover {{
+        border-color: {p["BRASS"]};
+        background: {p["PAPER_RAISED"]};
+    }}
+    QPushButton[role="abaFicha"]:checked {{
+        background: {p["INK"]};
+        border-color: {p["INK"]};
+        color: {p["PAPER_RAISED"]};
+    }}
+    QPushButton[role="abaFicha"][apagada="true"] {{
+        color: {p["INK_MUTED"]};
+        font-style: italic;
+    }}
+    QPushButton[role="abaFicha"][apagada="true"]:checked {{
+        color: {p["PAPER_RAISED"]};
+    }}
+    QListWidget[role="listaFichas"] {{
+        background: {p["PAPER_RAISED"]};
+        border: 1px solid {p["HAIRLINE"]};
+        border-radius: 8px;
+        outline: none;
+    }}
+    /* Atalho de um clique (R$ 1,00 / R$ 0,01): pílula pequena ao lado do
+       campo, pra não competir com os botões de verdade da tela. */
+    QPushButton[role="atalho"] {{
+        background: {p["PAPER_RAISED"]};
+        border: 1px solid {p["HAIRLINE"]};
+        border-radius: 12px;
+        padding: 3px 10px;
+        font-size: 12px;
+        color: {p["INK_MUTED"]};
+    }}
+    QPushButton[role="atalho"]:hover {{
+        border-color: {p["BRASS"]};
+        color: {p["INK"]};
+    }}
+    /* Os números que resumem a empresa no topo da ficha. */
+    QLabel[role="numeroFicha"] {{
+        font-family: {FONT_DISPLAY};
+        font-size: 19px;
+        font-weight: 600;
+    }}
+    QLabel[role="linkFicha"] {{
+        color: {p["BRASS_DARK"]};
+        font-size: 13px;
+    }}
+
+    /* Tela vazia é convite pra agir: texto maior e centrado, não um aviso. */
+    QLabel[role="vazioTitulo"] {{
+        font-family: {FONT_DISPLAY};
+        font-size: 16px;
+        font-weight: 600;
+    }}
+    QLabel[role="vazioTexto"] {{
+        color: {p["INK_MUTED"]};
+        font-size: 13px;
+    }}
+    QScrollArea[role="listaCartoes"], QScrollArea[role="listaCartoes"] > QWidget > QWidget {{
+        background: transparent;
+        border: none;
     }}
 
     QFrame[role="hairline"] {{
@@ -290,7 +686,7 @@ def build_stylesheet() -> str:
         border-radius: 4px;
         padding: 6px 8px;
         selection-background-color: {p["BRASS"]};
-        selection-color: {p["PAPER_RAISED"]};
+        selection-color: #203461;
     }}
 
     QLineEdit:focus, QDoubleSpinBox:focus, QSpinBox:focus, QDateEdit:focus,
@@ -467,8 +863,8 @@ def build_stylesheet() -> str:
     }}
 
     QTableWidget::item:selected {{
-        background: {p["BRASS"]};
-        color: {p["PAPER_RAISED"]};
+        background: {p["ENTROU_BG"]};
+        color: {p["INK"]};
     }}
 
     /* Barra de progresso na paleta do programa: o azul padrão do Qt é a única

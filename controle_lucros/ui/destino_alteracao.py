@@ -26,12 +26,14 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QRadioButton,
     QSizePolicy,
+    QSpinBox,
     QVBoxLayout,
 )
 
 from .. import repositories as repo
 from ..models import AlteracaoContratual
 from .common import formatar_numero
+from .theme import SEAL_RED
 
 DESCRICAO_PADRAO = "Importação do relatório de sócios"
 
@@ -94,10 +96,21 @@ class DialogoDestinoAlteracao(QDialog):
         estado = repo.estado_atual_empresa(conn, empresa_id)
         numero = repo.proximo_numero_alteracao(conn, empresa_id)
         self.rotulo_nova = _paragrafo(
-            f"Vai nascer como a alteração Nº {numero} de {estado['nome']} — o número é o próximo "
-            "da empresa, e a data vem do quadro societário do relatório."
+            f"Alteração de {estado['nome']}. O número sugerido é o próximo da empresa — mude para o "
+            "do contrato se for outro (a primeira registrada pode ser a Nº 7, por exemplo). A data "
+            "vem do quadro societário do relatório."
         )
         self.rotulo_nova.setProperty("role", "subtitulo")
+
+        self.numero = QSpinBox()
+        self.numero.setRange(1, 9999)
+        self.numero.setPrefix("Nº ")
+        self.numero.setValue(numero)
+        self.numero.valueChanged.connect(self._ajustar_campos)
+        self.aviso_numero = QLabel()
+        self.aviso_numero.setProperty("role", "subtitulo")
+        self.aviso_numero.setStyleSheet(f"color: {SEAL_RED()};")
+        self.aviso_numero.hide()
 
         self.data = QDateEdit(calendarPopup=True)
         self.data.setDisplayFormat("dd/MM/yyyy")
@@ -174,6 +187,9 @@ class DialogoDestinoAlteracao(QDialog):
         layout.addSpacing(6)
         layout.addWidget(self.opcao_nova)
         layout.addWidget(self.rotulo_nova)
+        layout.addWidget(QLabel("Nº da alteração"))
+        layout.addWidget(self.numero)
+        layout.addWidget(self.aviso_numero)
         layout.addWidget(QLabel("Data da alteração"))
         layout.addWidget(self.data)
         layout.addWidget(QLabel("Descrição"))
@@ -210,11 +226,17 @@ class DialogoDestinoAlteracao(QDialog):
 
     def _ajustar_campos(self, *_args) -> None:
         nova = self.opcao_nova.isChecked()
-        for campo in (self.rotulo_nova, self.data, self.descricao, self.mudou_capital):
+        for campo in (self.rotulo_nova, self.numero, self.data, self.descricao, self.mudou_capital):
             campo.setEnabled(nova)
         for campo in (self.capital, self.cotas):
             campo.setEnabled(nova and self.mudou_capital.isChecked())
         self.existentes.setEnabled(not nova and bool(self._abertas))
+        repetido = nova and repo.numero_alteracao_em_uso(self.conn, self.empresa_id, self.numero.value())
+        self.aviso_numero.setText(
+            f"Esta empresa já tem a alteração Nº {self.numero.value()}. Escolha outro número." if repetido else ""
+        )
+        self.aviso_numero.setVisible(bool(repetido))
+        self.botoes.button(QDialogButtonBox.Ok).setEnabled(not repetido)
 
     def resolver(self) -> int:
         """O id da alteração escolhida, criando-a se for o caso. Levanta
@@ -230,7 +252,7 @@ class DialogoDestinoAlteracao(QDialog):
             AlteracaoContratual(
                 id=None,
                 empresa_id=self.empresa_id,
-                numero=repo.proximo_numero_alteracao(self.conn, self.empresa_id),
+                numero=self.numero.value(),
                 data=self.data.date().toString("yyyy-MM-dd"),
                 nome_empresa=estado["nome"],
                 capital_social=self.capital.value() if mudou else estado["capital_social"],

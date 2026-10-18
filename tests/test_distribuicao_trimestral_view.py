@@ -483,3 +483,62 @@ def test_setas_travam_durante_a_edicao(conn, cenario):
     assert not view.btn_proximo.isEnabled()
     view._cancelar_edicao()
     assert view.btn_anterior.isEnabled()
+
+
+# ------------------------------------------------ faixa do ano e divisão --
+
+
+def test_grafico_do_ano_mostra_o_que_foi_lancado_e_o_total(conn, cenario):
+    _lancar(_view(conn, trimestre=1), cenario["fulano"], 10000.0)
+    view = _view(conn, trimestre=2)
+    _lancar(view, cenario["beltrano"], 5000.0)
+    assert [view.grafico.total(t) for t in (1, 2, 3, 4)] == [10000.0, 5000.0, 0.0, 0.0]
+    assert view.total_ano.text() == "R$ 15.000,00"
+    assert view.valor_lancados.text() == "2 de 4"
+    assert view.grafico._escolhido == 2
+
+
+def test_cada_socio_tem_a_mesma_cor_no_grafico_e_na_tabela(conn, cenario):
+    from controle_lucros.ui.painel_distribuicao import PAPEL_COR
+
+    view = _view(conn, trimestre=1)
+    _lancar(view, cenario["fulano"], 1000.0)
+    (valor, cor_grafico, nome) = view.grafico._colunas[1][0]
+    row = _linha_de(view, cenario["fulano"])
+    assert nome == "Fulano de Tal"
+    assert view.tabela.item(row, 0).data(PAPEL_COR) == cor_grafico
+
+
+def test_clicar_na_barra_abre_o_trimestre(conn, cenario):
+    view = _view(conn, trimestre=1)
+    view.grafico.clicado.emit(3)
+    assert view.trimestre.currentData() == 3
+
+
+def test_grafico_trava_durante_a_edicao(conn, cenario):
+    view = _view(conn, trimestre=1)
+    view._iniciar_edicao()
+    view._escolher_trimestre(3)
+    assert view.trimestre.currentData() == 1
+    assert not view.grafico.isEnabled()
+
+
+def test_dividir_pelo_percentual_reparte_o_total(conn, cenario):
+    view = _view(conn, trimestre=1)
+    view._iniciar_edicao()
+    view.total_para_dividir.setValue(1000.01)
+    view._dividir_pelo_percentual()
+    fulano = view._widgets_edicao[_linha_de(view, cenario["fulano"])]["valor"].value()
+    beltrano = view._widgets_edicao[_linha_de(view, cenario["beltrano"])]["valor"].value()
+    # 60% / 40%, e o centavo do arredondamento fica com a maior fatia.
+    assert (fulano, beltrano) == (600.01, 400.0)
+    assert "1.000,01" in view.total_digitado.text()
+    view._salvar_edicao()
+    assert repo.total_distribuido_trimestre(conn, cenario["empresa"], 2025, 1) == 1000.01
+
+
+def test_botao_diz_editar_quando_ja_tem_lancamento(conn, cenario):
+    view = _view(conn, trimestre=1)
+    assert view.btn_editar.text() == "Lançar valores"
+    _lancar(view, cenario["fulano"], 100.0)
+    assert view.btn_editar.text() == "Editar valores"

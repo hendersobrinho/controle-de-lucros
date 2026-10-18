@@ -1,8 +1,9 @@
-"""Estados visíveis do formulário nas telas de cadastro.
+"""Tela de Empresas: a lista, a ficha só de leitura e a janela de cadastro.
 
-O problema que isto cobre: a tela abria com os campos aparentemente
-editáveis e nada indicando que digitar por cima de um registro selecionado
-ALTERA aquele registro em vez de criar um novo.
+O problema que o desenho antigo tinha, e que estes testes prendem: um
+formulário sempre aberto ao lado da tabela, em que digitar por cima de um
+registro selecionado ALTERAVA aquele registro em vez de criar outro. Agora
+ver e editar são separados — a ficha só mostra, e mudar abre uma janela.
 """
 import os
 
@@ -10,20 +11,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
 import pytest
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication, QDialog, QLabel, QMessageBox
 
 from controle_lucros import repositories as repo
-from controle_lucros.models import Empresa, Socio
-from controle_lucros.ui import socios_tab as socios_mod
-from controle_lucros.ui.common import (
-    MODO_CANCELADO,
-    MODO_EDICAO,
-    MODO_NOVO,
-    MODO_SALVO,
-    MODO_VAZIO,
-)
-from controle_lucros.ui.empresas_tab import EmpresasTab
-from controle_lucros.ui.socios_tab import SociosTab
+from controle_lucros.models import Empresa, Socio, VinculoSocietario
+from controle_lucros.ui import empresas_tab as mod
+from controle_lucros.ui.empresas_tab import DialogoEmpresa, EmpresasTab
+from controle_lucros.ui.lista_fichas import PAPEL_DETALHE, PAPEL_MARCADOR
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -37,298 +31,221 @@ def avisos(monkeypatch):
     """QMessageBox.warning é modal: sem interceptar, um erro de validação
     dentro do teste trava a suíte inteira esperando um clique."""
     capturados = []
-    monkeypatch.setattr(
-        QMessageBox, "warning", lambda *args, **kwargs: capturados.append(args[2])
-    )
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: capturados.append(args[2]))
     monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: None)
     return capturados
 
 
-def _e_primario(botao) -> bool:
-    return botao.property("role") == "primario"
-
-
-# =========================================================== Empresas ======
-
-
 @pytest.fixture()
 def empresas(conn):
-    repo.salvar_empresa(conn, Empresa(None, "001", "ACME LTDA", "", 100000, 1000))
+    acme = repo.salvar_empresa(conn, Empresa(None, "001", "ACME LTDA", "11.222.333/0001-81", 100000, 1000))
     repo.salvar_empresa(conn, Empresa(None, "002", "BETA LTDA", "", 50000, 500))
+    fulano = repo.salvar_socio(conn, Socio(None, "Fulano de Tal", "005.169.717-35"))
+    repo.salvar_vinculo(conn, VinculoSocietario(None, acme, fulano, 60, 600, "2020-01-01", None, valor_capital=60000))
     return EmpresasTab(conn)
 
 
-def test_abre_com_formulario_bloqueado_e_destaque_no_novo(empresas):
-    assert empresas._modo == MODO_VAZIO
-    assert not empresas.painel_campos.isEnabled()
-    assert not empresas.btn_salvar.isEnabled()
-    assert not empresas.btn_excluir.isEnabled()
-    # O destaque de primário fica no botão que a tela espera que seja apertado.
-    assert _e_primario(empresas.btn_novo)
-    assert not _e_primario(empresas.btn_salvar)
-    assert "Clique em <b>Novo</b>" in empresas.aviso_form.text()
+def _textos(widget) -> str:
+    return " | ".join(r.text() for r in widget.findChildren(QLabel) if r.isVisibleTo(widget))
 
 
-def test_novo_destrava_o_formulario_e_move_o_destaque(empresas):
-    empresas.novo()
-    assert empresas._modo == MODO_NOVO
-    assert empresas.painel_campos.isEnabled()
-    assert empresas.btn_salvar.isEnabled()
-    assert _e_primario(empresas.btn_salvar)
-    assert not _e_primario(empresas.btn_novo)
-    # Excluir não faz sentido num registro que ainda não existe.
-    assert not empresas.btn_excluir.isEnabled()
-    assert "Novo registro" in empresas.aviso_form.text()
+def _acme(empresas):
+    return next(e for e in repo.listar_empresas(empresas.conn) if e.nome == "ACME LTDA")
 
 
-def test_novo_ja_deixa_o_cursor_no_primeiro_campo(empresas):
-    """hasFocus() exigiria a janela ativa (não existe com a plataforma
-    offscreen); focusWidget() diz quem receberia o foco, que é o que importa."""
-    empresas.novo()
-    assert empresas.focusWidget() is empresas.numero_chamada
+# ------------------------------------------------------------- lista --
 
 
-def test_selecionar_linha_entra_em_edicao_e_diz_quem_esta_sendo_editado(empresas):
-    empresas.tabela.selectRow(0)
-    assert empresas._modo == MODO_EDICAO
-    assert empresas.painel_campos.isEnabled()
-    assert empresas.btn_excluir.isEnabled()
-    texto = empresas.aviso_form.text()
-    assert "ACME LTDA" in texto
-    assert "substitui esse registro" in texto
-    assert "clique em <b>Novo</b>" in texto
+def test_lista_mostra_nome_numero_cnpj_e_socios(empresas):
+    linhas = {empresas.lista.item(r).text(): empresas.lista.item(r) for r in range(empresas.lista.count())}
+    assert linhas["ACME LTDA"].data(PAPEL_DETALHE) == "nº 001 · CNPJ 11.222.333/0001-81"
+    assert linhas["ACME LTDA"].data(PAPEL_MARCADOR) == "1 sócio"
+    assert linhas["BETA LTDA"].data(PAPEL_MARCADOR) == "sem sócios"
+    assert empresas.contagem.text() == "2 empresas"
 
 
-def test_salvar_volta_pro_estado_bloqueado_com_aviso_de_salvo(empresas):
-    empresas.novo()
-    empresas.numero_chamada.setText("003")
-    empresas.nome.setText("GAMA LTDA")
-    empresas.salvar()
-
-    assert empresas._modo == MODO_SALVO
-    assert not empresas.painel_campos.isEnabled()
-    assert _e_primario(empresas.btn_novo)
-    assert "Registro salvo" in empresas.aviso_form.text()
-    assert any(e.nome == "GAMA LTDA" for e in repo.listar_empresas(empresas.conn))
+def test_busca_por_nome_numero_ou_cnpj(empresas):
+    for termo in ("acme", "001", "11222333"):
+        empresas.busca.setText(termo)
+        assert [empresas.lista.item(r).text() for r in range(empresas.lista.count())] == ["ACME LTDA"], termo
+    assert empresas.contagem.text() == "1 de 2 empresas"
 
 
-def test_erro_ao_salvar_mantem_o_formulario_aberto(empresas, avisos):
-    """Se o salvamento falhou, travar o formulário faria perder o que foi
-    digitado — o estado tem que continuar sendo o de edição."""
-    empresas.novo()
-    empresas.nome.setText("SEM NUMERO DE CHAMADA")
-    empresas.salvar()
-
-    assert avisos and "número da empresa" in avisos[0]
-    assert empresas._modo == MODO_NOVO
-    assert empresas.painel_campos.isEnabled()
-    assert empresas.nome.text() == "SEM NUMERO DE CHAMADA"
+# ------------------------------------------------------------- ficha --
 
 
-def test_excluir_volta_pro_estado_bloqueado(empresas, monkeypatch):
-    from controle_lucros.ui import common as common_mod
-
-    monkeypatch.setattr(common_mod.QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
-    # A empresa pergunta com warning: a exclusão leva junto o que é dela.
-    monkeypatch.setattr(common_mod.QMessageBox, "warning", lambda *a, **k: QMessageBox.Yes)
-    empresas.tabela.selectRow(0)
-    empresas.excluir()
-
-    assert empresas._modo == MODO_VAZIO
-    assert not empresas.painel_campos.isEnabled()
-    assert _e_primario(empresas.btn_novo)
+def test_abre_sem_empresa_selecionada_e_convida_a_escolher(empresas):
+    assert not empresas.painel_vazio.isHidden()
+    assert empresas.rolagem.isHidden()
+    assert not empresas.btn_editar.isEnabled()
+    assert not empresas.btn_quadro.isEnabled()
 
 
-def test_trocar_de_tema_nao_perde_o_estado(empresas, tmp_path, monkeypatch):
-    """O aviso tem cor calculada na mão (não vem do QSS global), então ele é
-    reaplicado ao trocar de tema — e o modo não pode se perder nisso.
-
-    O tema é persistido em preferencias.json na pasta local; sem apontar o
-    CONTROLE_LUCROS_DADOS pra um lugar temporário, o teste escreveria na
-    preferência de verdade de quem estiver rodando a suíte."""
-    from controle_lucros.ui import theme
-
-    monkeypatch.setenv("CONTROLE_LUCROS_DADOS", str(tmp_path))
-    modo_inicial = theme.estado().modo
-
-    empresas.tabela.selectRow(0)
-    theme.estado().alternar()
-    try:
-        assert theme.estado().modo != modo_inicial
-        assert empresas._modo == MODO_EDICAO
-        assert "ACME LTDA" in empresas.aviso_form.text()
-        assert empresas.painel_campos.isEnabled()
-    finally:
-        theme.estado().alternar()
-    assert theme.estado().modo == modo_inicial
+def test_ficha_mostra_capital_valor_da_cota_e_quadro(empresas):
+    empresas.lista.selectRow(0)  # ACME
+    textos = _textos(empresas)
+    assert "ACME LTDA" in textos
+    assert "nº 001 · CNPJ 11.222.333/0001-81" in textos
+    assert "R$ 100.000,00" in textos            # capital social
+    assert "R$ 100,00" in textos                # valor da cota (capital ÷ cotas)
+    assert "capital ÷ cotas" in textos
+    assert "Fulano de Tal" in textos
+    assert "60,0000%" in textos
+    assert "As participações somam 60,0000%, não 100%" in textos
 
 
-# ============================================================= Sócios ======
+def test_ficha_nao_deixa_editar_por_cima(empresas):
+    """A ficha é só leitura: não há campo de texto nela."""
+    from PySide6.QtWidgets import QLineEdit
+
+    empresas.lista.selectRow(0)
+    campos = [c for c in empresas.findChildren(QLineEdit) if c.isVisibleTo(empresas) and c is not empresas.busca]
+    assert campos == []
 
 
-@pytest.fixture()
-def socios(conn):
-    repo.salvar_socio(conn, Socio(None, "Fulano de Tal", "005.169.717-35"))
-    return SociosTab(conn)
+def test_ficha_mostra_o_estado_vigente_e_a_fundacao(empresas):
+    from controle_lucros.models import AlteracaoContratual
+
+    acme = _acme(empresas)
+    repo.salvar_alteracao(empresas.conn, AlteracaoContratual(
+        None, acme.id, 1, "2024-05-01", "ACME LTDA", 200000, 2000, "Aumento de capital"))
+    empresas.atualizar()
+    empresas.selecionar_empresa(acme.id)
+    textos = _textos(empresas)
+    assert "R$ 200.000,00" in textos
+    assert "Na fundação: R$ 100.000,00 em 1.000 cotas" in textos
 
 
-def test_socios_abre_bloqueado_com_destaque_no_novo(socios):
-    assert socios._modo == MODO_VAZIO
-    assert not socios.painel_campos.isEnabled()
-    assert not socios.btn_salvar.isEnabled()
-    assert _e_primario(socios.btn_novo)
-    assert "Clique em <b>Novo</b>" in socios.aviso_form.text()
+def test_selecionar_avisa_a_tela_de_alteracoes(empresas):
+    escolhidas = []
+    empresas.definir_callback_selecao(lambda empresa: escolhidas.append(empresa.nome))
+    empresas.lista.selectRow(1)
+    assert escolhidas == ["BETA LTDA"]
 
 
-def test_socios_novo_destrava_e_foca_o_nome(socios):
-    socios._novo_socio()
-    assert socios._modo == MODO_NOVO
-    assert socios.painel_campos.isEnabled()
-    assert socios.focusWidget() is socios.nome
-    assert _e_primario(socios.btn_salvar)
+# ---------------------------------------------- cadastro e edição --
 
 
-def test_socios_selecionar_entra_em_edicao(socios):
-    socios.tabela.selectRow(0)
-    assert socios._modo == MODO_EDICAO
-    assert socios.painel_campos.isEnabled()
-    assert socios.btn_excluir.isEnabled()
-    assert "Fulano de Tal" in socios.aviso_form.text()
+def test_nova_empresa_pela_janela_de_cadastro(empresas, monkeypatch):
+    def cadastrar(dialogo):
+        dialogo.numero_chamada.setText("003")
+        dialogo.nome.setText("GAMA LTDA")
+        dialogo.cotas.setValue(250_000)
+        dialogo.valor_cota.atalhos[1].click()  # R$ 0,01
+        dialogo._salvar()
+        return dialogo.result()
+
+    monkeypatch.setattr(DialogoEmpresa, "exec", cadastrar)
+    empresas._nova_empresa()
+
+    gama = next(e for e in repo.listar_empresas(empresas.conn) if e.nome == "GAMA LTDA")
+    assert (gama.quantidade_cotas, gama.valor_cota, gama.capital_social) == (250_000, 0.01, 2_500)
+    assert empresas._empresa_atual_id == gama.id  # já fica selecionada
 
 
-def test_socios_salvar_novo_segue_em_edicao_do_recem_cadastrado(socios):
-    """Aqui o sócio salvo continua selecionado de propósito: o painel de
-    vínculos à direita é dele, e é pra lá que a pessoa vai em seguida."""
-    socios._novo_socio()
-    socios.nome.setText("Beltrano da Silva")
-    socios._salvar_socio()
-
-    assert socios._modo == MODO_EDICAO
-    assert "Beltrano da Silva" in socios.aviso_form.text()
-    assert socios.painel_campos.isEnabled()
+def test_capital_cotas_e_valor_da_cota_andam_juntos(empresas):
+    dialogo = DialogoEmpresa(empresas.conn)
+    dialogo.cotas.setValue(1000)
+    dialogo.valor_cota.setValue(2.5)
+    assert dialogo.capital.value() == 2500.0          # cotas × valor
+    dialogo.capital.setValue(5000)
+    assert dialogo.valor_cota.value() == 5.0           # capital ÷ cotas
+    assert "1.000 cotas × R$ 5,00 = R$ 5.000,00" in dialogo.conta.text()
 
 
-def test_socios_salvar_com_busca_filtrando_o_registro_avisa_que_salvou(socios):
-    """Se a busca esconde o registro recém-salvo, ele não fica selecionado —
-    e aí o estado certo é o de "salvo", não o de edição de coisa nenhuma."""
-    socios.busca.setText("Fulano")
-    socios._novo_socio()
-    socios.nome.setText("Zeca Pagodinho")
-    socios._salvar_socio()
-
-    assert socios._modo == MODO_SALVO
-    assert "Registro salvo" in socios.aviso_form.text()
-    assert any(s.nome == "Zeca Pagodinho" for s in repo.listar_socios(socios.conn))
+def test_cadastro_sem_numero_ou_nome_avisa(empresas, avisos):
+    dialogo = DialogoEmpresa(empresas.conn)
+    dialogo._salvar()
+    assert avisos == ["Informe o nº da empresa."]
+    dialogo.numero_chamada.setText("009")
+    dialogo._salvar()
+    assert avisos[-1] == "Informe a razão social da empresa."
+    assert dialogo.result() != QDialog.Accepted
 
 
-def test_socios_erro_ao_salvar_mantem_o_formulario_aberto(socios, avisos):
-    socios._novo_socio()
-    socios._salvar_socio()  # sem nome
+def test_editar_abre_com_os_dados_e_grava(empresas, monkeypatch):
+    def renomear(dialogo):
+        assert dialogo.nome.text() == "ACME LTDA"
+        assert dialogo.cotas.text() == "1.000"
+        dialogo.nome.setText("ACME COMERCIO LTDA")
+        dialogo._salvar()
+        return dialogo.result()
 
-    assert avisos
-    assert socios._modo == MODO_NOVO
-    assert socios.painel_campos.isEnabled()
-
-
-def test_socios_excluir_volta_pro_estado_bloqueado(socios, monkeypatch):
-    monkeypatch.setattr(socios_mod.QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
-    socios.tabela.selectRow(0)
-    socios._excluir_socio()
-
-    assert socios._modo == MODO_VAZIO
-    assert not socios.painel_campos.isEnabled()
-    assert _e_primario(socios.btn_novo)
+    monkeypatch.setattr(DialogoEmpresa, "exec", renomear)
+    empresas.lista.selectRow(0)
+    empresas.btn_editar.click()
+    assert empresas.titulo_empresa.text() == "ACME COMERCIO LTDA"
 
 
-# ------------------------------------------------------------- cancelar --
-
-
-def test_cancelar_so_aparece_com_o_formulario_aberto(empresas):
-    """Bloqueado não há o que cancelar — botão morto no meio dos outros só
-    polui a barra."""
-    assert not empresas.btn_cancelar.isVisibleTo(empresas)
-    empresas.novo()
-    assert empresas.btn_cancelar.isVisibleTo(empresas)
-    empresas.cancelar()
-    assert not empresas.btn_cancelar.isVisibleTo(empresas)
-
-
-def test_cancelar_um_cadastro_novo_descarta_o_que_foi_digitado(empresas):
-    antes = len(repo.listar_empresas(empresas.conn))
-    empresas.novo()
-    empresas.numero_chamada.setText("099")
-    empresas.nome.setText("NAO DEVE SER SALVA")
-    empresas.cancelar()
-
-    assert empresas._modo == MODO_CANCELADO
-    assert not empresas.painel_campos.isEnabled()
-    assert empresas.nome.text() == ""
-    assert len(repo.listar_empresas(empresas.conn)) == antes
-    assert "nada foi alterado" in empresas.aviso_form.text()
-
-
-def test_cancelar_uma_edicao_nao_altera_o_registro(empresas):
-    empresas.tabela.selectRow(0)
-    original = empresas._registros[0].nome
-    empresas.nome.setText("NOME TROCADO POR ENGANO")
-    empresas.cancelar()
-
-    assert empresas._registro_atual_id is None
-    assert not empresas.tabela.selectionModel().selectedRows()
-    assert any(e.nome == original for e in repo.listar_empresas(empresas.conn))
-    assert not any(e.nome == "NOME TROCADO POR ENGANO" for e in repo.listar_empresas(empresas.conn))
-
-
-def test_depois_de_cancelar_da_pra_recomecar(empresas):
-    empresas.novo()
-    empresas.cancelar()
-    empresas.novo()
-    assert empresas._modo == MODO_NOVO
-    assert empresas.painel_campos.isEnabled()
-    assert _e_primario(empresas.btn_salvar)
-
-
-def test_socios_cancelar_descarta_e_solta_o_painel_de_vinculos(socios):
-    socios.tabela.selectRow(0)
-    assert socios._socio_atual_id is not None
-    socios.nome.setText("NOME TROCADO POR ENGANO")
-    socios.btn_cancelar.click()
-
-    assert socios._modo == MODO_CANCELADO
-    assert socios._socio_atual_id is None
-    assert not socios.painel_campos.isEnabled()
-    assert not any(s.nome == "NOME TROCADO POR ENGANO" for s in repo.listar_socios(socios.conn))
-    # O painel da direita não pode seguir mostrando os vínculos de quem saiu de edição.
-    assert not socios.btn_associar.isEnabled()
-
-
-def test_socios_cancelar_so_aparece_com_o_formulario_aberto(socios):
-    assert not socios.btn_cancelar.isVisibleTo(socios)
-    socios._novo_socio()
-    assert socios.btn_cancelar.isVisibleTo(socios)
+def test_empresa_sem_cotas_nao_grava_o_valor_sugerido(empresas):
+    """O R$ 1,00 que o campo sugere numa empresa sem cotas não é informação:
+    só vira valor da cota se alguém o escolher."""
+    dialogo = DialogoEmpresa(empresas.conn)
+    dialogo.numero_chamada.setText("004")
+    dialogo.nome.setText("DELTA LTDA")
+    assert dialogo.empresa_editada().valor_cota is None
+    dialogo.valor_cota.atalhos[1].click()
+    assert dialogo.empresa_editada().valor_cota == 0.01
 
 
 def test_excluir_empresa_diz_o_que_vai_junto_e_ja_vem_em_nao(empresas, monkeypatch):
     """A empresa leva junto tudo o que é dela: a pergunta diz o quê, e
     responder "Não" (o padrão) não apaga nada."""
-    from controle_lucros.models import Socio
-    from controle_lucros.ui import common as common_mod
-
-    empresa_id = repo.listar_empresas(empresas.conn)[0].id  # a primeira da tabela, por nome
-    socio_id = repo.salvar_socio(empresas.conn, Socio(None, "Fulano", "111.111.111-11"))
-    repo.associar_socio_a_empresa(empresas.conn, empresa_id, socio_id, 100, 100, "2020-01-01")
-
     perguntas = []
+
     def responder(parent, titulo, texto, botoes=None, padrao=None):
         perguntas.append((texto, padrao))
         return QMessageBox.No
-    monkeypatch.setattr(common_mod.QMessageBox, "warning", responder)
 
-    empresas.tabela.selectRow(0)
-    empresas.excluir()
+    monkeypatch.setattr(mod.QMessageBox, "warning", responder)
+    acme = _acme(empresas)
+    dialogo = DialogoEmpresa(empresas.conn, acme)
+    dialogo._excluir()
 
     texto, padrao = perguntas[0]
     assert "1 vínculo(s) de sócio" in texto
     assert "sócios continuam cadastrados" in texto
     assert padrao == QMessageBox.No
-    assert any(e.id == empresa_id for e in repo.listar_empresas(empresas.conn))
+    assert any(e.id == acme.id for e in repo.listar_empresas(empresas.conn))
+
+
+def test_excluir_empresa_confirmado_some_da_lista(empresas, monkeypatch):
+    monkeypatch.setattr(mod.QMessageBox, "warning", lambda *a, **k: QMessageBox.Yes)
+
+    def excluir(dialogo):
+        dialogo._excluir()
+        return dialogo.result()
+
+    monkeypatch.setattr(DialogoEmpresa, "exec", excluir)
+    empresas.lista.selectRow(0)
+    empresas._editar_empresa()
+
+    assert [empresas.lista.item(r).text() for r in range(empresas.lista.count())] == ["BETA LTDA"]
+    assert empresas._empresa_atual_id is None
+    assert not empresas.painel_vazio.isHidden()
+
+
+# ------------------------------------------------------- navegação --
+
+
+def test_dois_cliques_no_socio_do_quadro_abre_o_socio(empresas):
+    from PySide6.QtCore import QEvent, QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+
+    abertos = []
+    empresas.ao_abrir_socio = abertos.append
+    empresas.atualizar()
+    empresas.lista.selectRow(0)
+    (linha,) = empresas.findChildren(mod._LinhaQuadro)
+    linha.mouseDoubleClickEvent(QMouseEvent(
+        QEvent.MouseButtonDblClick, QPointF(5, 5), QPointF(5, 5), Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
+    fulano = next(s for s in repo.listar_socios(empresas.conn) if s.nome == "Fulano de Tal")
+    assert abertos == [fulano.id]
+
+
+def test_botao_de_alteracoes_leva_a_empresa_junto(empresas):
+    abertas = []
+    empresas.ao_abrir_alteracoes = abertas.append
+    empresas.lista.selectRow(0)
+    empresas.btn_alteracoes.click()
+    assert abertas == [_acme(empresas).id]

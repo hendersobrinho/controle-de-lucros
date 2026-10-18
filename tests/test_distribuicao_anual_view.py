@@ -181,14 +181,14 @@ def test_salvar_remove_widgets_de_edicao_e_tranca_tabela(conn, cenario, monkeypa
     view._iniciar_edicao()
     idx, _ = _linha(view, cenario["s1"])
     view._widgets_edicao[idx]["valor"].setValue(15000)
-    assert view.tabela.cellWidget(idx, 4) is not None
+    assert view.tabela.cellWidget(idx, mod.COL_VALOR) is not None
 
     monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: None))
     view._salvar_edicao()
 
     assert view._editando is False
     assert view.btn_editar.isVisible()
-    for col in (2, 3, 4, 5, 6, 9):
+    for col in mod.COLUNAS_EDITAVEIS:
         assert view.tabela.cellWidget(idx, col) is None
 
 
@@ -215,3 +215,40 @@ def test_editar_percentual_com_data_dentro_do_ano_aparece_no_mesmo_ano(conn, cen
     linhas = repo.panorama_distribuicao_anual(conn, cenario["empresa_id"], 2025)
     (linha_s1,) = [l for l in linhas if l["socio_id"] == cenario["s1"]]
     assert linha_s1["percentual_capital"] == 70.0
+
+
+def test_painel_mostra_os_numeros_do_ano_e_a_rosca(conn, cenario):
+    view = _view(conn)
+    assert view.valor_total.text() == "R$ 18.000,00"
+    assert view.valor_socios.text() == "2"
+    assert sorted(v for v, _c, _n in view.rosca._fatias) == [8000, 10000]
+
+
+def test_cor_do_socio_e_a_mesma_na_rosca_e_na_tabela(conn, cenario):
+    from controle_lucros.ui.painel_distribuicao import PAPEL_COR
+
+    view = _view(conn)
+    idx, linha = _linha(view, cenario["s1"])
+    cor_rosca = next(c for _v, c, n in view.rosca._fatias if n == linha["socio_nome"])
+    assert view.tabela.item(idx, 0).data(PAPEL_COR) == cor_rosca
+
+
+def test_colunas_vazias_ficam_escondidas_ate_a_edicao(conn, cenario):
+    view = _view(conn)
+    assert view.tabela.isColumnHidden(mod.COL_ORIGEM)
+    assert view.tabela.isColumnHidden(mod.COL_EMPRESTIMO)
+    assert view.tabela.isColumnHidden(mod.COL_DATA_SAIDA)
+    view._iniciar_edicao()
+    # Na edição a data de saída aparece: é por ela que se registra uma saída.
+    assert not view.tabela.isColumnHidden(mod.COL_DATA_SAIDA)
+
+
+def test_dividir_pelo_percentual_no_anual(conn, cenario):
+    view = _view(conn)
+    view._iniciar_edicao()
+    view.total_para_dividir.setValue(50000)
+    view._dividir_pelo_percentual()
+    idx1, _ = _linha(view, cenario["s1"])
+    idx2, _ = _linha(view, cenario["s2"])
+    assert view._widgets_edicao[idx1]["valor"].value() == 30000
+    assert view._widgets_edicao[idx2]["valor"].value() == 20000

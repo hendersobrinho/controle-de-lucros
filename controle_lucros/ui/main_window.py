@@ -60,6 +60,8 @@ class MainWindow(QMainWindow):
         self.backup_view = BackupView(conn)
         self.sobre_view = SobreView()
         self.cadastro.definir_callback_selecao(lambda empresa: self.alteracoes.selecionar_empresa(empresa.id))
+        self.cadastro.ao_abrir_alteracoes = self._abrir_alteracoes_da_empresa
+        self.cadastro.ao_abrir_socio = self._abrir_socio
 
         self._paginas = {
             "empresas.cadastro": self.cadastro,
@@ -125,6 +127,15 @@ class MainWindow(QMainWindow):
         self.sidebar.marcar(chave)
         if hasattr(pagina, "atualizar"):
             pagina.atualizar()
+
+    def _abrir_alteracoes_da_empresa(self, empresa_id: int) -> None:
+        self.alteracoes.selecionar_empresa(empresa_id)
+        self._ir_para("empresas.alteracoes")
+
+    def _abrir_socio(self, socio_id: int) -> None:
+        """Do quadro da ficha da empresa direto pro sócio, na aba Sócios."""
+        self._ir_para("socios")
+        self.socios_tab._selecionar_socio(socio_id)
 
     def _retemar_pagina_atual(self) -> None:
         """QSS global já se reaplica sozinho — isso só força a página visível

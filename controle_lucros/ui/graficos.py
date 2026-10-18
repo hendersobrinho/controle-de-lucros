@@ -139,7 +139,7 @@ def grafico_capital_vs_distribuido(view: QChartView, linhas: list[dict]) -> None
         view.setChart(chart)
         return
 
-    capital = QBarSet("% capital")
+    capital = QBarSet("% do capital")
     capital.setColor(QColor(BRASS()))
     distribuido = QBarSet("% distribuído")
     distribuido.setColor(QColor(INK()))

@@ -26,6 +26,13 @@ def app():
     yield QApplication.instance() or QApplication([])
 
 
+@pytest.fixture(autouse=True)
+def preferencias_deste_teste(tmp_path, monkeypatch):
+    """O login lembrado fica nas preferências do PC: cada teste com a sua
+    pasta, pra um não abrir a tela já preenchida pelo outro."""
+    monkeypatch.setenv("CONTROLE_LUCROS_DADOS", str(tmp_path))
+
+
 @pytest.fixture()
 def usuario(conn):
     repo.criar_usuario(conn, "Henderson Pereira", "henderson", "senha123", True)
@@ -82,6 +89,7 @@ def test_senha_errada_avisa_e_limpa_o_campo(conn, usuario):
     assert dialogo.usuario_autenticado is None
     assert dialogo.erro.isVisibleTo(dialogo)
     assert dialogo.senha.text() == ""
+    assert dialogo.erro.text() == "Senha incorreta."
 
 
 def test_usuario_desativado_nao_entra(conn, usuario):
@@ -94,6 +102,30 @@ def test_usuario_desativado_nao_entra(conn, usuario):
 
     assert dialogo.usuario_autenticado is None
     assert dialogo.erro.isVisibleTo(dialogo)
+    assert "desativado" in dialogo.erro.text()
+
+
+def test_nome_no_lugar_do_login_mostra_o_login_certo(conn, usuario):
+    """O engano de quem esqueceu a senha: digita o nome, não o login, e uma
+    senha recém-redefinida parecia não ter funcionado."""
+    dialogo = DialogoLogin(conn)
+    dialogo.login.setText(usuario.nome)
+    dialogo.senha.setText("senha123")
+
+    dialogo._entrar()
+
+    assert dialogo.usuario_autenticado is None
+    assert "login: henderson" in dialogo.erro.text()
+
+
+def test_login_que_nao_existe_diz_isso(conn, usuario):
+    dialogo = DialogoLogin(conn)
+    dialogo.login.setText("ninguem")
+    dialogo.senha.setText("senha123")
+
+    dialogo._entrar()
+
+    assert 'Não existe usuário com o login "ninguem"' in dialogo.erro.text()
 
 
 # --------------------------------------------------------- primeiro acesso --
@@ -160,3 +192,116 @@ def test_trocar_senha_troca_mesmo(conn, usuario):
     assert dialogo.result() == QDialog.Accepted
     assert repo.autenticar(conn, "henderson", "novasenha") is not None
     assert repo.autenticar(conn, "henderson", "senha123") is None
+
+
+# ---------------------------------------------------------- lembrar login --
+def _entrar(conn, login, senha, lembrar):
+    dialogo = DialogoLogin(conn)
+    dialogo.login.setText(login)
+    dialogo.senha.setText(senha)
+    dialogo.lembrar.setChecked(lembrar)
+    dialogo._entrar()
+    return dialogo
+
+
+def test_sem_login_lembrado_a_tela_abre_vazia(conn, usuario):
+    dialogo = DialogoLogin(conn)
+    assert dialogo.login.text() == ""
+    assert not dialogo.lembrar.isChecked()
+
+
+def test_lembrar_preenche_o_login_na_proxima_abertura(conn, usuario):
+    _entrar(conn, "henderson", "senha123", lembrar=True)
+
+    proxima = DialogoLogin(conn)
+    assert proxima.login.text() == "henderson"
+    assert proxima.lembrar.isChecked()
+    # Só falta a senha: o cursor já vai pra ela.
+    assert proxima.senha.hasFocus() or proxima.focusWidget() is proxima.senha
+    assert proxima.senha.text() == ""
+
+
+def test_a_senha_nunca_fica_guardada(conn, usuario, tmp_path):
+    _entrar(conn, "henderson", "senha123", lembrar=True)
+    for arquivo in tmp_path.rglob("*"):
+        if arquivo.is_file():
+            assert "senha123" not in arquivo.read_text(encoding="utf-8", errors="ignore")
+
+
+def test_desmarcar_esquece_o_login(conn, usuario):
+    _entrar(conn, "henderson", "senha123", lembrar=True)
+    _entrar(conn, "henderson", "senha123", lembrar=False)
+    assert DialogoLogin(conn).login.text() == ""
+
+
+def test_login_errado_nao_e_lembrado(conn, usuario):
+    """Só se lembra o login que entrou: um errado preencheria a próxima
+    abertura com algo que não funciona."""
+    dialogo = _entrar(conn, "henderzon", "senha123", lembrar=True)
+    assert dialogo.usuario_autenticado is None
+    assert DialogoLogin(conn).login.text() == ""
+
+
+def test_lembra_o_login_como_cadastrado(conn, usuario):
+    """Login digitado com maiúscula ou espaço é guardado como está no cadastro."""
+    _entrar(conn, "  Henderson ", "senha123", lembrar=True)
+    assert DialogoLogin(conn).login.text() == "henderson"
+
+
+# ---------------------------------------------------- entrar sem a senha --
+from controle_lucros.ui.login import entrar_sem_senha, esquecer_acesso  # noqa: E402
+
+
+def _entrar_direto(conn):
+    dialogo = DialogoLogin(conn)
+    dialogo.login.setText("henderson")
+    dialogo.senha.setText("senha123")
+    dialogo.entrar_direto.setChecked(True)
+    dialogo._entrar()
+    return dialogo
+
+
+def test_sem_marcar_continua_pedindo_a_senha(conn, usuario):
+    _entrar(conn, "henderson", "senha123", lembrar=True)
+    assert entrar_sem_senha(conn) is None
+
+
+def test_entrar_direto_abre_a_conta_na_proxima_vez(conn, usuario):
+    _entrar_direto(conn)
+    assert entrar_sem_senha(conn).login == "henderson"
+
+
+def test_entrar_direto_tambem_lembra_o_login(conn, usuario):
+    dialogo = DialogoLogin(conn)
+    dialogo.entrar_direto.setChecked(True)
+    assert dialogo.lembrar.isChecked()
+    dialogo.lembrar.setChecked(False)
+    assert not dialogo.entrar_direto.isChecked()
+
+
+def test_entrar_direto_nao_guarda_a_senha(conn, usuario, tmp_path):
+    _entrar_direto(conn)
+    for arquivo in tmp_path.rglob("*"):
+        if arquivo.is_file():
+            assert "senha123" not in arquivo.read_text(encoding="utf-8", errors="ignore")
+    linhas = conn.execute("SELECT chave_hash FROM acesso_lembrado").fetchall()
+    assert len(linhas) == 1 and "senha123" not in linhas[0]["chave_hash"]
+
+
+def test_sair_volta_a_pedir_a_senha(conn, usuario):
+    _entrar_direto(conn)
+    esquecer_acesso(conn)
+    assert entrar_sem_senha(conn) is None
+    assert conn.execute("SELECT count(*) AS n FROM acesso_lembrado").fetchone()["n"] == 0
+
+
+def test_trocar_a_senha_derruba_o_entrar_direto(conn, usuario):
+    _entrar_direto(conn)
+    repo.alterar_senha(conn, usuario.id, "outra456")
+    assert entrar_sem_senha(conn) is None
+
+
+def test_usuario_desativado_nao_entra_direto(conn, usuario):
+    _entrar_direto(conn)
+    repo.definir_ativo(conn, usuario.id, False)
+    assert entrar_sem_senha(conn) is None

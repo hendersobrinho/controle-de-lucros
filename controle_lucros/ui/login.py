@@ -5,6 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -16,13 +17,40 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from .. import repositories as repo
+from .. import preferencias, repositories as repo
 from ..models import Usuario
 from . import theme
 from .icones import pasta_assets
 from .local_banco import DialogoConexao
 
 LARGURA_ENTRADA = 420
+
+# Login (só o nome de usuário) guardado nas preferências deste PC. A senha
+# nunca é guardada.
+CHAVE_LOGIN_LEMBRADO = "login_lembrado"
+# "Entrar sem pedir a senha": uma chave aleatória deste PC, conferida no
+# banco (repo.usuario_do_acesso_lembrado). Clicar em Sair a apaga.
+CHAVE_ACESSO_LEMBRADO = "acesso_lembrado"
+
+
+def entrar_sem_senha(conn) -> Usuario | None:
+    """O usuário deste PC, se ele marcou "entrar sem pedir a senha" e a
+    chave ainda vale (não trocou a senha nem foi desativado)."""
+    chave = str(preferencias.obter(CHAVE_ACESSO_LEMBRADO) or "")
+    usuario = repo.usuario_do_acesso_lembrado(conn, chave) if chave else None
+    if chave and usuario is None:
+        preferencias.salvar_chave(CHAVE_ACESSO_LEMBRADO, "")
+    return usuario
+
+
+def esquecer_acesso(conn) -> None:
+    """Sair da conta: este PC volta a pedir a senha na próxima vez."""
+    chave = str(preferencias.obter(CHAVE_ACESSO_LEMBRADO) or "")
+    preferencias.salvar_chave(CHAVE_ACESSO_LEMBRADO, "")
+    try:
+        repo.esquecer_acesso_lembrado(conn, chave)
+    except Exception:  # noqa: BLE001 — sem banco, a chave local já foi apagada
+        pass
 
 
 def _marca(tamanho: int = 72) -> QLabel:
@@ -202,6 +230,22 @@ class DialogoLogin(QDialog):
         self.senha.returnPressed.connect(self._entrar)
         self.erro = _rotulo_de_erro()
 
+        self.lembrar = QCheckBox("Lembrar meu login neste computador")
+        self.lembrar.setToolTip("Guarda só o login; a senha continua sendo pedida.")
+        lembrado = str(preferencias.obter(CHAVE_LOGIN_LEMBRADO) or "")
+        if lembrado:
+            self.login.setText(lembrado)
+            self.lembrar.setChecked(True)
+        self.entrar_direto = QCheckBox("Entrar direto, sem pedir a senha")
+        self.entrar_direto.setToolTip(
+            "Nas próximas vezes o programa abre já na sua conta, neste computador.\n"
+            "A senha não fica guardada. Para voltar a pedir a senha, use Sair dentro do programa.\n"
+            "Não marque em computador que outras pessoas usam."
+        )
+        # Entrar direto implica lembrar o login; desmarcar lembrar desmarca o outro.
+        self.entrar_direto.toggled.connect(lambda marcado: marcado and self.lembrar.setChecked(True))
+        self.lembrar.toggled.connect(lambda marcado: marcado or self.entrar_direto.setChecked(False))
+
         entrar = QPushButton("Entrar")
         entrar.setProperty("role", "primario")
         entrar.setMinimumHeight(40)
@@ -226,6 +270,12 @@ class DialogoLogin(QDialog):
         miolo.addSpacing(10)
         miolo.addWidget(self.senha)
         miolo.addSpacing(10)
+        opcoes = QVBoxLayout()
+        opcoes.setSpacing(6)
+        opcoes.addWidget(self.lembrar)
+        opcoes.addWidget(self.entrar_direto)
+        miolo.addLayout(opcoes)
+        miolo.addSpacing(10)
         miolo.addWidget(self.erro)
         miolo.addSpacing(6)
         miolo.addWidget(entrar)
@@ -242,16 +292,22 @@ class DialogoLogin(QDialog):
         rodape.addStretch()
         layout.addLayout(rodape)
 
-        self.login.setFocus()
+        # Com o login lembrado, quem abre o programa só digita a senha.
+        (self.senha if lembrado else self.login).setFocus()
 
     def _entrar(self) -> None:
         usuario = repo.autenticar(self.conn, self.login.text(), self.senha.text())
         if usuario is None:
-            self.erro.setText("Login ou senha incorretos, ou usuário desativado.")
+            self.erro.setText(repo.motivo_login_recusado(self.conn, self.login.text()))
             self.erro.show()
             self.senha.clear()
             self.senha.setFocus()
             return
+        # Só depois de entrar: lembrar um login digitado errado preencheria a
+        # próxima abertura com algo que não funciona.
+        preferencias.salvar_chave(CHAVE_LOGIN_LEMBRADO, usuario.login if self.lembrar.isChecked() else "")
+        if self.entrar_direto.isChecked():
+            preferencias.salvar_chave(CHAVE_ACESSO_LEMBRADO, repo.criar_acesso_lembrado(self.conn, usuario.id))
         self.usuario_autenticado = usuario
         self.accept()
 

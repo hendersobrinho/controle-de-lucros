@@ -66,31 +66,60 @@ uma distribuição de três anos atrás.</p>
 não há nuvem. Por isso o <b>backup é responsabilidade do escritório</b>: veja
 os tópicos <i>Backup</i> e <i>Servidor PostgreSQL</i>.</p>
 
+<h3>Digitar valores</h3>
+<p>Nos campos de valor e de cotas, os pontos de milhar aparecem <b>enquanto
+você digita</b>: 1500000 vira 1.500.000 na hora; a vírgula separa os
+centavos. Ao entrar no campo, o número já vem selecionado — é só digitar por
+cima. Percentuais aparecem sempre com <b>quatro casas</b> (50,0000%,
+33,3333%), em todas as telas.</p>
+<p>Nas janelas de cadastro, a conta das cotas aparece como equação —
+<b>[Cotas] × [Valor da cota] = [Capital]</b>: preencha dois números e o
+terceiro é calculado. O <b>ⓘ</b> ao lado de um título explica o campo quando
+você passa o mouse.</p>
+
+<h3>Escolher a empresa: código ou nome</h3>
+<p>Onde se escolhe uma empresa há dois campos: <b>Código</b> e <b>Nome</b>.
+Digite o código e aperte Enter — a empresa aparece na hora (042 e 42 são a
+mesma). Ou digite parte do nome e aperte Enter para buscar. <b>F2</b> em
+qualquer dos dois campos, ou o botão <b>Buscar</b>, abre a janela de busca,
+que acha pelo nome, pelo código ou pelo CNPJ; as setas andam na lista e
+Enter escolhe.</p>
+
 <p><i>Aperte F1 em qualquer tela para abrir este manual já no tópico dela.</i></p>
 """
 
 _EMPRESAS = """
 <h2>Empresas · Cadastro</h2>
-<p>O cadastro base da empresa. Nome, CNPJ, capital social e quantidade de cotas
-aqui são os valores <b>de fundação</b> — o estado atual de uma empresa que já
-teve alterações contratuais vem da alteração mais recente, não daqui.</p>
+<p>À esquerda, a lista das empresas: o nome em destaque e, embaixo, o nº e o
+CNPJ; à direita de cada uma, quantos sócios ela tem hoje. A busca acha pelo
+nome, pelo nº ou pelo CNPJ (com ou sem pontuação).</p>
 
-<h3>Como usar o formulário</h3>
-<p>O formulário da direita tem três estados, e o aviso acima dos campos sempre
-diz em qual você está:</p>
+<h3>A ficha da empresa</h3>
+<p>Escolhendo uma empresa, a ficha à direita mostra — só para consulta:</p>
 <ul>
-<li><b>Bloqueado</b> — campos apagados, botão <b>Novo</b> em destaque. É o
-estado inicial.</li>
-<li><b>Novo registro</b> — depois de clicar em <b>Novo</b>. Os campos liberam e
-o cursor vai para o primeiro deles.</li>
-<li><b>Editando <i>fulano</i></b> — depois de clicar numa linha da tabela. O que
-você salvar <b>substitui aquele registro</b>.</li>
+<li><b>Capital social, cotas e valor da cota</b> como estão <b>hoje</b>, pela
+alteração contratual mais recente. Quando mudaram desde a fundação, a ficha diz
+por qual alteração e quais eram os valores de fundação.</li>
+<li><b>Quadro societário</b> — cada sócio de hoje com a faixa da sua fatia, o
+percentual e o capital. A soma das participações aparece embaixo, com aviso
+se não fechar 100%. Dois cliques num sócio abrem a ficha dele na aba
+Sócios.</li>
+<li><b>Alterações contratuais</b> — quantas há e a mais recente. O botão
+<b>Alterações contratuais</b> leva direto para elas.</li>
+<li><b>Lucro distribuído</b> nos últimos anos, com o período fechado
+marcado.</li>
 </ul>
-<p><b>Atenção:</b> com uma linha selecionada, digitar por cima e salvar altera
-aquela empresa. Para cadastrar outra, clique em <b>Novo</b> antes.</p>
-<p>O botão <b>Cancelar</b> aparece sempre que o formulário está aberto e é a
-saída sem gravar nada: descarta o que foi digitado e volta ao estado
-bloqueado. Nada do que estava salvo é alterado.</p>
+
+<h3>Cadastrar e editar</h3>
+<p><b>Nova empresa</b> e <b>Editar dados</b> (ou dois cliques na lista) abrem
+uma janela própria: a ficha nunca é editada por cima, então não há como mudar
+uma empresa achando que se está cadastrando outra.</p>
+<p>Na parte de capital, <b>quantidade de cotas, valor da cota e capital social
+andam juntos</b> (capital = cotas × valor da cota): mudar as cotas ou o valor
+da cota refaz o capital, e mudar o capital refaz o valor da cota. Os atalhos
+<b>R$ 1,00</b> e <b>R$ 0,01</b> preenchem os valores de cota mais comuns. São
+os valores <b>de fundação</b>; mudanças depois entram como alteração
+contratual.</p>
 
 <h3>Nº da empresa</h3>
 <p>É o código interno do escritório. Serve para achar a empresa rápido na busca
@@ -98,7 +127,8 @@ e é um dos campos usados para reconhecer a empresa na importação em massa —
 por isso vale manter único e sem repetição.</p>
 
 <h3>Excluir</h3>
-<p>Excluir a empresa apaga <b>tudo o que é dela, de uma vez</b>: vínculos de
+<p>O botão <b>Excluir empresa</b> fica dentro da janela de <b>Editar dados</b>.
+Excluir a empresa apaga <b>tudo o que é dela, de uma vez</b>: vínculos de
 sócio, alterações contratuais, distribuições anuais e trimestrais,
 movimentações, informes de rendimentos e períodos — inclusive os fechados.
 Antes de apagar, o sistema lista o que vai junto e pede confirmação (o botão já
@@ -115,33 +145,67 @@ momento: nome, capital, quantidade de cotas e a movimentação de sócios daquel
 evento. É esse histórico que permite saber qual era o capital da empresa em
 2022 sem depender do valor de hoje.</p>
 
+<h3>Como a tela é organizada</h3>
+<p>Escolha a <b>empresa</b> no alto. Logo abaixo fica a <b>linha do tempo</b>:
+um selo por alteração, da mais antiga (à esquerda) à mais recente, com o
+número dentro e a data embaixo. Selo dourado é alteração aberta; vinho, com
+cadeado, é fechada. Um clique abre a alteração — a ficha desliza para o lado
+dela —, e as setas <b>←</b> e <b>→</b> do teclado andam uma por vez. Se as
+primeiras não foram cadastradas, a linha começa com um trecho tracejado
+("Nº 1 a 6 não registradas"). O selo <b>+</b> no fim cadastra a próxima.</p>
+<p>A ficha mostra data, capital, cotas, valor da cota (capital ÷ cotas, com o
+que era antes), a descrição, quem <b>entrou</b>, quem <b>saiu</b> e quem teve a
+<b>participação refeita</b>, e o quadro societário como ficou depois dela.</p>
+<p>A ficha só mostra. Para mudar alguma coisa use <b>Editar alteração</b>; a exclusão também fica nessa janela. Para cadastrar,
+<b>Nova alteração</b>.</p>
+
+<h3>O número da alteração</h3>
+<p>O número é o <b>do contrato</b>, e pode ser escolhido. Não é preciso
+cadastrar as alterações antigas: se a empresa já está na 7ª alteração, cadastre
+a situação de hoje como <b>Nº 7</b> e siga a partir dela — a próxima já vem
+sugerida como Nº 8. O número também pode ser corrigido depois, em
+<b>Editar alteração</b>. Só não pode repetir um número que a empresa já
+tem: o sistema avisa na hora e não deixa salvar.</p>
+<p>Ao importar o relatório de sócios numa alteração nova, o número também
+pode ser escolhido na tela <b>Onde lançar esta importação</b>.</p>
+
+<p>A ficha é lida de cima para baixo: a alteração e se está aberta ou
+fechada; o capital, as cotas e o valor de cada cota (com o valor de antes,
+quando mudou); o que aconteceu com os sócios; e como a sociedade ficou.</p>
+
 <h3>Aberta e fechada</h3>
-<p>O selo ao lado de cada alteração mostra a situação:</p>
+<p>O selo no alto da ficha mostra a situação (na linha do tempo, a fechada aparece em vinho, com cadeado):</p>
 <ul>
 <li><b>Aberta</b> (cadeado dourado) — ainda dá para editar.</li>
 <li><b>Fechada</b> (selo vinho) — travada. Nem ela nem os vínculos de sócio
 criados por ela podem ser alterados enquanto não for reaberta.</li>
 </ul>
-<p>Feche a alteração quando o documento estiver registrado. Reabrir é possível
-a qualquer momento, e fica no log de atividades.</p>
+<p>Feche a alteração quando o documento estiver registrado (<b>Fechar período</b>). Reabrir
+(<b>Destrancar período</b>) é possível a qualquer momento, e fica no log de atividades.</p>
 
 <h3>Incluir sócio na alteração</h3>
 <p><b>Incluir sócio</b> abre uma tela de busca: digite parte do nome ou do
 CPF/CNPJ e escolha na lista (duplo clique já confirma). Só aparecem os sócios
 que ainda não estão nesta empresa nesta data.</p>
+<p>Na mesma tela vão a <b>data de entrada</b> (já vem com a data da alteração;
+mude se o sócio entrou antes, numa alteração que não foi cadastrada), as
+<b>cotas</b>, o <b>valor da cota</b> e o <b>capital do sócio</b> (cotas × valor
+da cota, calculado sozinho) e o <b>% do capital</b> — calculado sobre as cotas
+que a empresa tinha nesta alteração.</p>
 <p>Se a pessoa ainda não estiver cadastrada, <b>Cadastrar sócio novo…</b>
 resolve ali mesmo, sem precisar sair para a aba Sócios e voltar — o
 recém-cadastrado já fica selecionado.</p>
 
 <h3>Alterações criadas automaticamente</h3>
-<p><b>Associar a uma empresa</b> pela aba Sócios, e importar o relatório de
+<p><b>+ Associar empresa</b> pela aba Sócios, e importar o relatório de
 sócios, geram uma alteração contratual sozinhos — <b>só para movimento do ano
 corrente</b>. Sócio que entrou em anos anteriores fica com a data de entrada
 certa e <b>sem alteração</b>: criar uma "nova" datada lá atrás inventaria um
 evento que o escritório não registrou.</p>
 <p>Para ligar depois o vínculo à alteração certa: cadastre a alteração aqui (se
-ainda não existir) e, na aba Sócios, abra <b>Editar vínculo</b> e escolha-a em
-<b>Alteração de entrada</b> (ou de saída).</p>
+ainda não existir) e, na aba Sócios, abra <b>Editar participação</b> na ficha da
+empresa e escolha-a em <b>Alteração contratual</b>, na parte de entrada (ou de
+saída).</p>
 
 <h3>Excluir alteração</h3>
 <p>Excluir uma alteração <b>desfaz o que ela registrou</b>: o vínculo de quem
@@ -160,9 +224,23 @@ empresa aparece repetida em várias linhas, uma para cada sócio dela.</p>
 de Sócios"</b> emitido por outro sistema contábil, em PDF ou em planilha (veja
 no fim desta página).</p>
 
+<h3>A tela em três passos</h3>
+<ol>
+<li><b>Formato do arquivo</b> — os formatos aparecem como cartões; clique no
+que corresponde à sua planilha. O escolhido fica com a borda laranja e
+<b>✓ Selecionado</b>.</li>
+<li><b>Importar</b> — <b>Importar planilha</b> usa o formato escolhido (o nome
+dele aparece no próprio botão); <b>Importar relatório de sócios</b> lê o PDF ou
+Excel de outro sistema e não depende do formato.</li>
+<li><b>Exportar</b> — <b>Planilha em branco</b> para preencher fora, ou
+<b>Cadastro atual</b> com tudo o que está no sistema.</li>
+</ol>
+<p>O resultado de cada operação aparece numa <b>faixa verde</b> no topo da
+tela.</p>
+
 <h3>Tudo gira em torno do "formato"</h3>
-<p>A primeira coisa da tela é o <b>Formato</b>, e ele vale para os dois lados:
-exporta no mesmo desenho em que importa. São dois tipos:</p>
+<p>O formato vale para os dois lados: exporta no mesmo desenho em que importa.
+São dois tipos:</p>
 <ul>
 <li><b>Modelos do sistema</b> — as planilhas exportadas daqui. As colunas são
 reconhecidas pelo <b>nome no cabeçalho</b>, então podem estar em qualquer
@@ -286,12 +364,12 @@ linhas já lidas pelo layout, <b>sem importar nada</b>. Use sempre: errar uma
 letra é fácil, e o estrago — o CNPJ gravado no lugar do capital social — só
 apareceria muito depois. Ao importar, a mesma prévia aparece como confirmação
 antes de qualquer coisa ser gravada.</p>
-<p><b>Salvar layout</b> guarda a configuração com um nome e <b>recolhe a
-grade</b>: da próxima vez é só escolher o formato e apontar o arquivo, sem as
-caixinhas de letra na frente. Para mexer nas colunas de novo, use <b>Editar
-layout</b> — e <b>Fechar</b> recolhe a grade outra vez, sem desfazer nada.
-Alterações ainda não salvas já valem para a importação e a exportação daquele
-momento — o aviso ao lado dos botões diz em que pé está.</p>
+<p>Criar ou editar um layout abre um <b>modo de edição só dele</b>: os passos
+saem da frente e ficam só as colunas, com <b>Salvar layout</b>, <b>Conferir com
+uma planilha…</b> e <b>Voltar</b>. Ao salvar, a tela volta aos passos com o
+layout <b>já selecionado</b> e a faixa verde confirmando. <b>Editar layout</b>
+reabre as colunas; <b>Voltar</b> recolhe sem desfazer nada. Um layout novo que
+não foi salvo some se você escolher outro formato.</p>
 <p>Importar por layout faz <b>as mesmas verificações de sempre</b>: o CPF
 identifica o sócio, empresa que não existe é criada, sócio novo espera sua
 confirmação, e o que já está cadastrado não é duplicado — vínculo que já existe
@@ -378,13 +456,32 @@ resolveu à mão, apontando para um sócio existente, não é tocado.</p>
 _SOCIOS = """
 <h2>Sócios</h2>
 <p>O sócio é cadastrado <b>uma vez só</b> e reaproveitado em todas as empresas
-de que participa. O painel da direita mostra os vínculos do sócio selecionado.</p>
+de que participa. À direita aparecem as participações do sócio selecionado,
+separadas em abas.</p>
 
-<h3>Cadastro</h3>
-<p>Mesmo formulário de três estados das Empresas: <b>Novo</b> libera os campos
-para um cadastro novo; clicar numa linha entra em edição daquele sócio;
-<b>Cancelar</b> sai sem gravar. O aviso acima dos campos diz sempre qual é o
-caso.</p>
+<h3>Abas: visão geral e uma por empresa</h3>
+<p>Abaixo do nome do sócio fica uma fileira de abas, com o nome de cada
+empresa. A primeira, <b>Visão geral</b>, mostra como ele está hoje: o cartão
+de cada empresa, com o percentual, as cotas, o capital e o botão <b>Editar
+participação</b>.</p>
+<p>Na aba de uma empresa ficam o cartão dela e, embaixo, as
+<b>movimentações</b> daquela empresa: quando entrou, quando saiu e quando a
+participação foi refeita (as cotas ou o percentual mudaram numa alteração).
+Clique numa movimentação para ver a <b>foto</b> de como era a participação
+naquela época. Empresa de onde o sócio já saiu aparece em itálico.</p>
+<p>Sócio de uma empresa só não tem abas: o cartão e as movimentações aparecem
+direto.</p>
+
+<h3>Lista e cadastro</h3>
+<p>À esquerda, a lista dos sócios: o nome e, embaixo, o CPF/CNPJ; à direita,
+em quantas empresas ele está hoje — <b>sem empresa</b> (em tom apagado) é o
+sócio cadastrado e ainda não associado. A busca acha pelo nome ou pelo
+documento, com ou sem pontuação.</p>
+<p><b>Novo sócio</b> e <b>Editar dados</b> (ou dois cliques na lista) abrem uma
+janela própria. No cadastro novo, o botão principal é <b>Salvar e associar a
+uma empresa</b>: o cadastro do sócio só fica completo com a participação dele,
+e a associação já abre em seguida. <b>Excluir sócio</b> fica na janela de
+edição — e só funciona para quem não tem participação nem lançamento.</p>
 <p><b>Tipo</b> decide a máscara do documento: pessoa física usa CPF, pessoa
 jurídica usa CNPJ (holding sócia de outra empresa é comum). O CPF/CNPJ não pode
 repetir entre sócios — o sistema recusa e mostra quem já usa aquele
@@ -397,31 +494,54 @@ direto para ele.</p>
 ali porque sócio duplicado se espalha por todas as empresas dele e costuma
 aparecer só na hora de emitir o informe, quando desfazer já dá trabalho.</p>
 
-<h3>Vínculos com empresas</h3>
+<h3>Participações nas empresas</h3>
+<p>Cada empresa do sócio é uma <b>ficha</b> com tudo da participação dele:</p>
 <ul>
-<li><b>Associar a uma empresa</b> — cria o vínculo: % do capital, cotas,
-capital do sócio em reais e data de entrada. Se a entrada for do ano corrente,
+<li>O <b>percentual do capital social</b>, em destaque, e a <b>faixa</b> logo
+abaixo: a barra inteira é o capital da empresa, e a parte em dourado é a fatia
+do sócio. Se as cotas dele, divididas pelo total de cotas da empresa, derem
+outro percentual, a ficha mostra também "Pelas cotas, hoje".</li>
+<li><b>Cotas</b> — as do sócio e o total da empresa ("469 de 1.000").</li>
+<li><b>Capital do sócio</b> — em reais, como foi informado. Sem valor
+informado, aparece uma <b>estimativa</b> marcada com "≈": capital social da
+empresa ÷ total de cotas × cotas do sócio.</li>
+<li><b>Na sociedade</b> — desde quando, ou de quando a quando.</li>
+<li>A alteração contratual de entrada (e de saída), ou o aviso de que ainda
+não há uma associada.</li>
+</ul>
+<p>Quem está na sociedade hoje aparece primeiro, da maior participação para a
+menor. As participações encerradas vêm depois, com a etiqueta <b>Saiu em</b> e
+a faixa apagada. A coluna <b>Empresas</b>, na lista de sócios, conta em
+quantas empresas cada um está hoje — um <b>0</b> ali é o sócio que foi
+cadastrado e ainda não foi associado.</p>
+
+<h3>Associar e editar</h3>
+<ul>
+<li><b>+ Associar empresa</b> — é aqui que entram as cotas, o <b>valor da
+cota</b>, o capital e o percentual do sócio, e a data de entrada. O capital do
+sócio é calculado na hora: <b>cotas × valor da cota</b>. O valor da cota vem do
+cadastro da empresa (ou R$ 1,00, o mais comum, quando ela ainda não tem), tem
+atalhos para <b>R$ 1,00</b> e <b>R$ 0,01</b>, e o que for usado fica gravado na
+empresa, valendo para os outros sócios dela. O percentual acompanha as cotas
+enquanto estiver em branco. Se a entrada for do ano corrente,
 abre uma alteração contratual na empresa; se for mais antiga, não (veja
 <i>Alterações criadas automaticamente</i>).</li>
-<li><b>Editar vínculo</b> (ou dois cliques na linha) — <b>todos os campos</b>
-numa tela só: % do capital, cotas, capital do sócio, data de entrada, saída
-(marque <b>Saiu da sociedade</b> e informe a data), alteração contratual de
-entrada e de saída, e observação. Corrige o registro como está: não abre
-vínculo novo nem cria alteração.</li>
-<li><b>Excluir vínculo</b> fica dentro da tela de edição. Apaga o registro de
-vez — use <b>só</b> para corrigir um vínculo cadastrado por engano. Se o sócio
-saiu da sociedade, marque a saída em vez de excluir: assim os anos em que ele
-participou continuam aparecendo.</li>
+<li><b>Calcular % pelas cotas</b> — cotas do sócio ÷ total de cotas da
+empresa. Percentual já informado só muda por este botão: se o contrato
+registra outro percentual, ele não é trocado sem você pedir.</li>
+<li><b>Editar participação</b> (ou dois cliques na ficha) — <b>todos os
+campos</b> numa tela só: cotas, % do capital, capital do sócio, entrada, saída
+(marque <b>O sócio saiu desta empresa</b> e informe a data), alteração
+contratual de entrada e de saída, e observação. Corrige o registro como está:
+não abre participação nova nem cria alteração.</li>
+<li><b>Excluir participação</b> fica dentro da tela de edição. Apaga o
+registro de vez — use <b>só</b> para corrigir uma participação cadastrada por
+engano. Se o sócio saiu, marque a saída em vez de excluir: assim os anos em
+que ele participou continuam aparecendo.</li>
 </ul>
 
-<h3>Capital do sócio</h3>
-<p>A coluna <b>Capital (R$)</b> mostra o capital que o sócio tem naquela
-empresa, em reais, como foi informado (na edição do vínculo ou na importação).
-Sem valor informado, aparece uma <b>estimativa</b> marcada com "≈": capital
-social da empresa ÷ total de cotas × cotas do sócio.</p>
-
 <h3>Mapa de vínculos</h3>
-<p>O botão <b>Mapa de vínculos</b>, no alto do painel da direita, desenha num
+<p>O botão <b>Mapa de vínculos</b>, ao lado do nome do sócio, desenha num
 diagrama o que a tabela mostra em linhas: o sócio no centro e, ao redor, as
 empresas em que ele participa, cada uma ligada por um traço com o
 <b>percentual</b>, a <b>data de entrada</b> e a de saída.</p>
@@ -451,13 +571,31 @@ _DISTRIBUICAO = """
 cotas, percentual de capital, valor distribuído, pró-labore, IRRF e empréstimo
 recebido da empresa.</p>
 
+<h3>O painel do ano</h3>
+<p>O ano escolhido fica em destaque no alto (com as setas <b>‹ ›</b> ao lado) e
+repetido na etiqueta laranja <b>Ano de …</b> do painel. No painel azul ficam os
+números do ano: <b>lucro distribuído</b> (bem grande), pró-labore, IRRF, quantos sócios e o capital social — com o aumento
+ou a redução do ano, se houve. Ao lado, a <b>rosca</b> mostra como o lucro se
+dividiu entre os sócios; passe o mouse numa fatia para ver de quem é e
+quanto. Empresa com muitos sócios mostra as maiores fatias e junta o resto em
+<b>Outros</b>; a lista completa está na tabela.</p>
+<p><b>Cada sócio tem uma cor</b>, a mesma na rosca e na bolinha com as
+iniciais dele na tabela (a partir do nono, todos em cinza). As setas <b>‹ ›</b> ao lado do ano trocam de ano, e o
+botão <b>Aberto · trancar período</b> (ou <b>Trancado · destrancar</b>) fica no
+próprio painel.</p>
+
 <h3>Quem aparece na lista</h3>
-<p>Todo sócio que teve vínculo em <b>qualquer momento</b> do ano. Quem entrou
-em março ou saiu em agosto aparece igual, destacado por cor (verde entrou,
-vermelho saiu), com a situação escrita na última coluna.</p>
+<p>Todo sócio que teve vínculo em <b>qualquer momento</b> do ano, com o CPF
+embaixo do nome, uma barrinha no percentual e a situação em etiqueta
+(<b>Ativo</b>, <b>Entrou este ano</b>, <b>Saiu este ano</b>). Colunas sem nada a
+mostrar — origem dos trimestres, empréstimo, data de saída — só aparecem
+quando têm conteúdo.</p>
 
 <h3>Editar</h3>
-<p>O botão <b>Editar</b> libera a edição direto na tabela. Valor distribuído,
+<p><b>Editar valores</b> (ou dois cliques num sócio) libera a edição direto na
+tabela. Para a divisão proporcional, informe o <b>lucro do ano a distribuir</b>
+e clique em <b>Dividir pelo % do capital</b>; a soma dos sócios aparece ao lado
+enquanto você digita. Valor distribuído,
 pró-labore e IRRF são salvos na hora. Já mexer em <b>% de capital ou cotas</b>
 é um evento societário: o sistema pede uma data de vigência e gera uma
 alteração contratual. Essa data precisa cair <b>dentro do ano em edição</b>,
@@ -508,13 +646,29 @@ _TRIMESTRAL = """
 ano. <b>Empresa que não usa esta tela não muda em nada</b> — continua lançando
 só o valor anual.</p>
 
+<h3>O painel do ano</h3>
+<p>No alto, em azul, um gráfico com os <b>quatro trimestres</b> do ano: cada
+barra é o que foi distribuído no trimestre, dividida pelas cores dos sócios
+(as mesmas das bolinhas da tabela). Trimestre sem lançamento aparece só com o
+contorno tracejado. Passe o mouse numa barra para ver quanto foi para cada
+sócio; <b>clique nela para abrir o trimestre</b> embaixo.</p>
+<p>Ao lado, o <b>total do ano</b> — é ele que vai sozinho para a distribuição
+anual —, quantos trimestres já foram lançados e a média por trimestre.</p>
+<p>As setas <b>‹</b> e <b>›</b> ao lado do título do trimestre andam um período
+por vez e atravessam a virada de ano: o anterior ao 1º de 2025 é o 4º de 2024.
+Durante um lançamento em aberto, setas e gráfico ficam travados — trocar de
+período no meio descartaria o que foi digitado; salve ou cancele antes.</p>
+
 <h3>Como lançar</h3>
-<p>Escolha empresa, ano e trimestre, clique em <b>Lançar trimestre</b>, preencha
-valor distribuído, pró-labore e IRRF de cada sócio, e salve.</p>
-<p>As setas <b>‹</b> e <b>›</b> ao lado do trimestre andam um período por vez e
-atravessam a virada de ano: o anterior ao 1º de 2025 é o 4º de 2024. Elas ficam
-travadas durante um lançamento em aberto — trocar de período no meio
-descartaria o que foi digitado; salve ou cancele antes.</p>
+<p>Clique em <b>Lançar valores</b> (ou <b>Editar valores</b>, se o trimestre já
+tem lançamento; dois cliques num sócio também abrem). Preencha valor
+distribuído, pró-labore e IRRF de cada sócio e clique em <b>Salvar
+trimestre</b>.</p>
+<p>Para a distribuição proporcional, que é a mais comum, informe o <b>valor
+total do trimestre</b> e clique em <b>Dividir pelo % do capital</b>: cada
+sócio recebe a parte dele, e os centavos do arredondamento ficam com a maior
+fatia, para a soma bater. Quem recebe diferente, é só ajustar depois. A
+<b>soma dos sócios</b> aparece à direita enquanto você digita.</p>
 
 <h3>O que acontece com a distribuição anual</h3>
 <p>A cada lançamento, a distribuição <b>anual</b> daquele sócio passa a ser
@@ -701,6 +855,24 @@ administrador, não pede a senha antiga), e <b>Trocar minha senha</b>, no bloco
 "Minha conta", troca a sua própria — essa pede a senha atual.</p>
 <p>Quem não é administrador não vê esta tela; para essas contas, o atalho
 <b>Trocar senha</b> fica no rodapé da barra lateral.</p>
+
+<h3>Entrar sem digitar a senha</h3>
+<p>Na tela de entrada, <b>Lembrar meu login</b> deixa o login preenchido e só
+pede a senha. <b>Entrar direto, sem pedir a senha</b> vai além: nas próximas
+vezes o programa abre já na sua conta, neste computador. A senha não fica
+guardada — o computador guarda uma chave que só vale para ele.</p>
+<p>Para voltar a pedir a senha, use <b>Sair</b> na barra lateral. Trocar a
+senha, ou um administrador redefini-la, também desfaz o entrar direto. Não
+marque essa opção em computador que outras pessoas usam.</p>
+
+<h3>A tela de Usuários</h3>
+<p>À esquerda, a lista (com busca); à direita, a ficha de quem está
+selecionado: nível (<b>Administrador</b> ou <b>Usuário</b>), se está ativo,
+desde quando existe, quando mexeu no sistema pela última vez, em quantos
+computadores entra sem senha (com o botão para voltar a pedir a senha em
+todos) e as últimas atividades. <b>Novo usuário</b> e <b>Editar dados</b> abrem
+uma janela em que o nível é escolhido em dois cartões, cada um dizendo o que
+aquele nível pode fazer; a senha tem o botão <b>Mostrar</b>.</p>
 
 <h3>Log de atividades</h3>
 <p>Registra quem fez o quê e quando: cadastros, alterações, exclusões,

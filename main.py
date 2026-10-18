@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QApplication, QDialog
 from controle_lucros import backup, db, relatorio_erro, repositories as repo, sessao, traducao
 from controle_lucros.ui.icones import icone_app
 from controle_lucros.ui.local_banco import DialogoBancoInacessivel, DialogoConexao
-from controle_lucros.ui.login import DialogoLogin, DialogoPrimeiroUsuario
+from controle_lucros.ui.login import DialogoLogin, DialogoPrimeiroUsuario, entrar_sem_senha, esquecer_acesso
 from controle_lucros.ui.main_window import MainWindow
 from controle_lucros.ui.reportar_erro import CapturaDeErros, abrir_para_fechamento
 from controle_lucros.ui.theme import build_stylesheet
@@ -82,21 +82,24 @@ def main() -> None:
     conn = _abrir_banco()
 
     while True:
-        if not repo.existe_algum_usuario(conn):
-            dialogo = DialogoPrimeiroUsuario(conn)
-        else:
-            dialogo = DialogoLogin(conn)
+        # Quem marcou "entrar direto" neste PC não vê a tela de login.
+        usuario = entrar_sem_senha(conn) if repo.existe_algum_usuario(conn) else None
+        if usuario is None:
+            if not repo.existe_algum_usuario(conn):
+                dialogo = DialogoPrimeiroUsuario(conn)
+            else:
+                dialogo = DialogoLogin(conn)
 
-        if dialogo.exec() != QDialog.Accepted:
-            if getattr(dialogo, "trocou_banco", False):
-                # PC que estava no banco errado, apontado pro do escritório:
-                # os usuários estão lá, então volta pro começo já com o login.
-                conn.close()
-                conn = _abrir_banco()
-                continue
-            sys.exit(0)
+            if dialogo.exec() != QDialog.Accepted:
+                if getattr(dialogo, "trocou_banco", False):
+                    # PC que estava no banco errado, apontado pro do escritório:
+                    # os usuários estão lá, então volta pro começo já com o login.
+                    conn.close()
+                    conn = _abrir_banco()
+                    continue
+                sys.exit(0)
 
-        usuario = dialogo.usuario_autenticado
+            usuario = dialogo.usuario_autenticado
         sessao.definir_usuario_atual(usuario)
 
         try:
@@ -120,6 +123,9 @@ def main() -> None:
         sessao.definir_usuario_atual(None)
         if not janela.logout_solicitado:
             sys.exit(0)
+        # Sair é "quero a tela de login de novo": sem isso, o entrar direto
+        # abriria a mesma conta na hora.
+        esquecer_acesso(conn)
 
 
 if __name__ == "__main__":

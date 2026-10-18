@@ -1,36 +1,28 @@
-"""Aba genérica de CRUD: tabela de registros + formulário de edição.
-
-O formulário tem três estados visíveis (ver aplicar_modo_formulario): enquanto
-nada está selecionado ele fica desabilitado e o destaque de botão primário vai
-pro "Novo" — sem isso, a tela abre com campos aparentemente editáveis e nada
-indicando que digitar ali por cima de um registro selecionado ALTERA aquele
-registro em vez de criar um novo."""
+"""Peças de tela usadas pelo programa inteiro: a tabela com cara de lista,
+os campos de número com unidade à vista (percentual, cotas, reais, valor da
+cota), os formatadores (percentual, data, dinheiro) e o cartão de número dos
+dashboards — pra que o mesmo dado apareça do mesmo jeito em toda tela."""
 from __future__ import annotations
 
 from contextlib import contextmanager
 
-from PySide6.QtCore import QLocale, Qt
+from PySide6.QtCore import QEvent, QLocale, QObject, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter
 from PySide6.QtWidgets import (
-    QAbstractItemView,
     QAbstractSpinBox,
     QComboBox,
     QDoubleSpinBox,
-    QFormLayout,
     QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QSizePolicy,
     QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
-from .. import db
 from . import theme
 
 
@@ -207,6 +199,10 @@ class TabelaLista(QTableWidget):
 
 
 def preencher_combo(combo: QComboBox, itens, texto_attr: str = "nome") -> None:
+    # O seletor de empresa (código + nome) recebe as empresas inteiras.
+    if hasattr(combo, "definir_empresas"):
+        combo.definir_empresas(itens)
+        return
     combo.clear()
     for item in itens:
         combo.addItem(getattr(item, texto_attr), item.id)
@@ -219,10 +215,83 @@ def selecionar_combo_por_id(combo: QComboBox, id_) -> None:
 
 def formatar_numero(spin: QDoubleSpinBox) -> None:
     """Aplica separador de milhar (ponto) e decimal (vírgula) — ex.: 1.234.567,89
-    — pra números grandes (capital, cotas, valores) ficarem legíveis."""
+    — pra números grandes (capital, cotas, valores) ficarem legíveis.
+
+    E formata ENQUANTO se digita: "1500000" vira "1.500.000" na hora, sem
+    ninguém precisar contar zeros. Ao entrar no campo o número já vem
+    selecionado, pra digitar por cima em vez de emendar no "0,00"."""
     spin.setLocale(LOCALE_BR)
     spin.setGroupSeparatorShown(True)
     spin.setButtonSymbols(QAbstractSpinBox.NoButtons)
+    if getattr(spin, "_formatador_ao_digitar", None) is None:
+        spin._formatador_ao_digitar = _FormatadorAoDigitar(spin)
+
+
+def formatar_digitacao(texto: str, casas: int) -> tuple[str, int]:
+    """O número digitado reescrito no padrão brasileiro: pontos de milhar
+    refeitos, uma vírgula só, no máximo `casas` decimais. Pontos digitados
+    são ignorados (o separador de milhar é a tela que põe). Devolve o texto e
+    quantos "caracteres que contam" (dígitos e vírgula) ele tem."""
+    digitos_e_virgula = "".join(c for c in texto if c.isdigit() or c == ",")
+    if casas == 0:
+        digitos_e_virgula = digitos_e_virgula.replace(",", "")
+    inteiro, tem_virgula, decimais = digitos_e_virgula.partition(",")
+    decimais = decimais.replace(",", "")[:casas]
+    inteiro = inteiro.lstrip("0") or ("0" if inteiro or tem_virgula else "")
+    grupos = []
+    while len(inteiro) > 3:
+        grupos.insert(0, inteiro[-3:])
+        inteiro = inteiro[:-3]
+    if inteiro:
+        grupos.insert(0, inteiro)
+    resultado = ".".join(grupos) + ("," + decimais if tem_virgula else "")
+    return resultado, sum(1 for c in resultado if c.isdigit() or c == ",")
+
+
+class _FormatadorAoDigitar(QObject):
+    def __init__(self, spin: QDoubleSpinBox):
+        super().__init__(spin)
+        self._spin = spin
+        self._ocupado = False
+        editor = spin.lineEdit()
+        editor.textEdited.connect(self._reformatar)
+        editor.installEventFilter(self)
+
+    def eventFilter(self, objeto, evento) -> bool:  # noqa: N802 (Qt override)
+        if evento.type() == QEvent.FocusIn:
+            QTimer.singleShot(0, self._spin.selectAll)
+        return False
+
+    def _reformatar(self, texto: str) -> None:
+        if self._ocupado:
+            return
+        spin, editor = self._spin, self._spin.lineEdit()
+        prefixo, sufixo = spin.prefix(), spin.suffix()
+        miolo = texto
+        cursor = editor.cursorPosition()
+        if prefixo and miolo.startswith(prefixo):
+            miolo = miolo[len(prefixo):]
+            cursor -= len(prefixo)
+        if sufixo and miolo.endswith(sufixo):
+            miolo = miolo[: -len(sufixo)]
+        cursor = max(0, min(cursor, len(miolo)))
+        # Quantos dígitos/vírgula havia antes do cursor: é por eles que o
+        # cursor volta ao lugar certo depois que os pontos mudam de posição.
+        antes = sum(1 for c in miolo[:cursor] if c.isdigit() or c == ",")
+        novo, _ = formatar_digitacao(miolo, spin.decimals())
+        if novo == miolo:
+            return
+        posicao, contados = 0, 0
+        while posicao < len(novo) and contados < antes:
+            if novo[posicao].isdigit() or novo[posicao] == ",":
+                contados += 1
+            posicao += 1
+        self._ocupado = True
+        try:
+            editor.setText(prefixo + novo + sufixo)
+            editor.setCursorPosition(len(prefixo) + posicao)
+        finally:
+            self._ocupado = False
 
 
 def configurar_campo_cnpj(campo: QLineEdit) -> None:
@@ -252,96 +321,123 @@ def formatar_valor_br(valor: float, casas: int = 2) -> str:
     return texto.replace(",", "|").replace(".", ",").replace("|", ".")
 
 
-MODO_VAZIO = "vazio"
-MODO_NOVO = "novo"
-MODO_EDICAO = "edicao"
-MODO_SALVO = "salvo"
-MODO_CANCELADO = "cancelado"
-
-MODOS_COM_FORMULARIO_ABERTO = (MODO_NOVO, MODO_EDICAO)
-
-AVISOS_FORMULARIO = {
-    MODO_VAZIO: (
-        "Formulário bloqueado. Clique em <b>Novo</b> para cadastrar, "
-        "ou selecione um registro na tabela para editar."
-    ),
-    MODO_NOVO: "<b>Novo registro</b> — preencha os campos e clique em Salvar.",
-    MODO_EDICAO: (
-        "Editando <b>{descricao}</b> — o que for salvo substitui esse registro. "
-        "Para cadastrar outro, clique em <b>Novo</b>."
-    ),
-    MODO_SALVO: (
-        "Registro salvo. Clique em <b>Novo</b> para cadastrar outro, "
-        "ou selecione um na tabela para editar."
-    ),
-    MODO_CANCELADO: (
-        "Cancelado — nada foi alterado. Clique em <b>Novo</b> para cadastrar, "
-        "ou selecione um registro na tabela para editar."
-    ),
-}
+CASAS_PERCENTUAL = 4
 
 
-def realcar_botao(botao: QPushButton, realcado: bool) -> None:
-    """Liga/desliga o destaque de botão primário. Trocar a property depois de
-    o QSS já ter sido aplicado exige repolir o widget — o Qt não reavalia o
-    seletor sozinho, e o botão ficaria com a aparência antiga."""
-    botao.setProperty("role", "primario" if realcado else "")
-    botao.style().unpolish(botao)
-    botao.style().polish(botao)
+def formatar_percentual(valor: float | None) -> str:
+    """46.94 -> '46,9400%'; 33.3333 -> '33,3333%'; 100 -> '100,0000%'.
+
+    O mesmo formato em todas as telas, sempre com o símbolo e sempre com
+    quatro casas: sem o símbolo, um número numa tabela ao lado de cotas e
+    reais não diz o que é; e com as casas fixas, um sócio com 50% e outro com
+    33,3333% ficam alinhados e comparáveis de relance. Quatro casas cobrem a
+    sociedade dividida em três (33,3333%) sem a soma deixar de fechar 100%."""
+    return f"{formatar_valor_br(round(float(valor or 0.0), CASAS_PERCENTUAL), CASAS_PERCENTUAL)}%"
 
 
-def aplicar_modo_formulario(
-    painel_campos: QWidget,
-    aviso: QLabel,
-    botoes: dict,
-    modo: str,
-    descricao: str = "",
-) -> None:
-    """Deixa o formulário coerente com o estado atual: campos habilitados só
-    quando há o que editar, botões conforme o que faz sentido apertar, e uma
-    linha de texto dizendo em que pé a coisa está.
-
-    O destaque de primário acompanha a próxima ação esperada — bloqueado, o
-    olho vai pro "Novo"; aberto, vai pro "Salvar" — que é o efeito visual que
-    faltava pra deixar claro que o cadastro começa pelo botão.
-
-    `botoes` traz "novo", "salvar" e (opcionalmente) "cancelar" e "excluir"."""
-    aberto = modo in MODOS_COM_FORMULARIO_ABERTO
-    painel_campos.setEnabled(aberto)
-    botoes["salvar"].setEnabled(aberto)
-    if "excluir" in botoes:
-        botoes["excluir"].setEnabled(modo == MODO_EDICAO)
-    if "cancelar" in botoes:
-        # Só aparece com o formulário aberto: com ele bloqueado não há o que
-        # cancelar, e um botão morto no meio dos outros só polui.
-        botoes["cancelar"].setVisible(aberto)
-    realcar_botao(botoes["novo"], not aberto)
-    realcar_botao(botoes["salvar"], aberto)
-    aviso.setText(AVISOS_FORMULARIO[modo].format(descricao=descricao))
-    aviso.setProperty("modo", modo)
-    aviso.setStyleSheet(_estilo_aviso(modo))
+def formatar_valor_cota(valor: float) -> str:
+    """1 -> 'R$ 1,00'; 0.01 -> 'R$ 0,01'; 0.001 -> 'R$ 0,001'. Duas casas como
+    todo valor em reais, e mais só quando a cota vale menos de um centavo."""
+    numero = round(float(valor or 0.0), 6)
+    casas = 2
+    while casas < 6 and round(numero, casas) != numero:
+        casas += 1
+    return f"R$ {formatar_valor_br(numero, casas)}"
 
 
-def _estilo_aviso(modo: str) -> str:
-    cores = {
-        MODO_VAZIO: theme.INK_MUTED(),
-        MODO_NOVO: theme.BRASS_DARK(),
-        MODO_EDICAO: theme.BRASS_DARK(),
-        MODO_SALVO: theme.SEAL_GREEN(),
-        MODO_CANCELADO: theme.INK_MUTED(),
-    }
-    cor = cores[modo]
-    return (
-        f"color: {cor}; font-size: 11px; padding: 7px 10px; "
-        f"border-left: 3px solid {cor}; background: {theme.PAPER()}; border-radius: 3px;"
-    )
+def formatar_data_br(iso: str | None, vazio: str = "—") -> str:
+    """'2007-03-23' -> '23/03/2007'. As datas moram no banco em ISO, mas na
+    tela são lidas por gente: data em ISO numa tabela parece código."""
+    if not iso:
+        return vazio
+    try:
+        ano, mes, dia = str(iso)[:10].split("-")
+        return f"{dia}/{mes}/{ano}"
+    except ValueError:
+        return str(iso)
 
 
-def criar_aviso_formulario() -> QLabel:
-    aviso = QLabel()
-    aviso.setTextFormat(Qt.RichText)
-    aviso.setWordWrap(True)
-    return aviso
+class CampoNumeroEnxuto(QDoubleSpinBox):
+    """QDoubleSpinBox que mostra só as casas decimais que o número tem.
+
+    O padrão do Qt escreve sempre todas as casas configuradas: um percentual
+    que aceita quatro casas aparece como "46,9400 %", e cotas que aceitam
+    duas como "469,00" — zeros que não dizem nada e destoam do resto da tela,
+    onde o mesmo número aparece "46,94%" e "469". As casas aceitas na
+    digitação continuam as mesmas; muda só como o valor é escrito."""
+
+    def __init__(self, casas_minimas: int = 0, casas_maximas: int = 2, parent=None):
+        super().__init__(parent)
+        self._casas_minimas = casas_minimas
+        self.setDecimals(casas_maximas)
+        formatar_numero(self)
+
+    def textFromValue(self, valor: float) -> str:  # noqa: N802 (Qt override)
+        casas = self._casas_minimas
+        while casas < self.decimals() and round(valor, casas) != round(valor, self.decimals()):
+            casas += 1
+        return self.locale().toString(float(valor), "f", casas)
+
+
+def campo_percentual() -> CampoNumeroEnxuto:
+    """Campo de percentual com a unidade à vista (" %"): até quatro casas — o
+    mesmo limite que o banco guarda e que formatar_percentual mostra — e
+    escrito do mesmo jeito que ela ("46,94 %", "33,3333 %")."""
+    campo = CampoNumeroEnxuto(casas_minimas=CASAS_PERCENTUAL, casas_maximas=CASAS_PERCENTUAL)
+    campo.setMaximum(100)
+    campo.setSuffix(" %")
+    return campo
+
+
+def campo_cotas() -> CampoNumeroEnxuto:
+    """Quantidade de cotas: inteira na quase totalidade dos contratos, então
+    sem ",00" — mas aceita fração quando o contrato tem."""
+    campo = CampoNumeroEnxuto(casas_minimas=0, casas_maximas=2)
+    campo.setMaximum(1_000_000_000)
+    return campo
+
+
+class CampoValorCota(QWidget):
+    """Valor nominal de uma cota, com atalhos de um clique pros dois valores
+    que aparecem em quase todo contrato (R$ 1,00 e R$ 0,01) — e o campo
+    livre pro resto. Aceita até seis casas: há cota de R$ 0,001."""
+
+    ATALHOS = (1.0, 0.01)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.campo = CampoNumeroEnxuto(casas_minimas=2, casas_maximas=6)
+        self.campo.setMaximum(1_000_000)
+        self.campo.setPrefix("R$ ")
+        self.valueChanged = self.campo.valueChanged
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        layout.addWidget(self.campo, 1)
+        self.atalhos: list[QPushButton] = []
+        for valor in self.ATALHOS:
+            botao = QPushButton(f"R$ {formatar_valor_br(valor)}")
+            botao.setProperty("role", "atalho")
+            botao.setCursor(Qt.PointingHandCursor)
+            botao.setToolTip(f"Cota de R$ {formatar_valor_br(valor)}")
+            botao.clicked.connect(lambda _marcado=False, v=valor: self.campo.setValue(v))
+            layout.addWidget(botao)
+            self.atalhos.append(botao)
+
+    def value(self) -> float:
+        return self.campo.value()
+
+    def setValue(self, valor: float) -> None:  # noqa: N802 — mesma interface do QDoubleSpinBox
+        self.campo.setValue(valor)
+
+
+def configurar_campo_moeda(campo: QDoubleSpinBox, maximo: float = 1_000_000_000_000) -> QDoubleSpinBox:
+    """Campo de valor em reais, com "R$" à vista."""
+    campo.setMaximum(maximo)
+    campo.setDecimals(2)
+    campo.setPrefix("R$ ")
+    formatar_numero(campo)
+    return campo
 
 
 def cnpj_valido_ou_vazio(campo: QLineEdit) -> str:
@@ -467,251 +563,3 @@ class CartaoEstatistica(QFrame):
             if metrica.horizontalAdvance(self._contexto_inteiro) > largura
             else ""
         )
-
-
-class CrudTab(QWidget):
-    colunas: list[tuple[str, str]] = []
-    # Qual coluna recebe o espaço que sobra na largura da tabela. O padrão é a
-    # primeira; quem tem um código curto na frente (o nº da empresa) aponta
-    # para a coluna do nome, que é a que ganha em ficar larga.
-    coluna_flexivel = 0
-    mensagem_tabela_vazia = "Nada por aqui ainda."
-
-    def __init__(self, conn, parent=None):
-        super().__init__(parent)
-        self.conn = conn
-        self._registro_atual_id = None
-        self._registros: list = []
-        self._callback_selecao = None
-
-        self.busca = QLineEdit()
-        self.busca.setPlaceholderText(self.placeholder_busca())
-        self.busca.textChanged.connect(lambda _texto: self.atualizar())
-
-        self.tabela = TabelaLista(
-            0, len(self.colunas),
-            coluna_flexivel=self.coluna_flexivel,
-            mensagem_vazia=self.mensagem_tabela_vazia,
-        )
-        self.tabela.setHorizontalHeaderLabels([c[0] for c in self.colunas])
-        self.tabela.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.tabela.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.tabela.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.tabela.itemSelectionChanged.connect(self._ao_selecionar)
-
-        self.form_layout = QFormLayout()
-        self.form_layout.setSpacing(10)
-        self.montar_formulario(self.form_layout)
-
-        # Os campos vão num container próprio pra dar pra bloquear o
-        # formulário inteiro com um setEnabled só — o QSS já escurece tudo
-        # junto, e é esse escurecimento que mostra que a tela está esperando
-        # um clique em "Novo" (ou a seleção de uma linha).
-        self.painel_campos = QWidget()
-        self.painel_campos.setLayout(self.form_layout)
-
-        self.aviso_form = criar_aviso_formulario()
-
-        self.btn_novo = QPushButton("Novo")
-        self.btn_salvar = QPushButton("Salvar")
-        self.btn_cancelar = QPushButton("Cancelar")
-        self.btn_excluir = QPushButton("Excluir")
-        self.btn_excluir.setProperty("role", "perigo")
-        self.btn_novo.clicked.connect(self.novo)
-        self.btn_salvar.clicked.connect(self.salvar)
-        self.btn_cancelar.clicked.connect(self.cancelar)
-        self.btn_excluir.clicked.connect(self.excluir)
-
-        botoes = QHBoxLayout()
-        botoes.addWidget(self.btn_novo)
-        botoes.addWidget(self.btn_salvar)
-        botoes.addWidget(self.btn_cancelar)
-        botoes.addWidget(self.btn_excluir)
-        botoes.addStretch()
-
-        form_container = QVBoxLayout()
-        form_container.addWidget(self.aviso_form)
-        form_container.addWidget(self.painel_campos)
-        form_container.addLayout(botoes)
-        form_container.addStretch()
-
-        # A linha da busca fica acessível às subclasses porque é onde entra
-        # ação que olha o registro selecionado sem editá-lo (abrir um mapa,
-        # por exemplo): ela pertence à tabela, não ao formulário, e na barra
-        # de baixo brigaria por espaço com Novo/Salvar/Cancelar/Excluir.
-        self.linha_busca = QHBoxLayout()
-        self.linha_busca.setSpacing(8)
-        self.linha_busca.addWidget(self.busca, 1)
-
-        coluna_tabela = QVBoxLayout()
-        coluna_tabela.setSpacing(8)
-        coluna_tabela.addLayout(self.linha_busca)
-        coluna_tabela.addWidget(self.tabela)
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(20)
-        layout.addLayout(coluna_tabela, 2)
-        layout.addLayout(form_container, 1)
-
-        self._modo = MODO_VAZIO
-        self._descricao_modo = ""
-        self.atualizar()
-        self._definir_modo(MODO_VAZIO)
-        theme.estado().mudou.connect(lambda: self._definir_modo(self._modo, self._descricao_modo))
-
-    # -------- a sobrescrever nas subclasses --------
-    def montar_formulario(self, form_layout: QFormLayout) -> None:
-        raise NotImplementedError
-
-    def listar(self) -> list:
-        raise NotImplementedError
-
-    def ler_form(self, id_atual):
-        raise NotImplementedError
-
-    def carregar_form(self, registro) -> None:
-        raise NotImplementedError
-
-    def limpar_form(self) -> None:
-        raise NotImplementedError
-
-    def salvar_registro(self, registro) -> None:
-        raise NotImplementedError
-
-    def excluir_registro(self, id_) -> None:
-        raise NotImplementedError
-
-    def antes_atualizar(self) -> None:
-        """Ponto de extensão: recarregar combos dependentes de outras tabelas."""
-
-    def definir_callback_selecao(self, callback) -> None:
-        """Chamado com o registro sempre que uma linha é selecionada — usado
-        para sincronizar outra aba com o item selecionado aqui."""
-        self._callback_selecao = callback
-
-    def ao_selecionar(self, registro) -> None:
-        if self._callback_selecao is not None:
-            self._callback_selecao(registro)
-
-    def valor_coluna(self, registro, attr):
-        return getattr(registro, attr, None)
-
-    def placeholder_busca(self) -> str:
-        """Sobrescrever pra ajustar o texto de dica do campo de busca."""
-        return "Buscar por nome ou código…"
-
-    def corresponde_busca(self, registro, termo: str) -> bool:
-        """Sobrescrever pra incluir outros campos (código, CPF, CNPJ…) na busca."""
-        return termo in str(getattr(registro, "nome", "")).lower()
-
-    # -------- comportamento comum --------
-    def atualizar(self) -> None:
-        self.antes_atualizar()
-        registros = self.listar()
-        termo = self.busca.text().strip().lower()
-        if termo:
-            registros = [r for r in registros if self.corresponde_busca(r, termo)]
-        self._registros = registros
-        self.tabela.setRowCount(len(self._registros))
-        for row, registro in enumerate(self._registros):
-            for col, (_, attr) in enumerate(self.colunas):
-                valor = self.valor_coluna(registro, attr)
-                item = QTableWidgetItem("" if valor is None else str(valor))
-                item.setData(Qt.UserRole, registro.id)
-                self.tabela.setItem(row, col, item)
-        self.tabela.ajustar_colunas()
-
-    def _definir_modo(self, modo: str, descricao: str = "") -> None:
-        self._modo = modo
-        self._descricao_modo = descricao
-        aplicar_modo_formulario(
-            self.painel_campos,
-            self.aviso_form,
-            {
-                "novo": self.btn_novo,
-                "salvar": self.btn_salvar,
-                "cancelar": self.btn_cancelar,
-                "excluir": self.btn_excluir,
-            },
-            modo,
-            descricao,
-        )
-
-    def descricao_registro(self, registro) -> str:
-        """Como o registro em edição é chamado no aviso. Sobrescrever quando
-        "nome" não for o campo que identifica a coisa pra quem olha."""
-        return str(getattr(registro, "nome", "") or "este registro")
-
-    def _ao_selecionar(self) -> None:
-        linhas = self.tabela.selectionModel().selectedRows()
-        if not linhas:
-            return
-        registro = self._registros[linhas[0].row()]
-        self._registro_atual_id = registro.id
-        self.carregar_form(registro)
-        self._definir_modo(MODO_EDICAO, self.descricao_registro(registro))
-        self.ao_selecionar(registro)
-
-    def novo(self) -> None:
-        self._registro_atual_id = None
-        self.tabela.clearSelection()
-        self.limpar_form()
-        self._definir_modo(MODO_NOVO)
-        self._focar_primeiro_campo()
-
-    def _focar_primeiro_campo(self) -> None:
-        """Depois de destravar o formulário, o cursor já vai pro primeiro
-        campo — sem isso o clique em "Novo" libera a digitação mas ainda
-        exige um segundo clique pra começar a digitar."""
-        campo = self.form_layout.itemAt(0, QFormLayout.FieldRole)
-        if campo is not None and campo.widget() is not None:
-            campo.widget().setFocus()
-
-    def cancelar(self) -> None:
-        """Sai do cadastro/edição sem gravar nada. Descarta o que estiver
-        digitado — é o que "Cancelar" quer dizer, e sem ele a única saída de
-        um formulário aberto era salvar."""
-        self._registro_atual_id = None
-        self.tabela.clearSelection()
-        self.limpar_form()
-        self._definir_modo(MODO_CANCELADO)
-
-    def salvar(self) -> None:
-        try:
-            registro = self.ler_form(self._registro_atual_id)
-            self.salvar_registro(registro)
-        except Exception as exc:
-            QMessageBox.warning(self, "Erro ao salvar", db.explicar_erro(exc))
-            return
-        self.atualizar()
-        self._registro_atual_id = None
-        self.tabela.clearSelection()
-        self.limpar_form()
-        self._definir_modo(MODO_SALVO)
-
-    def confirmar_exclusao(self, id_) -> bool:
-        """A pergunta antes de excluir. Tela cuja exclusão leva mais coisa
-        junto (a empresa leva vínculos, alterações, distribuições...)
-        sobrescreve pra dizer o quê."""
-        resposta = QMessageBox.question(
-            self, "Excluir", "Confirma a exclusão do registro selecionado?"
-        )
-        return resposta == QMessageBox.Yes
-
-    def excluir(self) -> None:
-        if self._registro_atual_id is None:
-            QMessageBox.information(self, "Excluir", "Selecione um registro na tabela.")
-            return
-        if not self.confirmar_exclusao(self._registro_atual_id):
-            return
-        try:
-            self.excluir_registro(self._registro_atual_id)
-        except Exception as exc:
-            QMessageBox.warning(self, "Erro ao excluir", db.explicar_erro(exc))
-            return
-        self.atualizar()
-        self._registro_atual_id = None
-        self.tabela.clearSelection()
-        self.limpar_form()
-        self._definir_modo(MODO_VAZIO)

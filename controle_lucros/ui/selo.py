@@ -3,7 +3,7 @@ cartorial que mostra se uma alteração contratual está aberta (editável) ou
 fechada (travada) — cadeado aberto em latão vs. selo fechado em vinho."""
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
@@ -17,7 +17,7 @@ class Selo(QWidget):
         super().__init__(parent)
         self._numero = numero
         self._fechada = fechada
-        self.setFixedSize(64, 64)
+        self.setFixedSize(72, 72)
         tema_estado().mudou.connect(self.update)
 
     def definir_estado(self, numero: int, fechada: bool) -> None:
@@ -42,14 +42,17 @@ class Selo(QWidget):
             painter.setBrush(Qt.NoBrush)
             painter.drawEllipse(centro, anel, anel)
 
-            self._desenhar_cadeado(painter, centro, cor)
+            # Cadeado um pouco acima do centro e o número logo abaixo, os
+            # dois dentro do anel: embaixo, colado na borda, o número era
+            # cortado pela própria linha do círculo.
+            self._desenhar_cadeado(painter, QPointF(centro.x(), centro.y() - 6), cor)
 
             painter.setPen(QPen(cor, 1))
             fonte = QFont()
             fonte.setPointSize(8)
             fonte.setBold(True)
             painter.setFont(fonte)
-            rotulo = QRectF(0, self.height() - 16, self.width(), 14)
+            rotulo = QRectF(0, centro.y() + 6, self.width(), 14)
             painter.drawText(rotulo, Qt.AlignCenter, f"Nº {self._numero}")
 
     def _desenhar_cadeado(self, painter: QPainter, centro, cor: QColor) -> None:

@@ -1,13 +1,16 @@
-"""Painel de distribuição anual: para uma empresa/ano, mostra cada sócio com
-cotas, % de capital, valor e % distribuído, e empréstimo recebido da
-empresa — sócios que entraram ou saíram naquele ano ficam destacados."""
+"""Painel de distribuição anual: para uma empresa/ano, o painel de destaque
+com o lucro distribuído, pró-labore, IRRF e capital, a rosca da divisão entre
+os sócios, e a tabela com cada sócio — na mesma cor da fatia dele.
+
+Sócios que entraram ou saíram naquele ano ficam destacados. Colunas que não
+têm o que mostrar (origem dos trimestres, empréstimo, data de saída) somem
+até terem."""
 from __future__ import annotations
 
 import datetime as dt
 from pathlib import Path
 
 from PySide6.QtCore import QDate, Qt
-from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -17,29 +20,54 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QMessageBox,
     QPushButton,
     QSpinBox,
-    QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
+from .seletor_empresa import SeletorEmpresa
 from .. import repositories as repo
 from ..models import TIPOS_MOVIMENTACAO, TIPOS_MOVIMENTACAO_LABEL, Movimentacao
 from ..planilha import exportar_modelo_distribuicao, importar_distribuicao
 from .importacao_distribuicao import DialogoRevisaoImportacao, associar_linhas
-from .common import formatar_numero, formatar_valor_br, preencher_combo, TabelaLista
-from .theme import ENTROU_BG, ENTROU_FG, SAIU_BG, SAIU_FG, SEAL_GREEN
+from .common import (
+    campo_percentual,
+    formatar_data_br,
+    formatar_numero,
+    formatar_percentual,
+    formatar_valor_br,
+    preencher_combo,
+    TabelaLista,
+)
+from .painel_distribuicao import (
+    PAPEL_COR,
+    PAPEL_DETALHE,
+    PAPEL_PERCENTUAL,
+    PAPEL_TOM,
+    DelegadoEtiqueta,
+    DelegadoPercentual,
+    DelegadoSocio,
+    Rosca,
+    _compacto,
+    agrupar_fatias,
+    cor_da_vez,
+    divisor_hero,
+    kpi,
+    navegador_ano,
+    ordem_de_cores,
+)
+from .theme import ENTROU_BG, ENTROU_FG, SAIU_FG, cor
 from .theme import estado as tema_estado
 
 COLUNAS = [
     "Sócio",
-    "CPF",
-    "% capital",
+    "% do capital",
     "Cotas",
     "Valor distribuído",
     "Origem",
@@ -54,13 +82,16 @@ COLUNAS = [
 # Os widgets da edição em linha são posicionados por índice de coluna;
 # derivar do nome evita que inserir uma coluna no meio desloque tudo em
 # silêncio (o widget iria parar na célula errada, sem erro nenhum).
-COL_PERCENTUAL = COLUNAS.index("% capital")
+COL_PERCENTUAL = COLUNAS.index("% do capital")
 COL_COTAS = COLUNAS.index("Cotas")
 COL_VALOR = COLUNAS.index("Valor distribuído")
 COL_ORIGEM = COLUNAS.index("Origem")
 COL_PRO_LABORE = COLUNAS.index("Pró-labore")
 COL_IRRF = COLUNAS.index("IRRF")
 COL_DATA_SAIDA = COLUNAS.index("Data de saída")
+COL_PCT_DISTRIBUIDO = COLUNAS.index("% distribuído")
+COL_EMPRESTIMO = COLUNAS.index("Empréstimo (ano)")
+COL_SITUACAO = COLUNAS.index("Situação")
 COLUNAS_EDITAVEIS = (COL_PERCENTUAL, COL_COTAS, COL_VALOR, COL_PRO_LABORE, COL_IRRF, COL_DATA_SAIDA)
 
 
@@ -219,103 +250,220 @@ class DistribuicaoAnualView(QWidget):
         super().__init__(parent)
         self.conn = conn
         self._linhas: list[dict] = []
+        self._cores: dict[int, int] = {}
 
-        self.empresa = QComboBox()
+        # ---- empresa e ano
+        self.empresa = SeletorEmpresa()
         self.empresa.currentIndexChanged.connect(lambda _: self._carregar())
 
         self.ano = QSpinBox()
         self.ano.setRange(2000, 2100)
         self.ano.setValue(dt.date.today().year)
+        self.ano.setMinimumWidth(90)
         self.ano.valueChanged.connect(lambda _: self._carregar())
+        self.btn_ano_anterior = QPushButton("‹")
+        self.btn_ano_anterior.setProperty("role", "chevron")
+        self.btn_ano_anterior.setToolTip("Ano anterior")
+        self.btn_ano_anterior.clicked.connect(lambda: self.ano.setValue(self.ano.value() - 1))
+        self.btn_ano_proximo = QPushButton("›")
+        self.btn_ano_proximo.setProperty("role", "chevron")
+        self.btn_ano_proximo.setToolTip("Próximo ano")
+        self.btn_ano_proximo.clicked.connect(lambda: self.ano.setValue(self.ano.value() + 1))
 
+        rotulo_empresa = QLabel("EMPRESA")
+        rotulo_empresa.setProperty("role", "rotuloCampo")
+        rotulo_ano = QLabel("ANO")
+        rotulo_ano.setProperty("role", "rotuloCampo")
+        coluna_empresa = QVBoxLayout()
+        coluna_empresa.setSpacing(3)
+        coluna_empresa.addWidget(rotulo_empresa)
+        coluna_empresa.addWidget(self.empresa)
+        coluna_ano = QVBoxLayout()
+        coluna_ano.setSpacing(3)
+        coluna_ano.addWidget(rotulo_ano, 0, Qt.AlignHCenter)
+        coluna_ano.addWidget(navegador_ano(self.ano, self.btn_ano_anterior, self.btn_ano_proximo))
+        topo = QHBoxLayout()
+        topo.setSpacing(16)
+        topo.addLayout(coluna_empresa, 1)
+        topo.addLayout(coluna_ano)
+
+        # ---- painel de destaque: os números do ano e a rosca
         self._periodo_fechado = False
         self.rotulo_trancamento = QLabel()
-        self.rotulo_trancamento.setProperty("role", "subtitulo")
+        self.rotulo_trancamento.setProperty("role", "heroNota")
         self.btn_trancar = QPushButton()
-        self.btn_trancar.setProperty("role", "perigo")
+        self.btn_trancar.setCursor(Qt.PointingHandCursor)
         self.btn_trancar.clicked.connect(self._alternar_trancamento)
 
-        topo = QHBoxLayout()
-        topo.addWidget(QLabel("Empresa:"))
-        topo.addWidget(self.empresa, 1)
-        topo.addWidget(QLabel("Ano:"))
-        topo.addWidget(self.ano)
-        topo.addSpacing(12)
-        topo.addWidget(self.rotulo_trancamento)
-        topo.addWidget(self.btn_trancar)
+        self.selo_ano = QLabel()
+        self.selo_ano.setProperty("role", "heroAno")
+        bloco_total, self.valor_total, self.resumo = kpi("Lucro distribuído", grande=True)
+        self.resumo.setMaximumWidth(460)
+        bloco_pro, self.valor_pro_labore, _ = kpi("Pró-labore")
+        bloco_irrf, self.valor_irrf, _ = kpi("IRRF retido")
+        bloco_socios, self.valor_socios, self.nota_socios = kpi("Sócios no ano")
+        bloco_capital, self.valor_capital, self.info_capital = kpi("Capital social")
+        menores = QHBoxLayout()
+        menores.setSpacing(26)
+        for bloco in (bloco_pro, bloco_irrf, bloco_socios, bloco_capital):
+            menores.addWidget(bloco)
+        menores.addStretch()
 
-        self.info_capital = QLabel()
-        self.info_capital.setProperty("role", "secao")
+        linha_tranca = QHBoxLayout()
+        linha_tranca.addWidget(bloco_total, 1)
+        coluna_tranca = QVBoxLayout()
+        coluna_tranca.addWidget(self.btn_trancar, 0, Qt.AlignRight)
+        coluna_tranca.addWidget(self.rotulo_trancamento, 0, Qt.AlignRight)
+        coluna_tranca.addStretch()
+        linha_tranca.addLayout(coluna_tranca)
 
+        numeros = QVBoxLayout()
+        numeros.setSpacing(14)
+        numeros.addWidget(self.selo_ano, 0, Qt.AlignLeft)
+        numeros.addLayout(linha_tranca)
+        numeros.addLayout(menores)
+
+        self.rosca = Rosca()
+        self.legenda = QVBoxLayout()
+        self.legenda.setSpacing(4)
+        coluna_legenda = QVBoxLayout()
+        coluna_legenda.addStretch()
+        coluna_legenda.addLayout(self.legenda)
+        coluna_legenda.addStretch()
+
+        self.hero = QFrame()
+        self.hero.setProperty("role", "hero")
+        dentro_hero = QHBoxLayout(self.hero)
+        dentro_hero.setContentsMargins(28, 22, 28, 22)
+        dentro_hero.setSpacing(26)
+        dentro_hero.addLayout(numeros, 3)
+        dentro_hero.addWidget(divisor_hero())
+        dentro_hero.addWidget(self.rosca, 0, Qt.AlignVCenter)
+        dentro_hero.addLayout(coluna_legenda, 2)
+
+        # ---- avisos
         self.aviso_cotas = QLabel()
+        self.aviso_cotas.setProperty("role", "alerta")
         self.aviso_cotas.setWordWrap(True)
         self.aviso_cotas.hide()
-
         self.aviso_percentual = QLabel()
+        self.aviso_percentual.setProperty("role", "alerta")
         self.aviso_percentual.setWordWrap(True)
         self.aviso_percentual.hide()
 
-        self.resumo = QLabel()
-        self.resumo.setProperty("role", "subtitulo")
+        # ---- tabela dos sócios
+        self.titulo_tabela = QLabel()
+        self.titulo_tabela.setProperty("role", "secao")
 
         self.tabela = TabelaLista(0, len(COLUNAS), coluna_flexivel=0,
-                                  mensagem_vazia="Escolha uma empresa e um ano.")
+                                  mensagem_vazia="Nenhum sócio nesta empresa neste ano.")
         self.tabela.setHorizontalHeaderLabels(COLUNAS)
         self.tabela.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tabela.setSelectionMode(QAbstractItemView.SingleSelection)
         self.tabela.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.tabela.verticalHeader().setDefaultSectionSize(56)
+        self.tabela.horizontalHeaderItem(0).setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.tabela.setItemDelegateForColumn(0, DelegadoSocio(self.tabela))
+        self.tabela.setItemDelegateForColumn(COL_PERCENTUAL, DelegadoPercentual(self.tabela))
+        self.tabela.setItemDelegateForColumn(COL_PCT_DISTRIBUIDO, DelegadoPercentual(self.tabela))
+        self.tabela.setItemDelegateForColumn(COL_SITUACAO, DelegadoEtiqueta(self.tabela))
         self.tabela.itemSelectionChanged.connect(self._atualizar_disponibilidade_botoes)
+        self.tabela.cellDoubleClicked.connect(lambda *_: self.btn_editar.isEnabled() and self._iniciar_edicao())
 
         self._editando = False
         self._widgets_edicao: list[dict] = []
 
-        self.btn_editar = QPushButton("Editar")
+        self.btn_editar = QPushButton("Editar valores")
         self.btn_editar.setProperty("role", "primario")
         self.btn_editar.clicked.connect(self._iniciar_edicao)
-
         self.btn_salvar_edicao = QPushButton("Salvar")
         self.btn_salvar_edicao.setProperty("role", "primario")
         self.btn_salvar_edicao.clicked.connect(self._salvar_edicao)
-
         self.btn_cancelar_edicao = QPushButton("Cancelar")
         self.btn_cancelar_edicao.clicked.connect(self._cancelar_edicao)
-
-        self.btn_movimentacoes = QPushButton("Gerenciar movimentações")
+        self.btn_movimentacoes = QPushButton("Movimentações do sócio")
+        self.btn_movimentacoes.setToolTip("Empréstimos, adiantamentos e devoluções entre a empresa e o sócio selecionado.")
         self.btn_movimentacoes.clicked.connect(self._gerenciar_movimentacoes)
-
         self.btn_exportar_modelo = QPushButton("Exportar modelo")
         self.btn_exportar_modelo.clicked.connect(self._exportar_modelo)
-
         self.btn_importar = QPushButton("Importar planilha")
         self.btn_importar.clicked.connect(self._importar_planilha)
 
-        botoes = QHBoxLayout()
-        botoes.addWidget(self.btn_editar)
-        botoes.addWidget(self.btn_salvar_edicao)
-        botoes.addWidget(self.btn_cancelar_edicao)
-        botoes.addWidget(self.btn_movimentacoes)
-        botoes.addSpacing(8)
-        botoes.addWidget(self.btn_exportar_modelo)
-        botoes.addWidget(self.btn_importar)
-        botoes.addStretch()
+        cabecalho_tabela = QHBoxLayout()
+        cabecalho_tabela.setSpacing(8)
+        cabecalho_tabela.addWidget(self.titulo_tabela, 1)
+        for botao in (self.btn_movimentacoes, self.btn_exportar_modelo, self.btn_importar,
+                      self.btn_cancelar_edicao, self.btn_salvar_edicao, self.btn_editar):
+            cabecalho_tabela.addWidget(botao)
+
+        # Ajuda da edição: dividir um total pelo % do capital.
+        self.total_para_dividir = QDoubleSpinBox()
+        self.total_para_dividir.setMaximum(1_000_000_000)
+        self.total_para_dividir.setDecimals(2)
+        self.total_para_dividir.setPrefix("R$ ")
+        formatar_numero(self.total_para_dividir)
+        self.total_para_dividir.setMinimumWidth(170)
+        self.btn_dividir = QPushButton("Dividir pelo % do capital")
+        self.btn_dividir.setToolTip(
+            "Reparte o valor entre os sócios ativos, na proporção do % do capital de cada um. "
+            "Os centavos do arredondamento vão pro sócio de maior fatia."
+        )
+        self.btn_dividir.clicked.connect(self._dividir_pelo_percentual)
+        self.total_digitado = QLabel()
+        self.total_digitado.setProperty("role", "valorCampo")
+        rotulo_dividir = QLabel("Lucro do ano a distribuir")
+        rotulo_dividir.setProperty("role", "subtitulo")
+        self.barra_ajuda = QFrame()
+        self.barra_ajuda.setProperty("role", "barraAjuda")
+        linha_ajuda = QHBoxLayout(self.barra_ajuda)
+        linha_ajuda.setContentsMargins(12, 8, 12, 8)
+        linha_ajuda.setSpacing(10)
+        linha_ajuda.addWidget(rotulo_dividir)
+        linha_ajuda.addWidget(self.total_para_dividir)
+        linha_ajuda.addWidget(self.btn_dividir)
+        linha_ajuda.addStretch()
+        linha_ajuda.addWidget(self.total_digitado)
+        self.barra_ajuda.hide()
+
         self._legenda_entrou = self._legenda("Entrou neste ano")
         self._legenda_saiu = self._legenda("Saiu neste ano")
-        botoes.addWidget(self._legenda_entrou)
-        botoes.addWidget(self._legenda_saiu)
+        dica_tabela = QLabel("Dois cliques num sócio para editar.")
+        dica_tabela.setProperty("role", "subtitulo")
+        rodape = QHBoxLayout()
+        rodape.addWidget(dica_tabela, 1)
+        rodape.addWidget(self._legenda_entrou)
+        rodape.addWidget(self._legenda_saiu)
 
-        layout = QVBoxLayout(self)
+        self.bloco_tabela = QFrame()
+        self.bloco_tabela.setProperty("role", "card")
+        miolo = QVBoxLayout(self.bloco_tabela)
+        miolo.setContentsMargins(20, 16, 20, 14)
+        miolo.setSpacing(12)
+        miolo.addLayout(cabecalho_tabela)
+        miolo.addWidget(self.barra_ajuda)
+        miolo.addWidget(self.tabela, 1)
+        miolo.addLayout(rodape)
+
+        coluna = QWidget()
+        coluna.setMaximumWidth(1320)
+        conteudo = QVBoxLayout(coluna)
+        conteudo.setContentsMargins(0, 0, 0, 0)
+        conteudo.setSpacing(14)
+        conteudo.addLayout(topo)
+        conteudo.addWidget(self.hero)
+        conteudo.addWidget(self.aviso_cotas)
+        conteudo.addWidget(self.aviso_percentual)
+        conteudo.addWidget(self.bloco_tabela, 1)
+
+        layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
-        layout.addLayout(topo)
-        layout.addWidget(self.info_capital)
-        layout.addWidget(self.aviso_cotas)
-        layout.addWidget(self.aviso_percentual)
-        layout.addWidget(self.resumo)
-        layout.addWidget(self.tabela, 1)
-        layout.addLayout(botoes)
+        layout.addStretch(1)
+        layout.addWidget(coluna, 40)
+        layout.addStretch(1)
 
         self._aplicar_cores()
         tema_estado().mudou.connect(self._aplicar_cores)
+        tema_estado().mudou.connect(self._repintar_cores_dos_socios)
         self.atualizar()
 
     @staticmethod
@@ -346,12 +494,7 @@ class DistribuicaoAnualView(QWidget):
         return rotulo
 
     def _aplicar_cores(self) -> None:
-        estilo_aviso = (
-            f"background: {ENTROU_BG()}; color: {ENTROU_FG()}; border-radius: 4px; "
-            f"padding: 8px 12px; font-weight: 600; font-size: 12px;"
-        )
-        self.aviso_cotas.setStyleSheet(estilo_aviso)
-        self.aviso_percentual.setStyleSheet(estilo_aviso)
+        self.barra_ajuda.setStyleSheet(f"QFrame[role=\"barraAjuda\"] {{ background: {ENTROU_BG()}; border-radius: 6px; border: none; }}")
         self._legenda_entrou.setStyleSheet(f"color: {ENTROU_FG()}; font-size: 11px; font-weight: 600; padding-left: 12px;")
         self._legenda_saiu.setStyleSheet(f"color: {SAIU_FG()}; font-size: 11px; font-weight: 600; padding-left: 12px;")
 
@@ -376,34 +519,54 @@ class DistribuicaoAnualView(QWidget):
         self._widgets_edicao = []
         for row in range(self.tabela.rowCount()):
             for col in COLUNAS_EDITAVEIS:
+                campo = self.tabela.cellWidget(row, col)
+                if campo is not None:
+                    campo.hide()
                 self.tabela.removeCellWidget(row, col)
         empresa_id = self.empresa.currentData()
+        ano_base = self.ano.value()
+        self.titulo_tabela.setText(f"Sócios em {ano_base}")
+        self.selo_ano.setText(f"Ano de {ano_base}")
         if empresa_id is None:
             self._linhas = []
             self._periodo_fechado = False
             self.tabela.setRowCount(0)
+            self.valor_total.setText("—")
+            self.resumo.setText("Cadastre uma empresa primeiro.")
+            for rotulo in (self.valor_pro_labore, self.valor_irrf, self.valor_socios, self.valor_capital):
+                rotulo.setText("—")
             self.info_capital.setText("")
             self.aviso_cotas.hide()
             self.aviso_percentual.hide()
-            self.resumo.setText("Cadastre uma empresa primeiro.")
             self.rotulo_trancamento.setText("")
             self.btn_trancar.setVisible(False)
+            self.rosca.definir([], "", "")
+            self._montar_legenda([])
             self._atualizar_disponibilidade_botoes()
             return
 
-        ano_base = self.ano.value()
         self._periodo_fechado = repo.periodo_esta_fechado(self.conn, empresa_id, ano_base)
         self.btn_trancar.setVisible(True)
+        self.btn_trancar.setProperty("trancado", "true" if self._periodo_fechado else "false")
+        self.btn_trancar.style().unpolish(self.btn_trancar)
+        self.btn_trancar.style().polish(self.btn_trancar)
         if self._periodo_fechado:
-            self.rotulo_trancamento.setText(f"🔒 Período de {ano_base} trancado")
-            self.btn_trancar.setText("Destrancar período")
+            self.btn_trancar.setText("🔒  Trancado · destrancar")
+            self.rotulo_trancamento.setText(f"{ano_base} não aceita mudanças")
         else:
+            self.btn_trancar.setText("🔓  Aberto · trancar período")
             self.rotulo_trancamento.setText("")
-            self.btn_trancar.setText("Trancar período")
 
         self._linhas = repo.panorama_distribuicao_anual(self.conn, empresa_id, ano_base)
+        self._cores = ordem_de_cores(self._linhas)
         total = repo.total_distribuido_empresa_ano(self.conn, empresa_id, ano_base)
-        resumo = f"Lucro total distribuído em {ano_base}: R$ {formatar_valor_br(total)}"
+        self.valor_total.setText(f"R$ {formatar_valor_br(total)}")
+        self.valor_pro_labore.setText(f"R$ {formatar_valor_br(sum(l['pro_labore'] for l in self._linhas))}")
+        self.valor_irrf.setText(f"R$ {formatar_valor_br(sum(l['irrf'] for l in self._linhas))}")
+        ativos = sum(1 for l in self._linhas if l["data_saida"] is None)
+        self.valor_socios.setText(str(ativos))
+        mudancas = sum(1 for l in self._linhas if l["entrou_no_ano"] or l["saiu_no_ano"])
+        self.nota_socios.setText(f"{mudancas} entrada(s)/saída(s) no ano" if mudancas else "sem mudança no ano")
 
         # Empresa que lança por trimestre tem o valor anual alimentado por lá;
         # dizer isso aqui evita a pergunta "de onde saiu esse número?" e avisa
@@ -411,33 +574,44 @@ class DistribuicaoAnualView(QWidget):
         lancados = repo.trimestres_lancados(self.conn, empresa_id, ano_base)
         if lancados:
             trimestres = ", ".join(f"{t}º" for t in lancados)
-            resumo += (
-                f"  ·  acumulado dos trimestres lançados ({trimestres}) — "
+            resumo = (
+                f"em {ano_base} · acumulado dos trimestres lançados ({trimestres}) — "
                 "editar aqui vale até o próximo lançamento na aba trimestral"
             )
+        else:
+            resumo = f"em {ano_base} · lançado direto nesta tela"
         self.resumo.setText(resumo)
 
         estado = repo.estado_empresa_no_periodo(self.conn, empresa_id, ano_base)
-        texto_capital = f"Capital atual: R$ {formatar_valor_br(estado['capital_fim'])}"
+        self.valor_capital.setText(f"R$ {formatar_valor_br(estado['capital_fim'])}")
         if estado["variacao_capital"] > 0:
-            texto_capital += (
-                f'  ·  <span style="color:{SEAL_GREEN()};">▲ Aumento de capital no ano: '
-                f'R$ {formatar_valor_br(estado["variacao_capital"])}</span>'
-            )
+            self.info_capital.setText(f"▲ aumento de R$ {formatar_valor_br(estado['variacao_capital'])} no ano")
         elif estado["variacao_capital"] < 0:
-            texto_capital += (
-                f'  ·  <span style="color:{SAIU_FG()};">▼ Redução de capital no ano: '
-                f'R$ {formatar_valor_br(abs(estado["variacao_capital"]))}</span>'
-            )
-        self.info_capital.setText(texto_capital)
+            self.info_capital.setText(f"▼ redução de R$ {formatar_valor_br(abs(estado['variacao_capital']))} no ano")
+        else:
+            self.info_capital.setText("sem mudança no ano")
+
+        fatias = [
+            (l["valor_distribuido"], cor_da_vez(self._cores[l["socio_id"]]), l["socio_nome"])
+            for l in sorted(self._linhas, key=lambda l: self._cores[l["socio_id"]])
+        ]
+        # Anima só ao trocar de empresa ou de ano: recarregar o mesmo (depois
+        # de salvar, por exemplo) não precisa refazer o gráfico do zero.
+        chave = (empresa_id, ano_base)
+        fatias = agrupar_fatias(fatias)
+        self.rosca.definir(fatias, f"R$ {_compacto(total)}" if total else "—",
+                           f"distribuídos em {ano_base}" if total else "nada lançado",
+                           animar=chave != getattr(self, "_chave_grafico", None))
+        self._chave_grafico = chave
+        self._montar_legenda(fatias)
 
         consistencia = repo.consistencia_cotas_socios(self.conn, empresa_id, ano_base)
         if consistencia["diferenca"] != 0:
             self.aviso_cotas.setText(
-                f"⚠ As cotas totais da empresa ({formatar_valor_br(consistencia['cotas_totais_empresa'], 0)}) não conferem com a "
+                f"⚠  As cotas totais da empresa ({formatar_valor_br(consistencia['cotas_totais_empresa'], 0)}) não conferem com a "
                 f"soma das cotas dos sócios ({formatar_valor_br(consistencia['soma_cotas_socios'], 0)}). O capital ou as cotas da "
                 f"empresa mudaram numa alteração contratual, mas não foram redistribuídas entre os sócios — "
-                f"selecione o sócio abaixo e use \"Atualizar cotas do sócio\" para corrigir."
+                f"use Editar valores e corrija as cotas de cada um."
             )
             self.aviso_cotas.show()
         else:
@@ -447,8 +621,8 @@ class DistribuicaoAnualView(QWidget):
         if round(consistencia_pct["diferenca"], 4) != 0:
             sinal = "falta" if consistencia_pct["diferenca"] > 0 else "sobra"
             self.aviso_percentual.setText(
-                f"⚠ Os percentuais de capital dos sócios ativos somam {formatar_valor_br(consistencia_pct['soma_percentual'], 4)}%, "
-                f"não 100% ({sinal} {formatar_valor_br(abs(consistencia_pct['diferenca']), 4)} p.p.). "
+                f"⚠  Os percentuais de capital dos sócios ativos somam {formatar_percentual(consistencia_pct['soma_percentual'])}, "
+                f"não 100% ({sinal} {formatar_percentual(abs(consistencia_pct['diferenca']))[:-1]} p.p.). "
                 f"Confira o cadastro societário desta empresa na aba Empresas."
             )
             self.aviso_percentual.show()
@@ -457,47 +631,112 @@ class DistribuicaoAnualView(QWidget):
 
         self.tabela.setRowCount(len(self._linhas))
         for row, linha in enumerate(self._linhas):
-            situacao = "Ativo"
+            situacao, tom = "Ativo", "ativo"
             if linha["reentrou_no_ano"]:
-                situacao = f"Saiu em {linha['data_saida_anterior']} e reentrou em {linha['data_entrada']}"
+                situacao, tom = f"Reentrou em {formatar_data_br(linha['data_entrada'])}", "entrou"
             elif linha["saiu_no_ano"]:
-                situacao = "Saiu este ano"
+                situacao, tom = "Saiu este ano", "saiu"
             elif linha["entrou_no_ano"]:
-                situacao = "Entrou este ano"
+                situacao, tom = "Entrou este ano", "entrou"
+            elif linha["data_saida"]:
+                situacao, tom = f"Saiu em {formatar_data_br(linha['data_saida'])}", "neutro"
 
             valores = [
                 linha["socio_nome"],
-                linha["socio_cpf"] or "—",
-                formatar_valor_br(linha["percentual_capital"], 4),
+                formatar_percentual(linha["percentual_capital"]),
                 formatar_valor_br(linha["quantidade_cotas"], 0),
                 f"R$ {formatar_valor_br(linha['valor_distribuido'])}",
                 self._texto_origem(linha),
                 f"R$ {formatar_valor_br(linha['pro_labore'])}" if linha["pro_labore"] else "—",
                 f"R$ {formatar_valor_br(linha['irrf'])}" if linha["irrf"] else "—",
-                formatar_valor_br(linha["percentual_distribuido"], 3),
+                formatar_percentual(linha["percentual_distribuido"]),
                 f"R$ {formatar_valor_br(linha['emprestimo_recebido'])}" if linha["emprestimo_recebido"] else "—",
-                linha["data_saida"] or "—",
+                formatar_data_br(linha["data_saida"]),
                 situacao,
             ]
 
-            cor_fundo = cor_texto = None
-            if linha["saiu_no_ano"]:
-                cor_fundo, cor_texto = SAIU_BG(), SAIU_FG()
-            elif linha["entrou_no_ano"]:
-                cor_fundo, cor_texto = ENTROU_BG(), ENTROU_FG()
-
+            cor_socio = cor_da_vez(self._cores[linha["socio_id"]])
             for col, valor in enumerate(valores):
                 item = QTableWidgetItem(valor)
                 item.setData(Qt.UserRole, linha["socio_id"])
+                item.setData(PAPEL_COR, cor_socio)
+                if col == 0:
+                    tipo = "CNPJ" if linha.get("socio_tipo_pessoa") == "juridica" else "CPF"
+                    item.setData(PAPEL_DETALHE, f"{tipo} {linha['socio_cpf']}" if linha["socio_cpf"] else f"sem {tipo}")
+                elif col == COL_PERCENTUAL:
+                    item.setData(PAPEL_PERCENTUAL, linha["percentual_capital"])
+                elif col == COL_PCT_DISTRIBUIDO:
+                    item.setData(PAPEL_PERCENTUAL, linha["percentual_distribuido"])
+                elif col == COL_SITUACAO:
+                    item.setData(PAPEL_TOM, tom)
                 if col == COL_ORIGEM:
                     item.setToolTip(self._dica_origem(linha))
-                if cor_fundo:
-                    item.setBackground(QColor(cor_fundo))
-                    item.setForeground(QColor(cor_texto))
+                if col == COL_VALOR:
+                    fonte = item.font()
+                    fonte.setBold(True)
+                    item.setFont(fonte)
+                if col not in (0, COL_ORIGEM, COL_SITUACAO):
+                    item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 self.tabela.setItem(row, col, item)
+
+        # Coluna sem o que mostrar some: menos colunas, mais fácil de ler.
+        self.tabela.setColumnHidden(COL_ORIGEM, not any(l["tem_trimestres"] for l in self._linhas))
+        self.tabela.setColumnHidden(COL_EMPRESTIMO, not any(l["emprestimo_recebido"] for l in self._linhas))
+        self.tabela.setColumnHidden(COL_DATA_SAIDA, not any(l["data_saida"] for l in self._linhas))
         self.tabela.ajustar_colunas()
-        self.tabela.resizeRowsToContents()
         self._atualizar_disponibilidade_botoes()
+
+    def _montar_legenda(self, fatias: list) -> None:
+        while self.legenda.count():
+            item = self.legenda.takeAt(0)
+            if item.widget() is not None:
+                item.widget().hide()
+                item.widget().deleteLater()
+        total = sum(v for v, _c, _n in fatias)
+        if not total:
+            vazio = QLabel("Nenhum valor distribuído neste ano ainda.\nUse Editar valores para lançar.")
+            vazio.setProperty("role", "heroNota")
+            self.legenda.addWidget(vazio)
+            return
+        # Uma linha por fatia, compacta: com muitos sócios a legenda não pode
+        # empurrar a tabela pra fora da tela.
+        for valor, cor_fatia, nome in fatias:
+            curto = nome if len(nome) <= 30 else nome[:29].rstrip() + "…"
+            linha = QLabel(
+                f'<span style="color:{cor_fatia.name()}; font-size:15px;">●</span>&nbsp; '
+                f"<b>{curto}</b>&nbsp;&nbsp;"
+                f'<span style="color:{cor("HERO_MUTED")};">R$ {formatar_valor_br(valor)}'
+                f" · {formatar_percentual(100 * valor / total)}</span>"
+            )
+            linha.setTextFormat(Qt.RichText)
+            linha.setToolTip(nome)
+            self.legenda.addWidget(linha)
+
+    def _repintar_cores_dos_socios(self) -> None:
+        if not self._editando:
+            self._carregar()
+
+    def _dividir_pelo_percentual(self) -> None:
+        total = round(self.total_para_dividir.value(), 2)
+        participantes = [
+            (row, l) for row, l in enumerate(self._linhas)
+            if (l["percentual_capital"] or 0) > 0 and l["data_saida"] is None
+        ]
+        soma = sum(l["percentual_capital"] for _r, l in participantes)
+        if not participantes or not soma:
+            QMessageBox.information(self, "Dividir pelo % do capital", "Nenhum sócio ativo com % do capital.")
+            return
+        partes = {row: round(total * l["percentual_capital"] / soma, 2) for row, l in participantes}
+        maior = max(participantes, key=lambda p: p[1]["percentual_capital"])[0]
+        partes[maior] = round(partes[maior] + total - sum(partes.values()), 2)
+        for row, campos in enumerate(self._widgets_edicao):
+            if row in partes:
+                campos["valor"].setValue(partes[row])
+        self._mostrar_total_digitado()
+
+    def _mostrar_total_digitado(self, *_args) -> None:
+        total = sum(c["valor"].value() for c in self._widgets_edicao)
+        self.total_digitado.setText(f"Soma dos sócios: R$ {formatar_valor_br(total)}")
 
     def _atualizar_disponibilidade_botoes(self) -> None:
         linha = self._linha_selecionada()
@@ -515,7 +754,10 @@ class DistribuicaoAnualView(QWidget):
 
         self.empresa.setEnabled(not self._editando)
         self.ano.setEnabled(not self._editando)
+        self.btn_ano_anterior.setEnabled(not self._editando and self.ano.value() > self.ano.minimum())
+        self.btn_ano_proximo.setEnabled(not self._editando and self.ano.value() < self.ano.maximum())
         self.btn_trancar.setEnabled(not self._editando)
+        self.barra_ajuda.setVisible(self._editando)
 
     def _alternar_trancamento(self) -> None:
         empresa_id = self.empresa.currentData()
@@ -569,10 +811,7 @@ class DistribuicaoAnualView(QWidget):
         for row, linha in enumerate(self._linhas):
             socio_ativo = linha["data_saida"] is None
 
-            pct = QDoubleSpinBox()
-            pct.setMaximum(100)
-            pct.setDecimals(4)
-            formatar_numero(pct)
+            pct = campo_percentual()
             pct.setValue(linha["percentual_capital"])
             pct.setEnabled(socio_ativo)
 
@@ -624,23 +863,20 @@ class DistribuicaoAnualView(QWidget):
                 {"percentual": pct, "cotas": cotas, "valor": valor, "pro_labore": pro_labore, "irrf": irrf, "data_saida": saida}
             )
 
-        larguras = (
-            (COL_PERCENTUAL, 110),
-            (COL_COTAS, 100),
-            (COL_VALOR, 150),
-            (COL_PRO_LABORE, 140),
-            (COL_IRRF, 140),
-            (COL_DATA_SAIDA, 130),
-        )
-        for col, largura in larguras:
-            if self.tabela.columnWidth(col) < largura:
-                self.tabela.setColumnWidth(col, largura)
+        # A data de saída aparece na edição mesmo se ninguém saiu: é por ela
+        # que se registra uma saída.
+        self.tabela.setColumnHidden(COL_DATA_SAIDA, False)
+        larguras = self.tabela._larguras_base()
+        for col, largura in ((COL_PERCENTUAL, 120), (COL_COTAS, 110), (COL_VALOR, 150),
+                             (COL_PRO_LABORE, 140), (COL_IRRF, 140), (COL_DATA_SAIDA, 130)):
+            larguras[col] = max(larguras[col], largura)
+        self.tabela._larguras_do_conteudo = larguras
+        self.tabela._distribuir_sobra()
 
-        altura = QDoubleSpinBox().sizeHint().height() + 8
-        for row in range(len(self._linhas)):
-            if self.tabela.rowHeight(row) < altura:
-                self.tabela.setRowHeight(row, altura)
-
+        for campos in self._widgets_edicao:
+            campos["valor"].valueChanged.connect(self._mostrar_total_digitado)
+        self.total_para_dividir.setValue(sum(l["valor_distribuido"] for l in self._linhas))
+        self._mostrar_total_digitado()
         self._atualizar_disponibilidade_botoes()
 
     def _cancelar_edicao(self) -> None:

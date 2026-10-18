@@ -32,6 +32,7 @@ ACAO_LABEL = {
     "ativar": "Ativou",
     "desativar": "Desativou",
     "trocar_senha": "Trocou senha",
+    "encerrar_acessos": "Encerrou acessos sem senha",
 }
 
 ENTIDADE_LABEL = {

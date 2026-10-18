@@ -1626,3 +1626,55 @@ def test_baixa_por_ausencia_olha_o_quadro_na_data_da_alteracao(conn):
     ) == ["Entrou Depois"]
     (vinculo,) = repo.listar_vinculos_empresa(conn, empresa_id)
     assert vinculo.data_saida == "2026-06-01"
+
+
+# ------------------------------------------------------- valor da cota --
+
+
+def test_valor_da_cota_informado_vale_sobre_o_calculado(conn):
+    empresa_id = _nova_empresa(conn, capital_social=10000, quantidade_cotas=1000)
+    assert repo.valor_da_cota(conn, empresa_id) == 10.0  # capital ÷ cotas
+    repo.definir_valor_da_cota(conn, empresa_id, 0.01)
+    assert repo.valor_da_cota(conn, empresa_id) == 0.01
+
+
+def test_valor_da_cota_desconhecido_sem_capital_nem_cotas(conn):
+    """Empresa criada pelo relatório de sócios: sem capital nem cotas."""
+    empresa_id = _nova_empresa(conn, capital_social=0, quantidade_cotas=0)
+    assert repo.valor_da_cota(conn, empresa_id) is None
+
+
+def test_capital_do_socio_pelas_cotas_usa_o_valor_da_cota(conn):
+    empresa_id = _nova_empresa(conn, capital_social=0, quantidade_cotas=0)
+    repo.definir_valor_da_cota(conn, empresa_id, 0.01)
+    socio_id = repo.salvar_socio(conn, Socio(None, "Fulano", "111.111.111-11"))
+    vinculo_id = repo.salvar_vinculo(conn, VinculoSocietario(None, empresa_id, socio_id, 50, 250_000, "2020-01-01", None))
+    assert repo.valor_participacao(conn, repo.buscar_vinculo(conn, vinculo_id)) == 2500.0
+
+
+def test_importacao_calcula_o_capital_pelo_valor_da_cota(conn):
+    """O relatório e muitas planilhas trazem as cotas mas não o capital: com
+    o valor da cota informado na empresa, o capital sai certo."""
+    empresa_id = _nova_empresa(conn)
+    repo.definir_valor_da_cota(conn, empresa_id, 0.01)
+    repo.salvar_socio(conn, Socio(id=None, nome="Fulano de Tal", cpf="111.111.111-11"))
+
+    resultado = repo.preparar_importacao_cadastro(conn, [_linha_cadastro(cotas_socio=250_000)])
+    repo.aplicar_importacao_cadastro(conn, resultado["prontas"])
+    (vinculo,) = repo.listar_vinculos_empresa(conn, empresa_id)
+    assert vinculo.valor_capital == 2500.0
+
+    # Reimportar com outras cotas leva o capital junto.
+    resultado = repo.preparar_importacao_cadastro(conn, [_linha_cadastro(cotas_socio=300_000)])
+    repo.aplicar_importacao_cadastro(conn, resultado["prontas"])
+    (vinculo,) = repo.listar_vinculos_empresa(conn, empresa_id)
+    assert (vinculo.quantidade_cotas, vinculo.valor_capital) == (300_000, 3000.0)
+
+
+def test_importacao_sem_valor_da_cota_nao_inventa_capital(conn):
+    empresa_id = _nova_empresa(conn)
+    repo.salvar_socio(conn, Socio(id=None, nome="Fulano de Tal", cpf="111.111.111-11"))
+    resultado = repo.preparar_importacao_cadastro(conn, [_linha_cadastro(cotas_socio=500)])
+    repo.aplicar_importacao_cadastro(conn, resultado["prontas"])
+    (vinculo,) = repo.listar_vinculos_empresa(conn, empresa_id)
+    assert vinculo.valor_capital is None

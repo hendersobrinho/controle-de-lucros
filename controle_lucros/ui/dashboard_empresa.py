@@ -7,7 +7,6 @@ import datetime as dt
 from pathlib import Path
 
 from PySide6.QtWidgets import (
-    QComboBox,
     QDoubleSpinBox,
     QFileDialog,
     QHBoxLayout,
@@ -19,17 +18,18 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .seletor_empresa import SeletorEmpresa
 from .. import repositories as repo
 from ..planilha import exportar_relatorio_excel
 from .classificacao import CLASSE_PDF, LABEL, cor_classificacao
-from .common import formatar_valor_br, preencher_combo
+from .common import formatar_percentual, formatar_valor_br, preencher_combo
 from ..analise import desvio_por_socio
 from .graficos import grafico_capital_vs_distribuido, grafico_desvio_por_socio, nova_chart_view
 from .relatorio_pdf import exportar_relatorio_pdf
 from .theme import estado as tema_estado
 
 COLUNAS = [
-    "Ano", "Sócio", "CPF", "% capital", "% distribuído", "Valor distribuído",
+    "Ano", "Sócio", "CPF", "% do capital", "% distribuído", "Valor distribuído",
     "Pró-labore", "IRRF", "Empréstimo", "Classificação",
 ]
 
@@ -42,7 +42,7 @@ class DashboardEmpresaView(QWidget):
 
         ano_atual = dt.date.today().year
 
-        self.empresa = QComboBox()
+        self.empresa = SeletorEmpresa()
         self.empresa.currentIndexChanged.connect(lambda _: self._carregar())
 
         self.ano_de = QSpinBox()
@@ -201,8 +201,8 @@ class DashboardEmpresaView(QWidget):
                     linha["ano_base"],
                     linha["socio_nome"],
                     linha["socio_cpf"] or "—",
-                    formatar_valor_br(linha["percentual_capital"], 4),
-                    formatar_valor_br(linha["percentual_distribuido"], 3),
+                    formatar_percentual(linha["percentual_capital"]),
+                    formatar_percentual(linha["percentual_distribuido"]),
                     f"R$ {formatar_valor_br(linha['valor_distribuido'])}",
                     f"R$ {formatar_valor_br(linha['pro_labore'])}" if linha["pro_labore"] else "—",
                     f"R$ {formatar_valor_br(linha['irrf'])}" if linha["irrf"] else "—",

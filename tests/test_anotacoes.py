@@ -11,12 +11,11 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
 import pytest
-from PySide6.QtWidgets import QApplication, QDialogButtonBox
+from PySide6.QtWidgets import QApplication, QDialog, QDialogButtonBox
 
 from controle_lucros import preferencias, repositories as repo
 from controle_lucros.models import Empresa, Socio
-from controle_lucros.ui.common import MODO_CANCELADO, MODO_VAZIO
-from controle_lucros.ui.socios_tab import SociosTab
+from controle_lucros.ui.socios_tab import DialogoSocio, SociosTab
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -71,55 +70,56 @@ def test_documento_vem_antes_de_nome_parecido(conn):
 
 def test_aviso_aparece_ao_digitar_nome_ja_cadastrado(conn):
     repo.salvar_socio(conn, Socio(None, "João da Silva", "005.169.717-35"))
-    aba = SociosTab(conn)
-    assert not aba.aviso_duplicado.isVisibleTo(aba)
+    dialogo = DialogoSocio(conn)
+    assert not dialogo.aviso_duplicado.isVisibleTo(dialogo)
 
-    aba._novo_socio()
-    aba.nome.setText("JOAO DA SILVA")
-    assert aba.aviso_duplicado.isVisibleTo(aba)
-    assert "João da Silva" in aba.aviso_duplicado.text()
+    dialogo.nome.setText("JOAO DA SILVA")
+    assert dialogo.aviso_duplicado.isVisibleTo(dialogo)
+    assert "João da Silva" in dialogo.aviso_duplicado.text()
     # Cadastrando um novo, dá pra pular direto pro cadastro que já existe.
-    assert aba.btn_abrir_semelhante.isVisibleTo(aba)
+    assert dialogo.btn_abrir_semelhante.isVisibleTo(dialogo)
 
 
 def test_aviso_some_quando_o_nome_deixa_de_bater(conn):
     repo.salvar_socio(conn, Socio(None, "João da Silva", ""))
-    aba = SociosTab(conn)
-    aba._novo_socio()
-    aba.nome.setText("João da Silva")
-    assert aba.aviso_duplicado.isVisibleTo(aba)
-    aba.nome.setText("Carlos Andrade")
-    assert not aba.aviso_duplicado.isVisibleTo(aba)
+    dialogo = DialogoSocio(conn)
+    dialogo.nome.setText("João da Silva")
+    assert dialogo.aviso_duplicado.isVisibleTo(dialogo)
+    dialogo.nome.setText("Carlos Andrade")
+    assert not dialogo.aviso_duplicado.isVisibleTo(dialogo)
 
 
-def test_aviso_nao_aparece_com_o_formulario_bloqueado(conn):
-    """Sem nada sendo digitado não há o que avisar."""
+def test_editando_nao_oferece_abrir_outro_cadastro(conn):
+    """Abrir outro cadastro no meio da edição descartaria o que está na tela."""
     repo.salvar_socio(conn, Socio(None, "João da Silva", ""))
-    aba = SociosTab(conn)
-    aba._novo_socio()
-    aba.nome.setText("João da Silva")
-    aba._cancelar_socio()
-    assert aba._modo == MODO_CANCELADO
-    assert not aba.aviso_duplicado.isVisibleTo(aba)
+    outro_id = repo.salvar_socio(conn, Socio(None, "Carlos Andrade", ""))
+    dialogo = DialogoSocio(conn, next(s for s in repo.listar_socios(conn) if s.id == outro_id))
+    dialogo.nome.setText("João da Silva")
+    assert dialogo.aviso_duplicado.isVisibleTo(dialogo)
+    assert not dialogo.btn_abrir_semelhante.isVisibleTo(dialogo)
 
 
-def test_abrir_o_semelhante_leva_pro_cadastro_existente(conn):
+def test_abrir_o_semelhante_leva_pro_cadastro_existente(conn, monkeypatch):
     socio_id = repo.salvar_socio(conn, Socio(None, "João da Silva", ""))
     aba = SociosTab(conn)
+
+    def digitar_e_abrir(dialogo):
+        dialogo.nome.setText("João da Silva")
+        dialogo._abrir_semelhante()
+        return dialogo.result()
+
+    monkeypatch.setattr(DialogoSocio, "exec", digitar_e_abrir)
     aba._novo_socio()
-    aba.nome.setText("João da Silva")
-    aba._abrir_semelhante()
     assert aba._socio_atual_id == socio_id
 
 
 def test_o_aviso_nao_impede_cadastrar_homonimo(conn):
     """Homônimo existe; o aviso informa, não bloqueia."""
     repo.salvar_socio(conn, Socio(None, "João da Silva", "005.169.717-35"))
-    aba = SociosTab(conn)
-    aba._novo_socio()
-    aba.nome.setText("João da Silva")
-    aba.cpf.setText("072.525.437-81")
-    aba._salvar_socio()
+    dialogo = DialogoSocio(conn)
+    dialogo.nome.setText("João da Silva")
+    dialogo.cpf.setText("072.525.437-81")
+    dialogo._salvar(associar=False)
     assert len([s for s in repo.listar_socios(conn) if s.nome == "João da Silva"]) == 2
 
 
@@ -287,7 +287,53 @@ def test_montar_a_tela_nao_dispara_erro_no_aviso(conn):
     exceção dentro de slot, um erro aqui passaria despercebido — este teste
     chama o handler direto, sem a rede de proteção do Qt."""
     repo.salvar_socio(conn, Socio(None, "João da Silva", "005.169.717-35"))
-    aba = SociosTab(conn)
-    aba._procurar_semelhantes()  # não pode levantar
-    assert aba._modo == MODO_VAZIO
-    assert not aba.aviso_duplicado.isVisibleTo(aba)
+    dialogo = DialogoSocio(conn)
+    dialogo._procurar_semelhantes()  # não pode levantar
+    assert not dialogo.aviso_duplicado.isVisibleTo(dialogo)
+
+
+def test_incluir_traz_data_de_entrada_e_capital_do_socio(conn, cenario_alteracao):
+    """Quem lança o contrato de hoje inclui sócios que entraram antes desta
+    alteração — e o capital de cada um é o que o relatório não traz."""
+    from controle_lucros.ui.alteracao_card import _DialogoIncluirSocio
+
+    alteracao = repo.buscar_alteracao(conn, cenario_alteracao["alteracao"])
+    dialogo = _DialogoIncluirSocio(conn, cenario_alteracao["empresa"], {cenario_alteracao["dentro"]},
+                                   alteracao=alteracao)
+    assert dialogo.data_entrada.date().toString("yyyy-MM-dd") == "2025-01-01"
+    dialogo.busca.setText("maria")
+    dialogo.tabela.selectRow(0)
+    dialogo.campos.valor_cota.setValue(1.0)
+    dialogo.cotas.setValue(250)
+    assert dialogo.capital.value() == 250.0
+    # % sobre as 1.000 cotas da alteração.
+    assert dialogo.percentual.value() == 25.0
+    from PySide6.QtCore import QDate
+    dialogo.data_entrada.setDate(QDate(2019, 5, 2))
+    socio_id, percentual, cotas, data, capital = dialogo.dados()
+    assert (socio_id, cotas, data, capital) == (cenario_alteracao["fora"], 250, "2019-05-02", 250.0)
+
+
+def test_incluir_grava_data_e_capital_e_aparece_na_ficha(conn, cenario_alteracao, monkeypatch):
+    from controle_lucros.ui import alteracao_card as mod
+
+    alteracao = repo.buscar_alteracao(conn, cenario_alteracao["alteracao"])
+
+    def preencher(self):
+        self.busca.setText("maria")
+        self.tabela.selectRow(0)
+        self.campos.valor_cota.setValue(1.0)
+        self.cotas.setValue(250)
+        from PySide6.QtCore import QDate
+        self.data_entrada.setDate(QDate(2019, 5, 2))
+        return QDialog.Accepted
+    monkeypatch.setattr(mod._DialogoIncluirSocio, "exec", preencher)
+
+    ficha = mod.AlteracaoCard(conn, cenario_alteracao["empresa"], alteracao, lambda _f: None)
+    ficha._incluir_socio()
+    vinculo = next(v for v in repo.listar_vinculos_empresa(conn, cenario_alteracao["empresa"])
+                   if v.socio_id == cenario_alteracao["fora"])
+    assert (vinculo.data_entrada, vinculo.valor_capital, vinculo.alteracao_entrada_id) == (
+        "2019-05-02", 250.0, alteracao.id)
+    resumo = repo.ficha_alteracao(conn, alteracao.id)
+    assert "MARIA EXEMPLO" in resumo["entradas"]

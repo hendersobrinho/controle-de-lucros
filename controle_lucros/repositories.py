@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import re
+import secrets
 import unicodedata
 
 import psycopg
@@ -73,18 +75,18 @@ def buscar_empresa(conn: Conexao, empresa_id: int) -> Empresa | None:
 def salvar_empresa(conn: Conexao, e: Empresa) -> int:
     if e.id is None:
         cur = conn.execute(
-            """INSERT INTO empresa (numero_chamada, nome, cnpj, capital_social, quantidade_cotas)
-               VALUES (%s, %s, %s, %s, %s) RETURNING id""",
-            (e.numero_chamada, e.nome, e.cnpj, e.capital_social, e.quantidade_cotas),
+            """INSERT INTO empresa (numero_chamada, nome, cnpj, capital_social, quantidade_cotas, valor_cota)
+               VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
+            (e.numero_chamada, e.nome, e.cnpj, e.capital_social, e.quantidade_cotas, e.valor_cota),
         )
         novo_id = cur.fetchone()[0]
         _registrar_log(conn, "criar", "empresa", novo_id, f"{e.nome} (nº {e.numero_chamada})")
         conn.commit()
         return novo_id
     conn.execute(
-        """UPDATE empresa SET numero_chamada=%s, nome=%s, cnpj=%s, capital_social=%s, quantidade_cotas=%s
-           WHERE id=%s""",
-        (e.numero_chamada, e.nome, e.cnpj, e.capital_social, e.quantidade_cotas, e.id),
+        """UPDATE empresa SET numero_chamada=%s, nome=%s, cnpj=%s, capital_social=%s, quantidade_cotas=%s,
+           valor_cota=%s WHERE id=%s""",
+        (e.numero_chamada, e.nome, e.cnpj, e.capital_social, e.quantidade_cotas, e.valor_cota, e.id),
     )
     _registrar_log(conn, "atualizar", "empresa", e.id, f"{e.nome} (nº {e.numero_chamada})")
     conn.commit()
@@ -276,11 +278,32 @@ def estado_atual_empresa(conn: Conexao, empresa_id: int) -> dict:
     }
 
 
+def numero_alteracao_em_uso(conn: Conexao, empresa_id: int, numero: int, ignorar_id: int | None = None) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM alteracao_contratual WHERE empresa_id=%s AND numero=%s AND id IS DISTINCT FROM %s",
+        (empresa_id, numero, ignorar_id),
+    ).fetchone() is not None
+
+
+def _validar_numero_alteracao(conn: Conexao, a: AlteracaoContratual) -> None:
+    """O número é o do contrato de verdade, e quem começa a usar o sistema
+    hoje não cadastra o passado: a primeira alteração registrada pode muito
+    bem ser a Nº 7. Por isso o número é livre — só não pode repetir na
+    mesma empresa, nem ser zero ou negativo."""
+    if a.numero is None or int(a.numero) < 1:
+        raise ValueError("O número da alteração contratual precisa ser 1 ou maior.")
+    if numero_alteracao_em_uso(conn, a.empresa_id, int(a.numero), a.id):
+        raise ValueError(
+            f"Esta empresa já tem a alteração contratual Nº {a.numero}. Escolha outro número."
+        )
+
+
 def salvar_alteracao(conn: Conexao, a: AlteracaoContratual) -> int:
     if a.id is not None:
         existente = buscar_alteracao(conn, a.id)
         if existente is not None and existente.fechada:
             raise ValueError("Esta alteração contratual está fechada. Destranque-a para editar.")
+    _validar_numero_alteracao(conn, a)
     _garantir_periodo_aberto(conn, a.empresa_id, a.data)
     if a.id is None:
         cur = conn.execute(
@@ -296,9 +319,9 @@ def salvar_alteracao(conn: Conexao, a: AlteracaoContratual) -> int:
         conn.commit()
         return novo_id
     conn.execute(
-        """UPDATE alteracao_contratual SET data=%s, nome_empresa=%s, capital_social=%s,
+        """UPDATE alteracao_contratual SET numero=%s, data=%s, nome_empresa=%s, capital_social=%s,
            quantidade_cotas=%s, descricao=%s WHERE id=%s""",
-        (a.data, a.nome_empresa, a.capital_social, a.quantidade_cotas, a.descricao, a.id),
+        (a.numero, a.data, a.nome_empresa, a.capital_social, a.quantidade_cotas, a.descricao, a.id),
     )
     _registrar_log(
         conn, "atualizar", "alteracao_contratual", a.id, f"Nº {a.numero} — {a.nome_empresa} — {a.descricao}"
@@ -602,6 +625,242 @@ def excluir_vinculo(conn: Conexao, vinculo_id: int) -> None:
     conn.commit()
 
 
+def quantidade_socios_ativos_por_empresa(conn: Conexao) -> dict[int, int]:
+    """Empresa -> quantos sócios ela tem hoje, pra lista de empresas inteira
+    numa consulta só."""
+    return {
+        r["empresa_id"]: r["total"]
+        for r in conn.execute(
+            """SELECT empresa_id, COUNT(DISTINCT socio_id) AS total FROM vinculo_societario
+               WHERE data_saida IS NULL GROUP BY empresa_id"""
+        ).fetchall()
+    }
+
+
+def ficha_empresa(conn: Conexao, empresa_id: int) -> dict | None:
+    """Tudo o que a ficha da empresa mostra, numa leitura só: o estado
+    vigente (da alteração mais recente), o valor da cota, o quadro
+    societário de hoje, quem já saiu, as alterações contratuais e o lucro
+    distribuído por ano. Só lê — quem grava é a tela de edição."""
+    empresa = buscar_empresa(conn, empresa_id)
+    if empresa is None:
+        return None
+    estado = estado_atual_empresa(conn, empresa_id)
+    valor_cota = valor_da_cota(conn, empresa_id)
+
+    linhas = conn.execute(
+        """SELECT v.*, s.nome AS socio_nome, s.cpf AS socio_cpf, s.tipo_pessoa
+           FROM vinculo_societario v JOIN socio s ON s.id = v.socio_id
+           WHERE v.empresa_id = %s ORDER BY v.percentual_capital DESC, s.nome""",
+        (empresa_id,),
+    ).fetchall()
+    quadro, saidas = [], []
+    for v in linhas:
+        if v["data_saida"] is None:
+            calculado = (v["quantidade_cotas"] or 0) * valor_cota if valor_cota and v["quantidade_cotas"] else None
+            quadro.append({
+                "vinculo_id": v["id"],
+                "socio_id": v["socio_id"],
+                "nome": v["socio_nome"],
+                "documento": v["socio_cpf"] or "",
+                "tipo_pessoa": v["tipo_pessoa"],
+                "percentual": v["percentual_capital"],
+                "cotas": v["quantidade_cotas"],
+                "capital": v["valor_capital"] if v["valor_capital"] is not None else calculado,
+                "capital_calculado": v["valor_capital"] is None and calculado is not None,
+                "data_entrada": v["data_entrada"],
+            })
+        else:
+            saidas.append({"socio_id": v["socio_id"], "nome": v["socio_nome"], "data_saida": v["data_saida"]})
+    # Quem saiu e voltou não é "ex-sócio": fica só no quadro de hoje.
+    ativos = {q["socio_id"] for q in quadro}
+    saidas = sorted((s for s in saidas if s["socio_id"] not in ativos), key=lambda s: s["data_saida"], reverse=True)
+
+    alteracoes = listar_alteracoes(conn, empresa_id)
+    ultima = max(alteracoes, key=lambda a: (a.data, a.numero)) if alteracoes else None
+
+    distribuicoes = conn.execute(
+        """SELECT d.ano_base, SUM(d.valor_distribuido) AS total, COUNT(DISTINCT d.socio_id) AS socios,
+                  COALESCE(MAX(p.fechado), 0) AS fechado
+           FROM distribuicao_lucro d
+           LEFT JOIN periodo_distribuicao p ON p.empresa_id = d.empresa_id AND p.ano_base = d.ano_base
+           WHERE d.empresa_id = %s GROUP BY d.ano_base ORDER BY d.ano_base DESC LIMIT 5""",
+        (empresa_id,),
+    ).fetchall()
+
+    return {
+        "empresa": empresa,
+        "capital_social": estado["capital_social"],
+        "quantidade_cotas": estado["quantidade_cotas"],
+        "valor_cota": valor_cota,
+        "valor_cota_informado": bool(empresa.valor_cota),
+        "quadro": quadro,
+        "soma_percentual": sum(q["percentual"] for q in quadro),
+        "saidas": saidas,
+        "total_alteracoes": len(alteracoes),
+        "ultima_alteracao": ultima,
+        "fundacao_diferente": ultima is not None and (
+            round(ultima.capital_social, 2) != round(empresa.capital_social, 2)
+            or round(ultima.quantidade_cotas, 2) != round(empresa.quantidade_cotas, 2)
+        ),
+        "distribuicoes": [
+            {"ano": d["ano_base"], "total": d["total"], "socios": d["socios"], "fechado": bool(d["fechado"])}
+            for d in distribuicoes
+        ],
+    }
+
+
+
+def ficha_alteracao(conn: Conexao, alteracao_id: int) -> dict | None:
+    """O que a ficha de uma alteração contratual mostra: os dados do
+    contrato, o que mudou em relação à alteração anterior (capital e
+    cotas), quem entrou, quem saiu, quem só teve a participação refeita e
+    o quadro societário como ficou depois dela. Só lê."""
+    a = buscar_alteracao(conn, alteracao_id)
+    if a is None:
+        return None
+
+    anteriores = [
+        x for x in listar_alteracoes(conn, a.empresa_id)
+        if x.id != a.id and (x.data, x.numero) < (a.data, a.numero)
+    ]
+    anterior = max(anteriores, key=lambda x: (x.data, x.numero)) if anteriores else None
+    if anterior is not None:
+        capital_antes, cotas_antes = anterior.capital_social, anterior.quantidade_cotas
+    else:
+        empresa = buscar_empresa(conn, a.empresa_id)
+        capital_antes, cotas_antes = empresa.capital_social, empresa.quantidade_cotas
+
+    linhas = conn.execute(
+        """SELECT v.*, s.nome AS socio_nome, s.cpf AS socio_cpf
+           FROM vinculo_societario v JOIN socio s ON s.id = v.socio_id
+           WHERE v.empresa_id = %s ORDER BY v.percentual_capital DESC, s.nome""",
+        (a.empresa_id,),
+    ).fetchall()
+    entraram = {v["socio_id"] for v in linhas if v["alteracao_entrada_id"] == a.id}
+    sairam = {v["socio_id"] for v in linhas if v["alteracao_saida_id"] == a.id}
+    # Fechar o vínculo antigo e abrir um novo na mesma alteração é como a
+    # participação de quem continua é refeita: não é entrada nem saída.
+    mudaram = entraram & sairam
+
+    valor_cota = a.capital_social / a.quantidade_cotas if a.capital_social and a.quantidade_cotas else None
+    quadro, saidas = [], []
+    for v in linhas:
+        # Quem entrou por esta alteração conta como sócio depois dela mesmo
+        # com a data de entrada diferente (o contrato de hoje pode registrar
+        # quem entrou antes, numa alteração que não foi cadastrada).
+        entrou_aqui = v["alteracao_entrada_id"] == a.id
+        ativo = (entrou_aqui or v["data_entrada"] <= a.data) and (
+            v["data_saida"] is None or v["data_saida"] > a.data
+        ) and v["alteracao_saida_id"] != a.id
+        if ativo:
+            if v["socio_id"] in mudaram:
+                movimento = "mudou"
+            elif v["alteracao_entrada_id"] == a.id:
+                movimento = "entrou"
+            else:
+                movimento = ""
+            calculado = v["quantidade_cotas"] * valor_cota if valor_cota and v["quantidade_cotas"] else None
+            quadro.append({
+                "socio_id": v["socio_id"],
+                "nome": v["socio_nome"],
+                "documento": v["socio_cpf"] or "",
+                "percentual": v["percentual_capital"],
+                "cotas": v["quantidade_cotas"],
+                "capital": v["valor_capital"] if v["valor_capital"] is not None else calculado,
+                "movimento": movimento,
+            })
+        elif v["alteracao_saida_id"] == a.id and v["socio_id"] not in mudaram:
+            saidas.append({"socio_id": v["socio_id"], "nome": v["socio_nome"], "documento": v["socio_cpf"] or ""})
+
+    return {
+        "alteracao": a,
+        "anterior": anterior,
+        "capital_antes": capital_antes,
+        "cotas_antes": cotas_antes,
+        "valor_cota": valor_cota,
+        "quadro": quadro,
+        "soma_percentual": sum(q["percentual"] or 0 for q in quadro),
+        "entradas": [q["nome"] for q in quadro if q["movimento"] == "entrou"],
+        "mudancas": [q["nome"] for q in quadro if q["movimento"] == "mudou"],
+        "saidas": saidas,
+    }
+
+
+def movimentacoes_do_socio(conn: Conexao, socio_id: int) -> list[dict]:
+    """A história do sócio em cada empresa, em eventos que se leem: entrou,
+    saiu, ou teve a participação refeita. É assim que se pergunta ("quando
+    ele entrou na Clínica?"), e não vínculo por vínculo.
+
+    Fechar um vínculo e abrir outro na mesma data é como a participação de
+    quem continua é refeita: vira "mudou" (a nova, com o antes e o depois) e
+    "saiu" com refeita=True (o encerramento da antiga). Mais recente
+    primeiro."""
+    vinculos = sorted(listar_vinculos_socio(conn, socio_id), key=lambda v: (v.empresa_id, v.data_entrada, v.id))
+    empresas = {e.id: e for e in listar_empresas(conn)}
+    numeros: dict[int, int] = {}
+    for empresa_id in {v.empresa_id for v in vinculos}:
+        for a in listar_alteracoes(conn, empresa_id):
+            numeros[a.id] = a.numero
+
+    eventos: list[dict] = []
+    for i, v in enumerate(vinculos):
+        anterior = vinculos[i - 1] if i and vinculos[i - 1].empresa_id == v.empresa_id else None
+        seguinte = vinculos[i + 1] if i + 1 < len(vinculos) and vinculos[i + 1].empresa_id == v.empresa_id else None
+        empresa = empresas.get(v.empresa_id)
+        base = {
+            "empresa_id": v.empresa_id,
+            "empresa_nome": empresa.nome if empresa else "?",
+            "vinculo_id": v.id,
+        }
+        refeita = anterior is not None and anterior.data_saida == v.data_entrada
+        eventos.append({
+            **base,
+            "tipo": "mudou" if refeita else "entrou",
+            "data": v.data_entrada,
+            "percentual": v.percentual_capital,
+            "cotas": v.quantidade_cotas,
+            "capital": v.valor_capital,
+            "percentual_antes": anterior.percentual_capital if refeita else None,
+            "cotas_antes": anterior.quantidade_cotas if refeita else None,
+            "alteracao_numero": numeros.get(v.alteracao_entrada_id),
+            "refeita": False,
+        })
+        if v.data_saida is not None:
+            # Também quando a participação é refeita: a de antes foi
+            # encerrada, e a saída dela aparece — marcada como "refeita",
+            # pra não parecer que o sócio deixou a empresa.
+            refeita_depois = seguinte is not None and seguinte.data_entrada == v.data_saida
+            eventos.append({
+                **base,
+                "tipo": "saiu",
+                "data": v.data_saida,
+                "percentual": v.percentual_capital,
+                "cotas": v.quantidade_cotas,
+                "capital": v.valor_capital,
+                "percentual_antes": None,
+                "cotas_antes": None,
+                "alteracao_numero": numeros.get(v.alteracao_saida_id),
+                "refeita": refeita_depois,
+            })
+    # Mais recente primeiro; no mesmo dia, a participação nova acima do
+    # encerramento da antiga, que acima de uma entrada.
+    ordem = {"mudou": 2, "saiu": 1, "entrou": 0}
+    eventos.sort(key=lambda e: (e["data"], ordem[e["tipo"]]), reverse=True)
+    return eventos
+
+def quantidade_empresas_ativas_por_socio(conn: Conexao) -> dict[int, int]:
+    """Sócio -> em quantas empresas ele está hoje. Uma consulta só pra lista
+    inteira: perguntar sócio por sócio seria uma ida ao servidor por linha."""
+    return {
+        r["socio_id"]: r["total"]
+        for r in conn.execute(
+            """SELECT socio_id, COUNT(DISTINCT empresa_id) AS total FROM vinculo_societario
+               WHERE data_saida IS NULL GROUP BY socio_id"""
+        ).fetchall()
+    }
+
+
 def listar_vinculos_socio(conn: Conexao, socio_id: int) -> list[VinculoSocietario]:
     rows = conn.execute(
         "SELECT * FROM vinculo_societario WHERE socio_id=%s ORDER BY data_entrada",
@@ -610,15 +869,37 @@ def listar_vinculos_socio(conn: Conexao, socio_id: int) -> list[VinculoSocietari
     return [VinculoSocietario(**dict(r)) for r in rows]
 
 
+def valor_da_cota(conn: Conexao, empresa_id: int) -> float | None:
+    """Quanto vale UMA cota da empresa: o valor informado no cadastro dela
+    e, sem ele, o capital social vigente dividido pelo total de cotas. None
+    quando não há como saber (empresa importada do relatório de sócios, que
+    não traz capital nem cotas, e sem valor da cota informado)."""
+    empresa = buscar_empresa(conn, empresa_id)
+    if empresa is not None and empresa.valor_cota:
+        return empresa.valor_cota
+    estado = estado_atual_empresa(conn, empresa_id)
+    if estado["quantidade_cotas"] and estado["capital_social"]:
+        return estado["capital_social"] / estado["quantidade_cotas"]
+    return None
+
+
+def definir_valor_da_cota(conn: Conexao, empresa_id: int, valor: float) -> None:
+    """Grava o valor nominal da cota na empresa — vale pra todos os sócios
+    dela. Informado normalmente na hora de associar um sócio, que é quando a
+    falta dele aparece."""
+    empresa = buscar_empresa(conn, empresa_id)
+    if empresa is None or (empresa.valor_cota is not None and round(empresa.valor_cota, 6) == round(valor, 6)):
+        return
+    conn.execute("UPDATE empresa SET valor_cota=%s WHERE id=%s", (valor, empresa_id))
+    _registrar_log(conn, "atualizar", "empresa", empresa_id, f"Valor da cota: R$ {valor:.6g}")
+    conn.commit()
+
+
 def valor_participacao(conn: Conexao, vinculo: VinculoSocietario) -> float:
-    """Valor atual da participação do sócio: cotas do vínculo × valor de cada
-    cota hoje (capital social vigente da empresa / total de cotas vigente)."""
-    estado = estado_atual_empresa(conn, vinculo.empresa_id)
-    total_cotas = estado["quantidade_cotas"]
-    if not total_cotas:
-        return 0.0
-    valor_por_cota = estado["capital_social"] / total_cotas
-    return (vinculo.quantidade_cotas or 0) * valor_por_cota
+    """Capital do sócio pelas cotas: cotas do vínculo × valor de uma cota
+    (ver valor_da_cota). Zero quando o valor da cota não é conhecido."""
+    valor = valor_da_cota(conn, vinculo.empresa_id)
+    return (vinculo.quantidade_cotas or 0) * (valor or 0.0)
 
 
 def _ano_corrente() -> int:
@@ -751,6 +1032,19 @@ def encerrar_vinculos_fora_da_lista(
         encerrar_vinculo(conn, vinculo.id, data_saida, alteracao_id)
         encerrados.append(socio.nome)
     return encerrados
+
+
+def _capital_pelas_cotas(conn: Conexao, empresa_id: int, cotas: float | None) -> float | None:
+    """Capital do sócio quando a planilha traz as cotas mas não o capital:
+    cotas × valor da cota, se a empresa tem o valor da cota informado. Sem
+    ele, fica sem capital — estimar por um capital social que pode estar
+    desatualizado gravaria um número que ninguém conferiu."""
+    if not cotas:
+        return None
+    empresa = buscar_empresa(conn, empresa_id)
+    if empresa is None or not empresa.valor_cota:
+        return None
+    return round(cotas * empresa.valor_cota, 2)
 
 
 # Campo da linha importada -> (atributo do vínculo, casas comparadas). As
@@ -1611,6 +1905,11 @@ def aplicar_importacao_cadastro(
         if linha.get("socio_id") is None:
             continue  # modelo "Só empresas": a empresa acima é tudo que a linha traz
 
+        if not linha.get("valor_capital_socio"):
+            capital = _capital_pelas_cotas(conn, empresa_id, linha.get("cotas_socio"))
+            if capital:
+                linha = {**linha, "valor_capital_socio": capital}
+
         vinculos_do_socio = [
             v for v in listar_vinculos_empresa(conn, empresa_id) if v.socio_id == linha["socio_id"]
         ]
@@ -1861,6 +2160,26 @@ def autenticar(conn: Conexao, login: str, senha: str) -> Usuario | None:
     return usuario
 
 
+def motivo_login_recusado(conn: Conexao, login: str) -> str:
+    """Por que autenticar() recusou esse login, em palavras de quem vai
+    corrigir. Uma mensagem só pra tudo ("login ou senha incorretos") fazia
+    uma senha recém-redefinida parecer não ter funcionado, quando o que
+    estava errado era o login digitado — ou a conta, desativada.
+
+    Quem digita o NOME no lugar do login recebe o login certo: no escritório
+    todo mundo se conhece, e é o engano mais comum de quem esqueceu a senha."""
+    digitado = login.strip()
+    usuario = buscar_usuario_por_login(conn, digitado)
+    if usuario is not None:
+        if not usuario.ativo:
+            return "Este usuário está desativado. Peça a um administrador para reativá-lo."
+        return "Senha incorreta."
+    pelo_nome = [u for u in listar_usuarios(conn) if u.nome.strip().lower() == digitado.lower()]
+    if len(pelo_nome) == 1:
+        return f'"{digitado}" é o nome do usuário. Entre com o login: {pelo_nome[0].login}'
+    return f'Não existe usuário com o login "{digitado}". Confira o login na aba Usuários, com um administrador.'
+
+
 def atualizar_usuario(conn: Conexao, usuario_id: int, nome: str, login: str, admin: bool) -> None:
     existente = buscar_usuario_por_login(conn, login)
     if existente is not None and existente.id != usuario_id:
@@ -1882,7 +2201,72 @@ def definir_ativo(conn: Conexao, usuario_id: int, ativo: bool) -> None:
 def alterar_senha(conn: Conexao, usuario_id: int, nova_senha: str) -> None:
     senha_hash, senha_salt = gerar_hash_senha(nova_senha)
     conn.execute("UPDATE usuario SET senha_hash=%s, senha_salt=%s WHERE id=%s", (senha_hash, senha_salt, usuario_id))
+    # Senha nova derruba os acessos sem senha: é o que se faz quando se
+    # desconfia que alguém está usando a conta.
+    conn.execute("DELETE FROM acesso_lembrado WHERE usuario_id=%s", (usuario_id,))
     _registrar_log(conn, "trocar_senha", "usuario", usuario_id, "")
+    conn.commit()
+
+
+# -------------------------------------------------------- AcessoLembrado --
+#
+# "Entrar sem pedir a senha neste computador". O PC guarda uma chave aleatória
+# nas preferências locais; o banco guarda só o hash dela. A senha nunca sai
+# da tela de login. Trocar a senha, desativar o usuário ou clicar em Sair
+# invalida a chave.
+
+
+def _hash_da_chave(chave: str) -> str:
+    return hashlib.sha256(chave.encode("utf-8")).hexdigest()
+
+
+def criar_acesso_lembrado(conn: Conexao, usuario_id: int) -> str:
+    chave = secrets.token_urlsafe(32)
+    conn.execute(
+        "INSERT INTO acesso_lembrado (usuario_id, chave_hash, criado_em) VALUES (%s, %s, %s)",
+        (usuario_id, _hash_da_chave(chave), dt.datetime.now().isoformat(timespec="seconds")),
+    )
+    conn.commit()
+    return chave
+
+
+def usuario_do_acesso_lembrado(conn: Conexao, chave: str) -> Usuario | None:
+    if not chave:
+        return None
+    row = conn.execute(
+        "SELECT usuario_id FROM acesso_lembrado WHERE chave_hash=%s", (_hash_da_chave(chave),)
+    ).fetchone()
+    if row is None:
+        return None
+    usuario = next((u for u in listar_usuarios(conn) if u.id == row["usuario_id"]), None)
+    if usuario is None or not usuario.ativo:
+        return None
+    conn.execute(
+        "UPDATE acesso_lembrado SET ultimo_uso=%s WHERE chave_hash=%s",
+        (dt.datetime.now().isoformat(timespec="seconds"), _hash_da_chave(chave)),
+    )
+    conn.commit()
+    return usuario
+
+
+def quantidade_acessos_lembrados(conn: Conexao, usuario_id: int) -> int:
+    """Em quantos computadores este usuário entra sem digitar a senha."""
+    return conn.execute(
+        "SELECT count(*) AS n FROM acesso_lembrado WHERE usuario_id=%s", (usuario_id,)
+    ).fetchone()["n"]
+
+
+def encerrar_acessos_lembrados(conn: Conexao, usuario_id: int) -> None:
+    """Todos os computadores voltam a pedir a senha deste usuário."""
+    conn.execute("DELETE FROM acesso_lembrado WHERE usuario_id=%s", (usuario_id,))
+    _registrar_log(conn, "encerrar_acessos", "usuario", usuario_id, "")
+    conn.commit()
+
+
+def esquecer_acesso_lembrado(conn: Conexao, chave: str) -> None:
+    if not chave:
+        return
+    conn.execute("DELETE FROM acesso_lembrado WHERE chave_hash=%s", (_hash_da_chave(chave),))
     conn.commit()
 
 

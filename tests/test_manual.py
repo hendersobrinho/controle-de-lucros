@@ -75,7 +75,9 @@ def test_topico_da_pagina_cai_no_inicio_quando_nao_conhece():
         ("distribuicao", ["Trancar o período", "Importar planilha", "Movimentações"]),
         ("dashboard", ["proporcional", "tolerância"]),
         ("sistema.importar", ["CPF", "CNPJ", "nº da empresa"]),
-        ("socios", ["Editar vínculo", "Saiu da sociedade", "Excluir vínculo", "Capital (R$)"]),
+        ("socios", ["Editar participação", "O sócio saiu desta empresa", "Excluir participação",
+                    "Calcular % pelas cotas", "faixa", "valor da", "Salvar e associar"]),
+        ("empresas.cadastro", ["Editar dados", "valor da cota", "Quadro societário", "Excluir empresa"]),
         ("sistema", ["backup", "log"]),
     ],
 )

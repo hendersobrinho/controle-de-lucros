@@ -24,7 +24,7 @@ from ..planilha import exportar_relatorio_excel
 from .classificacao import CLASSE_PDF, LABEL
 from . import theme
 from ..analise import resumo_sem_pro_labore, sem_pro_labore
-from .common import CartaoEstatistica, formatar_valor_br
+from .common import CartaoEstatistica, formatar_percentual, formatar_valor_br
 from .graficos import (
     grafico_barras_emprestimos_por_empresa,
     grafico_barras_por_empresa,
@@ -34,7 +34,7 @@ from .graficos import (
 from .relatorio_pdf import exportar_relatorio_pdf
 
 COLUNAS_RELATORIO = [
-    "Empresa", "Ano", "Sócio", "CPF", "% Capital", "% Distribuído", "Valor Distribuído",
+    "Empresa", "Ano", "Sócio", "CPF", "% do Capital", "% Distribuído", "Valor Distribuído",
     "Pró-labore", "IRRF", "Empréstimo", "Classificação",
 ]
 
@@ -238,8 +238,8 @@ class DashboardVisaoGeralView(QWidget):
                     linha["ano_base"],
                     linha["socio_nome"],
                     linha["socio_cpf"] or "—",
-                    formatar_valor_br(linha["percentual_capital"], 4),
-                    formatar_valor_br(linha["percentual_distribuido"], 3),
+                    formatar_percentual(linha["percentual_capital"]),
+                    formatar_percentual(linha["percentual_distribuido"]),
                     f"R$ {formatar_valor_br(linha['valor_distribuido'])}",
                     f"R$ {formatar_valor_br(linha['pro_labore'])}" if linha["pro_labore"] else "—",
                     f"R$ {formatar_valor_br(linha['irrf'])}" if linha["irrf"] else "—",

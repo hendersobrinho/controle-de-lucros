@@ -10,7 +10,7 @@ from __future__ import annotations
 import datetime as dt
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -18,11 +18,13 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -385,6 +387,100 @@ class _DialogoPrevia(QDialog):
         coluna.addWidget(botoes)
 
 
+class _CartaoFormato(QFrame):
+    """Um formato de arquivo como cartão: nome, de que tipo é e o que traz.
+    O escolhido fica com a borda laranja e o "✓ Selecionado" — é a resposta,
+    sem ler nada, para "com qual formato isto vai ser importado?"."""
+
+    clicado = Signal(str)
+
+    def __init__(self, chave: str, titulo: str, etiqueta: str, detalhe: str, parent=None):
+        super().__init__(parent)
+        self.chave = chave
+        self.setProperty("role", "cartaoFormato")
+        self.setProperty("escolhido", "false")
+        self.setCursor(Qt.PointingHandCursor)
+        self.setMinimumWidth(220)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        self.etiqueta = QLabel(etiqueta.upper())
+        self.etiqueta.setProperty("role", "rotuloCampo")
+        self.marca = QLabel("✓ Selecionado")
+        self.marca.setProperty("role", "marcaSelecionado")
+        self.marca.hide()
+        topo = QHBoxLayout()
+        topo.addWidget(self.etiqueta)
+        topo.addStretch()
+        topo.addWidget(self.marca)
+
+        nome = QLabel(titulo)
+        nome.setProperty("role", "valorCampo")
+        nome.setWordWrap(True)
+        fonte = nome.font()
+        fonte.setBold(True)
+        nome.setFont(fonte)
+        texto = QLabel(detalhe)
+        texto.setProperty("role", "subtitulo")
+        texto.setWordWrap(True)
+
+        coluna = QVBoxLayout(self)
+        coluna.setContentsMargins(14, 10, 14, 12)
+        coluna.setSpacing(4)
+        coluna.addLayout(topo)
+        coluna.addWidget(nome)
+        coluna.addWidget(texto)
+
+    def escolher(self, escolhido: bool) -> None:
+        self.setProperty("escolhido", "true" if escolhido else "false")
+        self.marca.setVisible(escolhido)
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        if event.button() == Qt.LeftButton:
+            self.clicado.emit(self.chave)
+        event.accept()
+
+
+def _botao_acao(titulo: str, detalhe: str, primario: bool = False) -> QPushButton:
+    """Botão grande de ação, com o que ele faz em duas linhas."""
+    botao = QPushButton(f"{titulo}\n{detalhe}")
+    botao.setProperty("role", "acaoGrandePrimaria" if primario else "acaoGrande")
+    botao.setCursor(Qt.PointingHandCursor)
+    botao.setMinimumHeight(64)
+    botao.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+    return botao
+
+
+def _passo(numero: str, titulo: str, explicacao: str = "") -> tuple[QFrame, QVBoxLayout]:
+    """Um passo da tela: o número num círculo, o título e uma linha só de
+    explicação — o resto fica nas dicas dos botões."""
+    card = QFrame()
+    card.setProperty("role", "card")
+    col = QVBoxLayout(card)
+    col.setContentsMargins(20, 16, 20, 18)
+    col.setSpacing(12)
+    circulo = QLabel(numero)
+    circulo.setProperty("role", "numeroPasso")
+    circulo.setAlignment(Qt.AlignCenter)
+    circulo.setFixedSize(30, 30)
+    rotulo = QLabel(titulo)
+    rotulo.setProperty("role", "secao")
+    cabeca = QHBoxLayout()
+    cabeca.setSpacing(10)
+    cabeca.addWidget(circulo)
+    cabeca.addWidget(rotulo)
+    if explicacao:
+        dica = QLabel(explicacao)
+        dica.setProperty("role", "subtitulo")
+        cabeca.addSpacing(6)
+        cabeca.addWidget(dica, 1)
+    else:
+        cabeca.addStretch()
+    col.addLayout(cabeca)
+    return card, col
+
+
 class ImportacaoCadastroView(QWidget):
     """Importação e exportação de cadastro em massa.
 
@@ -399,32 +495,55 @@ class ImportacaoCadastroView(QWidget):
         super().__init__(parent)
         self.conn = conn
 
-        # A grade de colunas fica recolhida: depois de descrever a planilha uma
-        # vez, quem importa todo mês só escolhe o formato e aponta o arquivo —
-        # dezesseis caixinhas de letra permanentes na frente disso são só
-        # ruído. Ela abre em "Novo layout", "Duplicar" e "Editar layout".
+        # A grade de colunas não fica aberta junto com o resto: criar ou mudar
+        # um layout é um modo próprio da tela (só a grade, com Salvar e
+        # Cancelar), e ao salvar a tela volta aos passos com o layout já
+        # escolhido e uma faixa verde dizendo que deu certo. Antes as duas
+        # coisas ficavam abertas ao mesmo tempo e não se via qual layout
+        # estava valendo.
         self._editor_aberto = False
+        self._cartoes: dict[str, _CartaoFormato] = {}
         self.editor = EditorLayout()
         self.editor.alterado.connect(self._ao_editar_layout)
 
+        # A lista de formatos de verdade: os cartões só a espelham.
+        self.formato = QComboBox()
+        self.formato.currentIndexChanged.connect(self._ao_trocar_formato)
+        self.formato.hide()
+
+        self.resultado = QLabel("")
+        self.resultado.setWordWrap(True)
+        self.resultado.setProperty("role", "sucesso")
+        self.resultado.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.resultado.hide()
+
+        self.passos = QWidget()
+        coluna_passos = QVBoxLayout(self.passos)
+        coluna_passos.setContentsMargins(0, 0, 0, 0)
+        coluna_passos.setSpacing(14)
+        coluna_passos.addWidget(self._montar_card_formato())
+        coluna_passos.addWidget(self._montar_card_acoes())
+
         corpo = QWidget()
         coluna = QVBoxLayout(corpo)
-        coluna.setContentsMargins(0, 0, 8, 0)
+        coluna.setContentsMargins(0, 0, 8, 12)
         coluna.setSpacing(14)
         coluna.addWidget(self._montar_cabecalho())
-        coluna.addWidget(self._montar_card_formato())
+        coluna.addWidget(self.resultado)
+        coluna.addWidget(self.passos)
         coluna.addWidget(self._montar_card_layout())
-        coluna.addWidget(self._montar_card_acoes())
+        coluna.addWidget(self.formato)
         coluna.addStretch()
 
         # A grade de colunas é alta; sem rolagem a tela fica inutilizável em
         # notebook de tela baixa, que é onde ela vai ser usada.
         area = QScrollArea()
+        area.setProperty("role", "listaCartoes")
         area.setWidgetResizable(True)
         area.setFrameShape(QFrame.NoFrame)
         area.setWidget(corpo)
 
-        raiz = QVBoxLayout(self)
+        raiz = QHBoxLayout(self)
         raiz.setContentsMargins(0, 0, 0, 0)
         raiz.addWidget(area)
 
@@ -432,168 +551,127 @@ class ImportacaoCadastroView(QWidget):
 
     # ------------------------------------------------------------ montagem --
     def _montar_cabecalho(self) -> QWidget:
-        card = QFrame()
-        card.setProperty("role", "card")
-        col = QVBoxLayout(card)
-        col.setContentsMargins(18, 14, 18, 16)
-        col.setSpacing(6)
-
-        titulo = QLabel("Importação e exportação de cadastro")
-        titulo.setProperty("role", "secao")
+        caixa = QWidget()
+        col = QVBoxLayout(caixa)
+        col.setContentsMargins(4, 0, 0, 0)
+        col.setSpacing(2)
         explicacao = QLabel(
-            "Cadastre empresas, sócios, vínculos e distribuição de uma vez, a partir de uma "
-            "planilha sua ou do relatório de sócios de outro sistema — em PDF ou em Excel. "
-            "A empresa é reconhecida pelo nº, "
-            "CNPJ ou nome e é criada se ainda não existir; o sócio é reconhecido pelo CPF e "
-            "<b>nunca é criado sem sua confirmação</b>. O que já está cadastrado não é duplicado: "
-            "vínculo que já existe é ignorado, e só entra o que é novo."
+            "Traga empresas, sócios e participações de uma planilha ou do relatório de outro "
+            "sistema. Nada é duplicado, e <b>nenhum sócio é criado sem você confirmar</b>."
         )
         explicacao.setWordWrap(True)
         explicacao.setProperty("role", "subtitulo")
-        col.addWidget(titulo)
         col.addWidget(explicacao)
-        return card
+        return caixa
 
     def _montar_card_formato(self) -> QWidget:
-        card = QFrame()
-        card.setProperty("role", "card")
-        col = QVBoxLayout(card)
-        col.setContentsMargins(18, 14, 18, 16)
-        col.setSpacing(8)
+        card, col = _passo("1", "Formato do arquivo", "Como as colunas da planilha estão organizadas.")
 
-        titulo = QLabel("Formato da planilha")
-        titulo.setProperty("role", "secao")
-        col.addWidget(titulo)
+        self.grade_formatos = QGridLayout()
+        self.grade_formatos.setHorizontalSpacing(10)
+        self.grade_formatos.setVerticalSpacing(10)
+        col.addLayout(self.grade_formatos)
 
-        self.formato = QComboBox()
-        self.formato.setMinimumWidth(320)
-        self.formato.currentIndexChanged.connect(self._ao_trocar_formato)
-
-        self.btn_novo_layout = QPushButton("Novo layout")
-        self.btn_novo_layout.setToolTip("Configurar do zero o desenho de uma planilha de outra origem.")
+        self.btn_novo_layout = QPushButton("+  Novo layout")
+        self.btn_novo_layout.setToolTip(
+            "Para planilha de outra origem: você diz em que coluna (A, B, C…) está cada informação."
+        )
         self.btn_novo_layout.clicked.connect(self._novo_layout)
-
         self.btn_duplicar = QPushButton("Duplicar como layout")
-        self.btn_duplicar.setToolTip(
-            "Cria um layout já preenchido a partir do formato selecionado — mais rápido do que "
-            "digitar as dezesseis letras."
-        )
+        self.btn_duplicar.setToolTip("Cria um layout já preenchido a partir do formato selecionado.")
         self.btn_duplicar.clicked.connect(self._duplicar_como_layout)
-
         self.btn_editar_layout = QPushButton("Editar layout")
-        self.btn_editar_layout.setToolTip(
-            "Abre a grade de colunas deste layout para mudar alguma letra ou a linha inicial."
-        )
+        self.btn_editar_layout.setToolTip("Mudar as colunas ou a linha inicial deste layout.")
         self.btn_editar_layout.clicked.connect(self._editar_layout)
-
         self.btn_excluir_layout = QPushButton("Excluir layout")
         self.btn_excluir_layout.setProperty("role", "perigo")
         self.btn_excluir_layout.clicked.connect(self._excluir_layout)
 
-        linha = QHBoxLayout()
-        linha.setSpacing(8)
-        linha.addWidget(QLabel("Formato:"))
-        linha.addWidget(self.formato, 1)
-        linha.addWidget(self.btn_novo_layout)
-        linha.addWidget(self.btn_duplicar)
-        linha.addWidget(self.btn_editar_layout)
-        linha.addWidget(self.btn_excluir_layout)
-        col.addLayout(linha)
-
         self.descricao_formato = QLabel()
         self.descricao_formato.setWordWrap(True)
         self.descricao_formato.setProperty("role", "subtitulo")
+
+        acoes = QHBoxLayout()
+        acoes.setSpacing(8)
+        acoes.addWidget(self.btn_novo_layout)
+        acoes.addWidget(self.btn_duplicar)
+        acoes.addStretch()
+        acoes.addWidget(self.btn_editar_layout)
+        acoes.addWidget(self.btn_excluir_layout)
         col.addWidget(self.descricao_formato)
+        col.addLayout(acoes)
         return card
 
     def _montar_card_layout(self) -> QWidget:
+        """O modo de edição do layout: aparece sozinho, no lugar dos passos."""
         self.card_layout = QFrame()
         self.card_layout.setProperty("role", "card")
         col = QVBoxLayout(self.card_layout)
-        col.setContentsMargins(18, 14, 18, 16)
-        col.setSpacing(10)
+        col.setContentsMargins(20, 16, 20, 18)
+        col.setSpacing(12)
 
-        titulo = QLabel("Colunas deste layout")
-        titulo.setProperty("role", "secao")
-        col.addWidget(titulo)
-        col.addWidget(self.editor)
-
+        self.titulo_editor = QLabel()
+        self.titulo_editor.setProperty("role", "titulo")
         self.btn_salvar_layout = QPushButton("Salvar layout")
         self.btn_salvar_layout.setProperty("role", "primario")
         self.btn_salvar_layout.clicked.connect(self._salvar_layout)
-
         self.btn_conferir = QPushButton("Conferir com uma planilha…")
         self.btn_conferir.setToolTip(
             "Abre uma planilha e mostra como o sistema leria as primeiras linhas com este "
             "layout — sem importar nada."
         )
         self.btn_conferir.clicked.connect(self._conferir_layout)
-
-        self.btn_fechar_editor = QPushButton("Fechar")
-        self.btn_fechar_editor.setToolTip(
-            "Recolhe a grade. O layout escolhido continua valendo para importar e exportar."
-        )
+        self.btn_fechar_editor = QPushButton("Voltar")
+        self.btn_fechar_editor.setToolTip("Volta aos passos. O layout continua escolhido, salvo ou não.")
         self.btn_fechar_editor.clicked.connect(self._fechar_editor)
+
+        topo = QHBoxLayout()
+        topo.setSpacing(8)
+        topo.addWidget(self.titulo_editor, 1)
+        topo.addWidget(self.btn_fechar_editor)
+        topo.addWidget(self.btn_conferir)
+        topo.addWidget(self.btn_salvar_layout)
 
         self.aviso_layout = QLabel()
         self.aviso_layout.setWordWrap(True)
-        self.aviso_layout.setProperty("role", "subtitulo")
+        self.aviso_layout.setProperty("role", "alerta")
 
-        linha = QHBoxLayout()
-        linha.setSpacing(8)
-        linha.addWidget(self.btn_salvar_layout)
-        linha.addWidget(self.btn_conferir)
-        linha.addWidget(self.btn_fechar_editor)
-        linha.addWidget(self.aviso_layout, 1)
-        col.addLayout(linha)
+        col.addLayout(topo)
+        col.addWidget(self.aviso_layout)
+        col.addWidget(self.editor)
         return self.card_layout
 
     def _montar_card_acoes(self) -> QWidget:
-        card = QFrame()
-        card.setProperty("role", "card")
-        col = QVBoxLayout(card)
-        col.setContentsMargins(18, 14, 18, 16)
-        col.setSpacing(10)
+        caixa = QWidget()
+        linha = QHBoxLayout(caixa)
+        linha.setContentsMargins(0, 0, 0, 0)
+        linha.setSpacing(14)
 
-        titulo = QLabel("Exportar e importar")
-        titulo.setProperty("role", "secao")
-        col.addWidget(titulo)
-
-        self.btn_exportar_modelo = QPushButton("Exportar planilha em branco")
-        self.btn_exportar_modelo.clicked.connect(self._exportar_modelo)
-
-        self.btn_exportar_atual = QPushButton("Exportar cadastro atual")
-        self.btn_exportar_atual.clicked.connect(self._exportar_atual)
-
-        self.btn_importar = QPushButton("Importar planilha")
-        self.btn_importar.setProperty("role", "primario")
+        card_importar, col = _passo("2", "Importar")
+        self.btn_importar = _botao_acao("Importar planilha", "no formato escolhido acima", primario=True)
         self.btn_importar.clicked.connect(self._importar_planilha)
-
-        self.btn_importar_relatorio = QPushButton("Importar relatório de sócios")
+        self.btn_importar_relatorio = _botao_acao(
+            "Importar relatório de sócios", "PDF ou Excel de outro sistema contábil")
         self.btn_importar_relatorio.setToolTip(
             "Lê o relatório \"Cadastro de Sócios\" emitido por outro sistema contábil — em "
             "PDF ou em planilha (.xls, .xlsx, .csv) — e traz empresas, sócios, participação "
-            "e datas de entrada/saída. Cada empresa tocada ganha uma alteração contratual "
-            "automática registrando a movimentação; pra lançar direto numa alteração já aberta "
-            "de uma empresa só, use o botão de importar dentro do card dela, na aba Alterações."
+            "e datas de entrada/saída. Não depende do formato escolhido acima."
         )
         self.btn_importar_relatorio.clicked.connect(self._importar_relatorio)
+        col.addWidget(self.btn_importar)
+        col.addWidget(self.btn_importar_relatorio)
 
-        linha = QHBoxLayout()
-        linha.setSpacing(8)
-        linha.addWidget(self.btn_exportar_modelo)
-        linha.addWidget(self.btn_exportar_atual)
-        linha.addSpacing(16)
-        linha.addWidget(self.btn_importar)
-        linha.addWidget(self.btn_importar_relatorio)
-        linha.addStretch()
-        col.addLayout(linha)
+        card_exportar, col = _passo("3", "Exportar")
+        self.btn_exportar_modelo = _botao_acao("Planilha em branco", "para preencher fora e importar depois")
+        self.btn_exportar_modelo.clicked.connect(self._exportar_modelo)
+        self.btn_exportar_atual = _botao_acao("Cadastro atual", "tudo o que está no sistema hoje")
+        self.btn_exportar_atual.clicked.connect(self._exportar_atual)
+        col.addWidget(self.btn_exportar_modelo)
+        col.addWidget(self.btn_exportar_atual)
 
-        self.resultado = QLabel("")
-        self.resultado.setWordWrap(True)
-        self.resultado.setProperty("role", "subtitulo")
-        col.addWidget(self.resultado)
-        return card
+        linha.addWidget(card_importar, 1)
+        linha.addWidget(card_exportar, 1)
+        return caixa
 
     # -------------------------------------------------------------- formato --
     def _recarregar_formatos(self, selecionar: str | None = None) -> None:
@@ -617,7 +695,44 @@ class ImportacaoCadastroView(QWidget):
         indice = self.formato.findData(anterior) if anterior else -1
         self.formato.setCurrentIndex(indice if indice >= 0 else 0)
         self.formato.blockSignals(False)
+        self._montar_cartoes()
         self._ao_trocar_formato()
+
+    def _montar_cartoes(self) -> None:
+        while self.grade_formatos.count():
+            item = self.grade_formatos.takeAt(0)
+            if item.widget() is not None:
+                item.widget().hide()
+                item.widget().deleteLater()
+        self._cartoes = {}
+        cartoes = []
+        for modelo in MODELOS_CADASTRO:
+            cartoes.append(_CartaoFormato(
+                f"modelo:{modelo.id}", modelo.nome, "Modelo do sistema",
+                f"{len(modelo.colunas)} colunas, lidas pelo cabeçalho",
+            ))
+        for layout in self._layouts_salvos.values():
+            cartoes.append(_CartaoFormato(
+                f"layout:{layout.id}", layout.nome, "Seu layout", layout.resumo(),
+            ))
+        if self.formato.findData("novo:") >= 0:
+            cartoes.append(_CartaoFormato("novo:", "Layout novo", "Não salvo", "termine de configurar e salve"))
+        for indice, cartao in enumerate(cartoes):
+            cartao.clicado.connect(self._escolher_cartao)
+            self._cartoes[cartao.chave] = cartao
+            self.grade_formatos.addWidget(cartao, indice // 3, indice % 3)
+        for coluna in range(3):
+            self.grade_formatos.setColumnStretch(coluna, 1)
+
+    def _escolher_cartao(self, chave: str) -> None:
+        indice = self.formato.findData(chave)
+        if indice >= 0:
+            self.formato.setCurrentIndex(indice)
+
+    def _mostrar_resultado(self, texto: str) -> None:
+        """A faixa verde no topo: o que acabou de acontecer, à vista."""
+        self.resultado.setText(texto)
+        self.resultado.show()
 
     def atualizar(self) -> None:
         """Repõe a lista ao voltar pra tela — layout salvo noutra sessão (ou um
@@ -647,6 +762,14 @@ class ImportacaoCadastroView(QWidget):
 
     def _ao_trocar_formato(self, *_args) -> None:
         tipo, identificador = self._formato_atual()
+        # Escolheu outro formato com um layout novo por terminar: o rascunho
+        # sai da lista, em vez de ficar lá como um cartão "não salvo" perdido.
+        rascunho = self.formato.findData("novo:")
+        if tipo != "novo" and rascunho >= 0:
+            self.formato.blockSignals(True)
+            self.formato.removeItem(rascunho)
+            self.formato.blockSignals(False)
+            self._montar_cartoes()
         if tipo != "novo":
             # Lembrar a escolha é mais do que conveniência: quem importa da
             # mesma origem todo mês encontraria a tela sempre no modelo
@@ -662,8 +785,13 @@ class ImportacaoCadastroView(QWidget):
         # preencher); layout salvo aparece recolhido até pedirem pra editar.
         self._editor_aberto = tipo == "novo"
         self._atualizar_visibilidade_editor()
-        self.btn_excluir_layout.setEnabled(tipo == "layout")
+        self.btn_excluir_layout.setVisible(tipo == "layout")
         self.btn_duplicar.setEnabled(tipo != "novo")
+        chave = self.formato.currentData()
+        for chave_cartao, cartao in self._cartoes.items():
+            cartao.escolher(chave_cartao == chave)
+        nome_formato = self.formato.currentText().replace("Modelo do sistema · ", "").replace("Layout · ", "")
+        self.btn_importar.setText(f"Importar planilha\nno formato “{nome_formato}”")
 
         if e_layout:
             layout = self._layout_escolhido()
@@ -683,11 +811,20 @@ class ImportacaoCadastroView(QWidget):
         self._atualizar_aviso_layout()
 
     def _atualizar_visibilidade_editor(self) -> None:
-        self.card_layout.setVisible(self._modo_layout() and self._editor_aberto)
+        editando = self._modo_layout() and self._editor_aberto
+        self.card_layout.setVisible(editando)
+        # Editando, os passos saem da frente: é uma coisa de cada vez.
+        self.passos.setVisible(not editando)
+        if editando:
+            layout = self._layout_escolhido()
+            self.titulo_editor.setText(
+                f"Editando o layout “{layout.nome}”" if layout.id is not None and layout.nome else "Novo layout"
+            )
         # Vale também para o layout novo ainda não salvo: quem recolheu a
         # grade sem querer precisa de um caminho de volta que não seja
         # começar tudo de novo.
         self.btn_editar_layout.setEnabled(self._modo_layout() and not self._editor_aberto)
+        self.btn_editar_layout.setVisible(self._modo_layout())
 
     def _editar_layout(self) -> None:
         self._editor_aberto = True
@@ -726,13 +863,19 @@ class ImportacaoCadastroView(QWidget):
 
     # --------------------------------------------------------- ações layout --
     def _novo_layout(self) -> None:
-        self.formato.blockSignals(True)
-        self.formato.addItem("Layout novo (não salvo)", "novo:")
-        self.formato.setCurrentIndex(self.formato.count() - 1)
-        self.formato.blockSignals(False)
+        self._selecionar_novo()
         self.editor.limpar()
         self._ao_trocar_formato()
         self.editor.primeiro_campo().setFocus()
+
+    def _selecionar_novo(self) -> None:
+        self.resultado.hide()
+        self.formato.blockSignals(True)
+        if self.formato.findData("novo:") < 0:
+            self.formato.addItem("Layout novo (não salvo)", "novo:")
+        self.formato.setCurrentIndex(self.formato.findData("novo:"))
+        self.formato.blockSignals(False)
+        self._montar_cartoes()
 
     def _duplicar_como_layout(self) -> None:
         tipo, _identificador = self._formato_atual()
@@ -744,10 +887,7 @@ class ImportacaoCadastroView(QWidget):
                 nome=f"Cópia de {base.nome}", colunas=dict(base.colunas), linha_inicial=base.linha_inicial
             )
         base.id = None
-        self.formato.blockSignals(True)
-        self.formato.addItem("Layout novo (não salvo)", "novo:")
-        self.formato.setCurrentIndex(self.formato.count() - 1)
-        self.formato.blockSignals(False)
+        self._selecionar_novo()
         self.editor.carregar(base)
         self._ao_trocar_formato()
         self.editor.primeiro_campo().setFocus()
@@ -764,9 +904,9 @@ class ImportacaoCadastroView(QWidget):
         # terminada a configuração, a tela volta a ser só escolher o formato e
         # apontar o arquivo.
         self._recarregar_formatos(selecionar=f"layout:{novo_id}")
-        self.resultado.setText(
-            f'Layout "{layout.nome}" salvo. {layout.resumo()}. '
-            "Use “Editar layout” para mudar as colunas."
+        self._mostrar_resultado(
+            f'✓  Layout "{layout.nome}" salvo e selecionado — {layout.resumo()}. '
+            "Já pode importar ou exportar com ele."
         )
 
     def _excluir_layout(self) -> None:
@@ -786,7 +926,7 @@ class ImportacaoCadastroView(QWidget):
             return
         repo.excluir_layout_importacao(self.conn, layout.id)
         self._recarregar_formatos(selecionar=f"modelo:{MODELO_CADASTRO_PADRAO.id}")
-        self.resultado.setText(f'Layout "{layout.nome}" excluído.')
+        self._mostrar_resultado(f'Layout "{layout.nome}" excluído.')
 
     def _conferir_layout(self) -> None:
         caminho, _ = QFileDialog.getOpenFileName(
@@ -877,6 +1017,7 @@ class ImportacaoCadastroView(QWidget):
                     return
             else:
                 exportar_modelo_cadastro(destino, linhas, modelo=self._modelo_escolhido())
+        self._mostrar_resultado(f"✓  Cadastro exportado: {len(linhas)} linha(s) em {destino}")
         QMessageBox.information(self, "Cadastro exportado", f"{len(linhas)} linha(s) salvas em:\n{destino}")
 
     def _exportar_no_layout(self, destino: Path, linhas: list[dict]) -> bool:
@@ -1214,5 +1355,5 @@ class ImportacaoCadastroView(QWidget):
         if nao_aplicadas > 0:
             resumo += f"\n{nao_aplicadas} linha(s) não foram aplicadas"
             resumo += f" ({len(conflitos)} por dados contraditórios)." if conflitos else "."
-        self.resultado.setText(resumo)
+        self._mostrar_resultado("✓  " + resumo)
         QMessageBox.information(self, "Importação concluída", resumo)

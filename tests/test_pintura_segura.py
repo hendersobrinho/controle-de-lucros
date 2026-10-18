@@ -211,11 +211,11 @@ def test_os_dois_mapas_pintam_do_jeito_que_as_abas_os_abrem():
         dv.DialogoMapaVinculos.exec = lambda self: abertos.append(self) or 0
 
         socios = SociosTab(conn)
-        socios.tabela.selectRow(0)
+        socios.lista.selectRow(0)
         socios._abrir_mapa_vinculos()
 
         empresas = EmpresasTab(conn)
-        empresas.tabela.selectRow(0)
+        empresas.lista.selectRow(0)
         empresas._abrir_quadro_societario()
 
         papeis = []
