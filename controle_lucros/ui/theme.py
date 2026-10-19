@@ -451,6 +451,30 @@ def build_stylesheet() -> str:
         border: 2px solid {p["BRASS"]};
         background: {p["ALT_ROW"]};
     }}
+    QFrame[role="linhaLayout"] {{
+        background: {p["PAPER_RAISED"]};
+        border: 1px solid {p["HAIRLINE"]};
+        border-radius: 6px;
+    }}
+    QFrame[role="linhaLayout"]:hover {{
+        border-color: {p["BRASS"]};
+    }}
+    QFrame[role="linhaLayout"][escolhido="true"] {{
+        border: 2px solid {p["BRASS"]};
+        background: {p["ALT_ROW"]};
+    }}
+    QLabel[role="marcaRadio"] {{
+        color: {p["BRASS_DARK"]};
+        font-size: 15px;
+    }}
+    QLabel[role="formatoEscolhido"] {{
+        background: {p["ALT_ROW"]};
+        border-left: 4px solid {p["BRASS"]};
+        border-radius: 4px;
+        padding: 8px 12px;
+        color: {p["INK"]};
+        font-size: 13px;
+    }}
     QLabel[role="marcaSelecionado"] {{
         color: {p["BRASS_DARK"]};
         font-size: 11px;

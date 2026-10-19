@@ -28,7 +28,7 @@ def app():
 @pytest.fixture()
 def cenario(conn):
     empresa_id = repo.salvar_empresa(conn, Empresa(None, "001", "ACME LTDA", "", 100000, 1000))
-    socio_id = repo.salvar_socio(conn, Socio(None, "Fulano de Tal", "005.169.717-35"))
+    socio_id = repo.salvar_socio(conn, Socio(None, "FULANO DE TAL", "005.169.717-35"))
     repo.associar_socio_a_empresa(conn, empresa_id, socio_id, 100.0, 1000, "2020-01-01")
     (vinculo,) = repo.listar_vinculos_socio(conn, socio_id)
     return {"empresa": empresa_id, "socio": socio_id, "vinculo": vinculo}
@@ -96,24 +96,24 @@ def test_ativas_vem_antes_das_encerradas_e_da_maior_pra_menor(conn, cenario):
 
 
 def test_lista_de_socios_conta_as_empresas_ativas(conn, cenario):
-    repo.salvar_socio(conn, Socio(None, "Sem Empresa Nenhuma", ""))
+    repo.salvar_socio(conn, Socio(None, "SEM EMPRESA NENHUMA", ""))
     aba = SociosTab(conn)
     from controle_lucros.ui.lista_fichas import PAPEL_DETALHE, PAPEL_MARCADOR
 
     linhas = {aba.lista.item(r).text(): aba.lista.item(r) for r in range(aba.lista.count())}
-    assert linhas["Fulano de Tal"].data(PAPEL_MARCADOR) == "1 empresa"
-    assert linhas["Sem Empresa Nenhuma"].data(PAPEL_MARCADOR) == "sem empresa"
-    assert linhas["Fulano de Tal"].data(PAPEL_DETALHE) == "CPF 005.169.717-35"
+    assert linhas["FULANO DE TAL"].data(PAPEL_MARCADOR) == "1 empresa"
+    assert linhas["SEM EMPRESA NENHUMA"].data(PAPEL_MARCADOR) == "sem empresa"
+    assert linhas["FULANO DE TAL"].data(PAPEL_DETALHE) == "CPF 005.169.717-35"
     assert aba.contagem.text() == "2 sócios"
 
 
 def test_busca_acha_por_nome_ou_documento_sem_pontuacao(conn, cenario):
-    repo.salvar_socio(conn, Socio(None, "Beatriz Lima", "111.444.777-35"))
+    repo.salvar_socio(conn, Socio(None, "BEATRIZ LIMA", "111.444.777-35"))
     aba = SociosTab(conn)
     aba.busca.setText("beatriz")
-    assert [aba.lista.item(r).text() for r in range(aba.lista.count())] == ["Beatriz Lima"]
+    assert [aba.lista.item(r).text() for r in range(aba.lista.count())] == ["BEATRIZ LIMA"]
     aba.busca.setText("11144477")
-    assert [aba.lista.item(r).text() for r in range(aba.lista.count())] == ["Beatriz Lima"]
+    assert [aba.lista.item(r).text() for r in range(aba.lista.count())] == ["BEATRIZ LIMA"]
     assert aba.contagem.text() == "1 de 2 sócios"
 
 
@@ -129,9 +129,9 @@ def test_sem_socio_selecionado_convida_a_escolher(conn, cenario):
 
 
 def test_socio_sem_empresa_convida_a_associar(conn, cenario):
-    repo.salvar_socio(conn, Socio(None, "Beatriz Lima", ""))
+    repo.salvar_socio(conn, Socio(None, "BEATRIZ LIMA", ""))
     aba = SociosTab(conn)
-    aba.lista.selectRow(0)  # "Beatriz Lima" vem antes por nome
+    aba.lista.selectRow(0)  # "BEATRIZ LIMA" vem antes por nome
     assert aba.cartoes == []
     assert "ainda não participa de nenhuma empresa" in aba.vazio_titulo.text()
     assert "Associar empresa" in aba.vazio_texto.text()
@@ -147,7 +147,7 @@ def test_novo_socio_salvar_e_associar_emenda_a_associacao(conn, cenario, monkeyp
     associacoes = []
 
     def preencher_e_salvar(dialogo):
-        dialogo.nome.setText("Nova Sócia")
+        dialogo.nome.setText("NOVA SÓCIA")
         dialogo._salvar(associar=True)
         return dialogo.result()
 
@@ -156,7 +156,7 @@ def test_novo_socio_salvar_e_associar_emenda_a_associacao(conn, cenario, monkeyp
     aba = SociosTab(conn)
     aba._novo_socio()
 
-    nova = next(s for s in repo.listar_socios(conn) if s.nome == "Nova Sócia")
+    nova = next(s for s in repo.listar_socios(conn) if s.nome == "NOVA SÓCIA")
     assert aba._socio_atual_id == nova.id
     assert len(associacoes) == 1
 
@@ -165,7 +165,7 @@ def test_novo_socio_so_salvar_nao_abre_a_associacao(conn, cenario, monkeypatch):
     associacoes = []
 
     def preencher_e_salvar(dialogo):
-        dialogo.nome.setText("Nova Sócia")
+        dialogo.nome.setText("NOVA SÓCIA")
         dialogo._salvar(associar=False)
         return dialogo.result()
 
@@ -189,17 +189,17 @@ def test_cadastro_sem_nome_avisa_e_nao_fecha(conn, cenario, monkeypatch):
 
 def test_editar_dados_do_socio(conn, cenario, monkeypatch):
     def renomear(dialogo):
-        assert dialogo.nome.text() == "Fulano de Tal"
+        assert dialogo.nome.text() == "FULANO DE TAL"
         assert dialogo.cpf.text() == "005.169.717-35"
-        dialogo.nome.setText("Fulano de Tal Junior")
+        dialogo.nome.setText("FULANO DE TAL JUNIOR")
         dialogo._salvar(associar=False)
         return dialogo.result()
 
     monkeypatch.setattr(mod.DialogoSocio, "exec", renomear)
     aba = _aba(conn)
     aba.btn_editar_socio.click()
-    assert aba.titulo_socio.text() == "Fulano de Tal Junior"
-    assert aba.lista.item(0).text() == "Fulano de Tal Junior"
+    assert aba.titulo_socio.text() == "FULANO DE TAL JUNIOR"
+    assert aba.lista.item(0).text() == "FULANO DE TAL JUNIOR"
 
 
 def test_excluir_socio_com_participacao_explica_e_nao_exclui(conn, cenario, monkeypatch):
@@ -336,8 +336,8 @@ def test_alteracoes_da_empresa_aparecem_para_associar(conn, cenario):
 
 
 def _associar_beatriz(conn, empresa_id):
-    repo.salvar_socio(conn, Socio(None, "Beatriz Lima", ""))
-    beatriz = next(s for s in repo.listar_socios(conn) if s.nome == "Beatriz Lima")
+    repo.salvar_socio(conn, Socio(None, "BEATRIZ LIMA", ""))
+    beatriz = next(s for s in repo.listar_socios(conn) if s.nome == "BEATRIZ LIMA")
     dialogo = mod._DialogoAssociarEmpresa(conn, beatriz.id)
     dialogo.empresa.setCurrentIndex(dialogo.empresa.findData(empresa_id))
     return dialogo
@@ -369,7 +369,7 @@ def test_valor_da_cota_vem_da_empresa(conn, cenario):
 
 def test_associar_grava_o_valor_da_cota_na_empresa(conn, cenario, monkeypatch):
     outra = repo.salvar_empresa(conn, Empresa(None, "002", "BETA LTDA", "", 0, 0))
-    repo.salvar_socio(conn, Socio(None, "Beatriz Lima", ""))
+    repo.salvar_socio(conn, Socio(None, "BEATRIZ LIMA", ""))
 
     def associar(dialogo):
         dialogo.empresa.setCurrentIndex(dialogo.empresa.findData(outra))

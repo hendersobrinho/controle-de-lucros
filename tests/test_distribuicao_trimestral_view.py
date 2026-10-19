@@ -28,8 +28,8 @@ def app():
 @pytest.fixture()
 def cenario(conn):
     empresa_id = repo.salvar_empresa(conn, Empresa(None, "001", "ACME LTDA", "", 100000, 1000))
-    fulano = repo.salvar_socio(conn, Socio(None, "Fulano de Tal", "111.111.111-11"))
-    beltrano = repo.salvar_socio(conn, Socio(None, "Beltrano da Silva", "222.222.222-22"))
+    fulano = repo.salvar_socio(conn, Socio(None, "FULANO DE TAL", "111.111.111-11"))
+    beltrano = repo.salvar_socio(conn, Socio(None, "BELTRANO DA SILVA", "222.222.222-22"))
     repo.associar_socio_a_empresa(conn, empresa_id, fulano, 60.0, 600, "2020-01-01")
     repo.associar_socio_a_empresa(conn, empresa_id, beltrano, 40.0, 400, "2020-01-01")
     return {"empresa": empresa_id, "fulano": fulano, "beltrano": beltrano}
@@ -264,7 +264,7 @@ def test_importar_lanca_no_trimestre_da_tela_e_reflete_no_anual(conn, cenario, s
     wb = openpyxl.load_workbook(caminho)
     aba = wb["Distribuição"]
     for linha in aba.iter_rows(min_row=2):
-        if linha[1].value == "Fulano de Tal":
+        if linha[1].value == "FULANO DE TAL":
             linha[2].value, linha[3].value, linha[4].value = 20000, 9000, 200
     wb.save(caminho)
 
@@ -293,7 +293,7 @@ def test_importar_nao_toca_nos_outros_trimestres(conn, cenario, sem_dialogos, mo
 
     wb = openpyxl.load_workbook(caminho)
     for linha in wb["Distribuição"].iter_rows(min_row=2):
-        if linha[1].value == "Fulano de Tal":
+        if linha[1].value == "FULANO DE TAL":
             linha[2].value = 5000
     wb.save(caminho)
     _importar(view, caminho, monkeypatch)
@@ -345,7 +345,7 @@ def test_substituir_lancamento_existente_pede_confirmacao(conn, cenario, tmp_pat
 
     wb = openpyxl.load_workbook(caminho)
     for linha in wb["Distribuição"].iter_rows(min_row=2):
-        if linha[1].value == "Fulano de Tal":
+        if linha[1].value == "FULANO DE TAL":
             linha[2].value = 777
     wb.save(caminho)
 
@@ -393,7 +393,7 @@ def test_socio_desconhecido_na_planilha_vai_pra_revisao(conn, cenario, sem_dialo
 def test_socio_fora_do_trimestre_vira_pendencia_com_o_periodo_no_aviso(conn, cenario):
     from controle_lucros.ui.importacao_distribuicao import associar_linhas
 
-    linhas = [{"cpf": "222.222.222-22", "nome": "Beltrano da Silva", "valor_distribuido": 1.0,
+    linhas = [{"cpf": "222.222.222-22", "nome": "BELTRANO DA SILVA", "valor_distribuido": 1.0,
                "pro_labore": 0.0, "irrf": 0.0}]
     _, pendencias = associar_linhas(conn, linhas, {cenario["fulano"]}, "no 4º trimestre de 2025")
     assert len(pendencias) == 1
@@ -505,7 +505,7 @@ def test_cada_socio_tem_a_mesma_cor_no_grafico_e_na_tabela(conn, cenario):
     _lancar(view, cenario["fulano"], 1000.0)
     (valor, cor_grafico, nome) = view.grafico._colunas[1][0]
     row = _linha_de(view, cenario["fulano"])
-    assert nome == "Fulano de Tal"
+    assert nome == "FULANO DE TAL"
     assert view.tabela.item(row, 0).data(PAPEL_COR) == cor_grafico
 
 

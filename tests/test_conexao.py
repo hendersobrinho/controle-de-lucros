@@ -175,7 +175,7 @@ def test_erro_no_meio_da_gravacao_nao_trava_a_conexao(conn):
     """No PostgreSQL, erro dentro da transação a invalida: sem desfazer na
     hora, todo comando seguinte falharia com "transaction is aborted"."""
     empresa_id = repo.salvar_empresa(conn, Empresa(None, "001", "ACME LTDA", "", 1000, 100))
-    repo.salvar_socio(conn, repo.Socio(id=None, nome="Fulano", cpf=""))
+    repo.salvar_socio(conn, repo.Socio(id=None, nome="FULANO", cpf=""))
     conn.execute(
         "INSERT INTO vinculo_societario (empresa_id, socio_id, percentual_capital, data_entrada) "
         "VALUES (%s, 1, 100, '2024-01-01')", (empresa_id,)
@@ -185,7 +185,7 @@ def test_erro_no_meio_da_gravacao_nao_trava_a_conexao(conn):
     with pytest.raises(ValueError, match="Não é possível excluir"):
         repo.excluir_socio(conn, 1)  # tem vínculo: a chave estrangeira recusa
 
-    assert [s.nome for s in repo.listar_socios(conn)] == ["Fulano"]
+    assert [s.nome for s in repo.listar_socios(conn)] == ["FULANO"]
     repo.salvar_empresa(conn, Empresa(None, "002", "OUTRA LTDA", "", 1, 1))
     assert len(repo.listar_empresas(conn)) == 2
 

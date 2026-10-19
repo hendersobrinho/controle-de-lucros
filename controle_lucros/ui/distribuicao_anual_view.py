@@ -74,7 +74,10 @@ COLUNAS = [
     "Pró-labore",
     "IRRF",
     "% distribuído",
-    "Empréstimo (ano)",
+    "Empréstimo ao sócio",
+    "Adiantamento",
+    "Empréstimo do sócio",
+    "Devolução de capital",
     "Data de saída",
     "Situação",
 ]
@@ -90,7 +93,10 @@ COL_PRO_LABORE = COLUNAS.index("Pró-labore")
 COL_IRRF = COLUNAS.index("IRRF")
 COL_DATA_SAIDA = COLUNAS.index("Data de saída")
 COL_PCT_DISTRIBUIDO = COLUNAS.index("% distribuído")
-COL_EMPRESTIMO = COLUNAS.index("Empréstimo (ano)")
+COL_EMPRESTIMO = COLUNAS.index("Empréstimo ao sócio")
+COL_ADIANTAMENTO = COLUNAS.index("Adiantamento")
+COL_EMPRESTIMO_FEITO = COLUNAS.index("Empréstimo do sócio")
+COL_DEVOLUCAO = COLUNAS.index("Devolução de capital")
 COL_SITUACAO = COLUNAS.index("Situação")
 COLUNAS_EDITAVEIS = (COL_PERCENTUAL, COL_COTAS, COL_VALOR, COL_PRO_LABORE, COL_IRRF, COL_DATA_SAIDA)
 
@@ -258,7 +264,12 @@ class DistribuicaoAnualView(QWidget):
 
         self.ano = QSpinBox()
         self.ano.setRange(2000, 2100)
-        self.ano.setValue(dt.date.today().year)
+        # Abre no ano corrente — ou, se ele ainda não tem nada lançado, no
+        # último ano com distribuição: abrir num ano vazio parecia que os
+        # dados não estavam lá.
+        hoje = dt.date.today().year
+        ultimo = repo.ultimo_ano_com_distribuicao(conn)
+        self.ano.setValue(ultimo if ultimo and ultimo < hoje else hoje)
         self.ano.setMinimumWidth(90)
         self.ano.valueChanged.connect(lambda _: self._carregar())
         self.btn_ano_anterior = QPushButton("‹")
@@ -651,6 +662,9 @@ class DistribuicaoAnualView(QWidget):
                 f"R$ {formatar_valor_br(linha['irrf'])}" if linha["irrf"] else "—",
                 formatar_percentual(linha["percentual_distribuido"]),
                 f"R$ {formatar_valor_br(linha['emprestimo_recebido'])}" if linha["emprestimo_recebido"] else "—",
+                f"R$ {formatar_valor_br(linha['adiantamento'])}" if linha["adiantamento"] else "—",
+                f"R$ {formatar_valor_br(linha['emprestimo_feito'])}" if linha["emprestimo_feito"] else "—",
+                f"R$ {formatar_valor_br(linha['devolucao_capital'])}" if linha["devolucao_capital"] else "—",
                 formatar_data_br(linha["data_saida"]),
                 situacao,
             ]
@@ -682,6 +696,9 @@ class DistribuicaoAnualView(QWidget):
         # Coluna sem o que mostrar some: menos colunas, mais fácil de ler.
         self.tabela.setColumnHidden(COL_ORIGEM, not any(l["tem_trimestres"] for l in self._linhas))
         self.tabela.setColumnHidden(COL_EMPRESTIMO, not any(l["emprestimo_recebido"] for l in self._linhas))
+        self.tabela.setColumnHidden(COL_ADIANTAMENTO, not any(l["adiantamento"] for l in self._linhas))
+        self.tabela.setColumnHidden(COL_EMPRESTIMO_FEITO, not any(l["emprestimo_feito"] for l in self._linhas))
+        self.tabela.setColumnHidden(COL_DEVOLUCAO, not any(l["devolucao_capital"] for l in self._linhas))
         self.tabela.setColumnHidden(COL_DATA_SAIDA, not any(l["data_saida"] for l in self._linhas))
         self.tabela.ajustar_colunas()
         self._atualizar_disponibilidade_botoes()

@@ -107,7 +107,7 @@ def test_alteracao_fechada_nao_pode_ser_editada(conn):
 
 def test_vinculo_nao_pode_ser_criado_em_alteracao_fechada(conn):
     empresa_id = _nova_empresa(conn)
-    socio_id = repo.salvar_socio(conn, Socio(None, "Fulano", "111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(None, "FULANO", "111.111.111-11"))
     alteracao_id = repo.salvar_alteracao(
         conn, AlteracaoContratual(None, empresa_id, 1, "2024-01-10", "ACME LTDA", 10000, 1000, "Fundação")
     )
@@ -124,7 +124,7 @@ def test_vinculo_nao_pode_ser_criado_em_alteracao_fechada(conn):
 
 def test_vinculo_entrada_e_saida_rastreiam_alteracao(conn):
     empresa_id = _nova_empresa(conn)
-    socio_id = repo.salvar_socio(conn, Socio(None, "Fulano", "111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(None, "FULANO", "111.111.111-11"))
     alt1 = repo.salvar_alteracao(
         conn, AlteracaoContratual(None, empresa_id, 1, "2024-01-10", "ACME LTDA", 10000, 1000, "Fundação")
     )
@@ -159,7 +159,7 @@ def ano_2024(monkeypatch):
 
 def test_associar_socio_a_empresa_gera_alteracao_contratual(conn, ano_2024):
     empresa_id = _nova_empresa(conn, capital_social=10000, quantidade_cotas=1000)
-    socio_id = repo.salvar_socio(conn, Socio(None, "Fulano", "111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(None, "FULANO", "111.111.111-11"))
 
     assert repo.listar_alteracoes(conn, empresa_id) == []
 
@@ -178,7 +178,7 @@ def test_associar_socio_a_empresa_gera_alteracao_contratual(conn, ano_2024):
 
 def test_encerrar_vinculo_pela_aba_de_socios_gera_alteracao(conn, ano_2024):
     empresa_id = _nova_empresa(conn, capital_social=10000, quantidade_cotas=1000)
-    socio_id = repo.salvar_socio(conn, Socio(None, "Fulano", "111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(None, "FULANO", "111.111.111-11"))
     repo.associar_socio_a_empresa(conn, empresa_id, socio_id, 50, 500, "2024-03-01")
 
     vinculo = repo.listar_vinculos_socio(conn, socio_id)[0]
@@ -194,7 +194,7 @@ def test_encerrar_vinculo_pela_aba_de_socios_gera_alteracao(conn, ano_2024):
 
 def test_atualizar_cotas_fecha_vinculo_antigo_e_abre_novo(conn, ano_2024):
     empresa_id = _nova_empresa(conn, capital_social=10000, quantidade_cotas=1000)
-    socio_id = repo.salvar_socio(conn, Socio(None, "Fulano", "111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(None, "FULANO", "111.111.111-11"))
     repo.associar_socio_a_empresa(conn, empresa_id, socio_id, 50, 500, "2024-03-01")
 
     vinculo_antigo = repo.listar_vinculos_socio(conn, socio_id)[0]
@@ -218,7 +218,7 @@ def test_associar_com_entrada_de_ano_anterior_nao_inventa_alteracao_antiga(conn,
     """Entrada de anos atrás é história com contrato próprio: o vínculo fica
     com a data certa e sem alteração, pra ela ser associada depois."""
     empresa_id = _nova_empresa(conn, capital_social=10000, quantidade_cotas=1000)
-    socio_id = repo.salvar_socio(conn, Socio(None, "Fulano", "111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(None, "FULANO", "111.111.111-11"))
 
     repo.associar_socio_a_empresa(conn, empresa_id, socio_id, 50, 500, "2015-03-01", valor_capital=5000)
 
@@ -231,7 +231,7 @@ def test_associar_com_entrada_de_ano_anterior_nao_inventa_alteracao_antiga(conn,
 
 def test_alteracao_pode_ser_associada_depois(conn, ano_2024):
     empresa_id = _nova_empresa(conn)
-    socio_id = repo.salvar_socio(conn, Socio(None, "Fulano", "111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(None, "FULANO", "111.111.111-11"))
     repo.associar_socio_a_empresa(conn, empresa_id, socio_id, 50, 500, "2015-03-01")
     alteracao_id = repo.salvar_alteracao(conn, AlteracaoContratual(
         None, empresa_id, 1, "2015-03-01", "ACME LTDA", 10000, 1000, "Contrato de 2015"))
@@ -247,7 +247,7 @@ def test_alteracao_pode_ser_associada_depois(conn, ano_2024):
 def test_vinculo_nao_aceita_alteracao_de_outra_empresa(conn):
     empresa_id = _nova_empresa(conn)
     outra_id = _nova_empresa(conn, numero_chamada="002", nome="OUTRA LTDA", cnpj="")
-    socio_id = repo.salvar_socio(conn, Socio(None, "Fulano", "111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(None, "FULANO", "111.111.111-11"))
     alteracao_da_outra = repo.salvar_alteracao(conn, AlteracaoContratual(
         None, outra_id, 1, "2024-01-01", "OUTRA LTDA", 1, 1, ""))
 
@@ -261,7 +261,7 @@ def test_tirar_vinculo_de_alteracao_trancada_e_bloqueado(conn):
     """Só a alteração NOVA era conferida: trocar a de entrada por "nenhuma"
     tirava o vínculo de uma alteração trancada sem ninguém perceber."""
     empresa_id = _nova_empresa(conn)
-    socio_id = repo.salvar_socio(conn, Socio(None, "Fulano", "111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(None, "FULANO", "111.111.111-11"))
     alteracao_id = repo.salvar_alteracao(conn, AlteracaoContratual(
         None, empresa_id, 1, "2024-01-01", "ACME LTDA", 10000, 1000, ""))
     vinculo_id = repo.salvar_vinculo(conn, VinculoSocietario(
@@ -276,7 +276,7 @@ def test_tirar_vinculo_de_alteracao_trancada_e_bloqueado(conn):
 
 def test_valor_participacao_usa_estado_atual_da_empresa(conn):
     empresa_id = _nova_empresa(conn, capital_social=10000, quantidade_cotas=1000)
-    socio_id = repo.salvar_socio(conn, Socio(None, "Fulano", "111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(None, "FULANO", "111.111.111-11"))
     repo.associar_socio_a_empresa(conn, empresa_id, socio_id, 50, 500, "2024-03-01")
 
     vinculo = repo.listar_vinculos_socio(conn, socio_id)[0]
@@ -290,8 +290,8 @@ def test_valor_participacao_usa_estado_atual_da_empresa(conn):
 
 def _empresa_com_dois_socios(conn, percentuais=(60, 40)):
     empresa_id = _nova_empresa(conn, capital_social=10000, quantidade_cotas=1000)
-    s1 = repo.salvar_socio(conn, Socio(None, "Fulano", "111.111.111-11"))
-    s2 = repo.salvar_socio(conn, Socio(None, "Beltrano", "222.222.222-22"))
+    s1 = repo.salvar_socio(conn, Socio(None, "FULANO", "111.111.111-11"))
+    s2 = repo.salvar_socio(conn, Socio(None, "BELTRANO", "222.222.222-22"))
     repo.associar_socio_a_empresa(conn, empresa_id, s1, percentuais[0], percentuais[0] * 10, "2020-01-01")
     repo.associar_socio_a_empresa(conn, empresa_id, s2, percentuais[1], percentuais[1] * 10, "2020-01-01")
     return empresa_id, s1, s2
@@ -317,7 +317,7 @@ def test_panorama_distribuicao_anual_calcula_percentual_com_precisao(conn):
     linhas = repo.panorama_distribuicao_anual(conn, empresa_id, 2024)
     assert len(linhas) == 2
 
-    fulano = next(l for l in linhas if l["socio_nome"] == "Fulano")
+    fulano = next(l for l in linhas if l["socio_nome"] == "FULANO")
     assert fulano["valor_distribuido"] == 6000
     assert fulano["percentual_distribuido"] == pytest.approx(66.6666666, rel=1e-4)
     assert fulano["percentual_capital"] == 60
@@ -329,16 +329,16 @@ def test_panorama_marca_entrada_e_saida_no_ano(conn):
     vinculo_s2 = repo.listar_vinculos_socio(conn, s2)[0]
     repo.encerrar_vinculo_registrando_alteracao(conn, vinculo_s2, "2024-06-01")
 
-    s3 = repo.salvar_socio(conn, Socio(None, "Ciclano", "333.333.333-33"))
+    s3 = repo.salvar_socio(conn, Socio(None, "CICLANO", "333.333.333-33"))
     repo.associar_socio_a_empresa(conn, empresa_id, s3, 20, 200, "2024-08-01")
 
     linhas = repo.panorama_distribuicao_anual(conn, empresa_id, 2024)
     por_nome = {l["socio_nome"]: l for l in linhas}
 
-    assert por_nome["Fulano"]["entrou_no_ano"] is False
-    assert por_nome["Fulano"]["saiu_no_ano"] is False
-    assert por_nome["Beltrano"]["saiu_no_ano"] is True
-    assert por_nome["Ciclano"]["entrou_no_ano"] is True
+    assert por_nome["FULANO"]["entrou_no_ano"] is False
+    assert por_nome["FULANO"]["saiu_no_ano"] is False
+    assert por_nome["BELTRANO"]["saiu_no_ano"] is True
+    assert por_nome["CICLANO"]["entrou_no_ano"] is True
 
 
 def test_movimentacao_de_emprestimo_soma_por_ano(conn):
@@ -462,7 +462,7 @@ def _linha_cadastro(**overrides) -> dict:
         cnpj="00000000000100",
         capital_social=10000,
         quantidade_cotas=1000,
-        socio_nome="Fulano de Tal",
+        socio_nome="FULANO DE TAL",
         socio_cpf="111.111.111-11",
         tipo_pessoa="fisica",
         percentual_capital=100.0,
@@ -483,12 +483,12 @@ def test_importacao_cadastro_socio_novo_vira_pendencia(conn):
     resultado = repo.preparar_importacao_cadastro(conn, [_linha_cadastro()])
     assert resultado["prontas"] == []
     assert len(resultado["pendencias"]) == 1
-    assert resultado["pendencias"][0]["socio_nome"] == "Fulano de Tal"
+    assert resultado["pendencias"][0]["socio_nome"] == "FULANO DE TAL"
 
 
 def test_importacao_cadastro_reconhece_empresa_e_socio_existentes(conn):
     empresa_id = _nova_empresa(conn)
-    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="Fulano de Tal", cpf="111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="FULANO DE TAL", cpf="111.111.111-11"))
 
     resultado = repo.preparar_importacao_cadastro(conn, [_linha_cadastro()])
     assert resultado["pendencias"] == []
@@ -505,7 +505,7 @@ def test_importacao_cadastro_reconhece_empresa_e_socio_existentes(conn):
 
 def test_importacao_cadastro_nao_duplica_vinculo_ja_ativo(conn):
     empresa_id = _nova_empresa(conn)
-    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="Fulano de Tal", cpf="111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="FULANO DE TAL", cpf="111.111.111-11"))
     repo.salvar_vinculo(
         conn,
         VinculoSocietario(
@@ -522,9 +522,9 @@ def test_importacao_cadastro_nao_duplica_vinculo_ja_ativo(conn):
 
 
 def test_importacao_cadastro_cria_empresa_nova_quando_nao_encontra(conn):
-    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="Fulano de Tal", cpf="111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="FULANO DE TAL", cpf="111.111.111-11"))
 
-    resultado = repo.preparar_importacao_cadastro(conn, [_linha_cadastro(numero_chamada="999", empresa_nome="Nova Empresa LTDA")])
+    resultado = repo.preparar_importacao_cadastro(conn, [_linha_cadastro(numero_chamada="999", empresa_nome="NOVA EMPRESA LTDA")])
     (pronta,) = resultado["prontas"]
     assert pronta["empresa_existente"] is None
 
@@ -532,18 +532,18 @@ def test_importacao_cadastro_cria_empresa_nova_quando_nao_encontra(conn):
     assert aplicado["empresas_criadas"] == 1
     assert aplicado["vinculos_criados"] == 1
     (empresa,) = [e for e in repo.listar_empresas(conn) if e.numero_chamada == "999"]
-    assert empresa.nome == "Nova Empresa LTDA"
+    assert empresa.nome == "NOVA EMPRESA LTDA"
     vinculos = repo.listar_vinculos_empresa(conn, empresa.id)
     assert vinculos[0].socio_id == socio_id
 
 
 def test_importacao_cadastro_reaproveita_empresa_nova_entre_linhas(conn):
-    s1 = repo.salvar_socio(conn, Socio(id=None, nome="Fulano", cpf="111.111.111-11"))
-    s2 = repo.salvar_socio(conn, Socio(id=None, nome="Beltrano", cpf="222.222.222-22"))
+    s1 = repo.salvar_socio(conn, Socio(id=None, nome="FULANO", cpf="111.111.111-11"))
+    s2 = repo.salvar_socio(conn, Socio(id=None, nome="BELTRANO", cpf="222.222.222-22"))
 
     linhas = [
-        _linha_cadastro(numero_chamada="999", empresa_nome="Nova Empresa LTDA", socio_nome="Fulano", socio_cpf="111.111.111-11", percentual_capital=60),
-        _linha_cadastro(numero_chamada="999", empresa_nome="Nova Empresa LTDA", socio_nome="Beltrano", socio_cpf="222.222.222-22", percentual_capital=40),
+        _linha_cadastro(numero_chamada="999", empresa_nome="NOVA EMPRESA LTDA", socio_nome="FULANO", socio_cpf="111.111.111-11", percentual_capital=60),
+        _linha_cadastro(numero_chamada="999", empresa_nome="NOVA EMPRESA LTDA", socio_nome="BELTRANO", socio_cpf="222.222.222-22", percentual_capital=40),
     ]
     resultado = repo.preparar_importacao_cadastro(conn, linhas)
     assert len(resultado["prontas"]) == 2
@@ -571,7 +571,7 @@ def test_panorama_detecta_reentrada_real_apos_saida_definitiva(conn):
     e voltou anos depois) com atualização de cotas (fecha/reabre no mesmo
     dia, sem lacuna) — as duas usavam o mesmo sinal errado."""
     empresa_id = _nova_empresa(conn)
-    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="Fulano", cpf="111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="FULANO", cpf="111.111.111-11"))
 
     repo.salvar_vinculo(
         conn,
@@ -608,7 +608,7 @@ def test_salvar_socio_nao_permite_cpf_duplicado(conn):
     cria sócio duplicado por CPF, mas o cadastro manual (aba Sócios) não
     tinha nenhuma trava equivalente — dava pra criar dois sócios com o
     mesmo CPF direto pelo formulário."""
-    repo.salvar_socio(conn, Socio(id=None, nome="Fulano de Tal", cpf="111.111.111-11"))
+    repo.salvar_socio(conn, Socio(id=None, nome="FULANO DE TAL", cpf="111.111.111-11"))
     with pytest.raises(ValueError, match="[Jj]á existe um sócio"):
         repo.salvar_socio(conn, Socio(id=None, nome="Fulano da Silva", cpf="111.111.111-11"))
 
@@ -616,23 +616,23 @@ def test_salvar_socio_nao_permite_cpf_duplicado(conn):
 def test_salvar_socio_permite_varios_sem_cpf(conn):
     """CPF em branco não deveria colidir consigo mesmo — muitos sócios ainda
     sem documento cadastrado é normal."""
-    repo.salvar_socio(conn, Socio(id=None, nome="Fulano", cpf=""))
-    repo.salvar_socio(conn, Socio(id=None, nome="Beltrano", cpf=""))
+    repo.salvar_socio(conn, Socio(id=None, nome="FULANO", cpf=""))
+    repo.salvar_socio(conn, Socio(id=None, nome="BELTRANO", cpf=""))
     assert len(repo.listar_socios(conn)) == 2
 
 
 def test_salvar_socio_permite_atualizar_mantendo_o_proprio_cpf(conn):
-    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="Fulano", cpf="111.111.111-11"))
-    repo.salvar_socio(conn, Socio(id=socio_id, nome="Fulano de Tal", cpf="111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="FULANO", cpf="111.111.111-11"))
+    repo.salvar_socio(conn, Socio(id=socio_id, nome="FULANO DE TAL", cpf="111.111.111-11"))
     (socio,) = repo.listar_socios(conn)
-    assert socio.nome == "Fulano de Tal"
+    assert socio.nome == "FULANO DE TAL"
 
 
 def test_salvar_socio_detecta_cpf_duplicado_mesmo_sem_pontuacao(conn):
     """A mesma regra de unicidade precisa reconhecer o CPF independente de
     como foi digitado — sócio cadastrado via importação (sem máscara) tem
     que colidir com o mesmo CPF digitado com máscara no formulário manual."""
-    repo.salvar_socio(conn, Socio(id=None, nome="Fulano de Tal", cpf="11111111111"))
+    repo.salvar_socio(conn, Socio(id=None, nome="FULANO DE TAL", cpf="11111111111"))
     with pytest.raises(ValueError, match="[Jj]á existe um sócio"):
         repo.salvar_socio(conn, Socio(id=None, nome="Fulano da Silva", cpf="111.111.111-11"))
 
@@ -641,7 +641,7 @@ def test_importacao_cadastro_reconhece_cpf_sem_pontuacao_na_planilha(conn):
     """Planilhas exportadas de outros sistemas costumam vir sem máscara —
     isso não pode virar pendência de revisão pra alguém já cadastrado."""
     empresa_id = _nova_empresa(conn)
-    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="Fulano de Tal", cpf="111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="FULANO DE TAL", cpf="111.111.111-11"))
 
     resultado = repo.preparar_importacao_cadastro(
         conn, [_linha_cadastro(socio_cpf="11111111111")]
@@ -691,7 +691,7 @@ def test_excluir_socio_com_vinculo_da_mensagem_clara(conn):
 
 def test_excluir_alteracao_desfaz_a_entrada_que_ela_registrou(conn):
     empresa_id = _nova_empresa(conn)
-    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="Fulano", cpf="111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="FULANO", cpf="111.111.111-11"))
     alteracao_id = repo.salvar_alteracao(
         conn, AlteracaoContratual(id=None, empresa_id=empresa_id, numero=1, data="2024-01-01",
                                    nome_empresa="ACME LTDA", capital_social=1000, quantidade_cotas=100,
@@ -705,7 +705,7 @@ def test_excluir_alteracao_desfaz_a_entrada_que_ela_registrou(conn):
             data_entrada="2024-01-01", data_saida=None, alteracao_entrada_id=alteracao_id,
         ),
     )
-    assert repo.resumo_exclusao_alteracao(conn, alteracao_id) == {"entradas": ["Fulano"], "saidas": []}
+    assert repo.resumo_exclusao_alteracao(conn, alteracao_id) == {"entradas": ["FULANO"], "saidas": []}
 
     repo.excluir_alteracao(conn, alteracao_id)
 
@@ -716,13 +716,13 @@ def test_excluir_alteracao_desfaz_a_entrada_que_ela_registrou(conn):
 
 def test_excluir_alteracao_de_saida_devolve_o_socio(conn, ano_2024):
     empresa_id = _nova_empresa(conn)
-    socio_id = repo.salvar_socio(conn, Socio(None, "Fulano", "111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(None, "FULANO", "111.111.111-11"))
     repo.associar_socio_a_empresa(conn, empresa_id, socio_id, 50, 500, "2024-03-01")
     (vinculo,) = repo.listar_vinculos_socio(conn, socio_id)
     repo.encerrar_vinculo_registrando_alteracao(conn, vinculo, "2024-09-01")
     alteracao_saida = repo.listar_alteracoes(conn, empresa_id)[-1]
 
-    assert repo.resumo_exclusao_alteracao(conn, alteracao_saida.id) == {"entradas": [], "saidas": ["Fulano"]}
+    assert repo.resumo_exclusao_alteracao(conn, alteracao_saida.id) == {"entradas": [], "saidas": ["FULANO"]}
     repo.excluir_alteracao(conn, alteracao_saida.id)
 
     (vinculo,) = repo.listar_vinculos_socio(conn, socio_id)
@@ -735,7 +735,7 @@ def test_excluir_alteracao_de_cotas_volta_as_cotas_de_antes(conn, ano_2024):
     alteração: excluí-la tem que devolver o sócio às cotas de antes, e não
     deixá-lo sem vínculo nenhum."""
     empresa_id = _nova_empresa(conn)
-    socio_id = repo.salvar_socio(conn, Socio(None, "Fulano", "111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(None, "FULANO", "111.111.111-11"))
     repo.associar_socio_a_empresa(conn, empresa_id, socio_id, 50, 500, "2024-03-01")
     (antigo,) = repo.listar_vinculos_socio(conn, socio_id)
     repo.atualizar_cotas_vinculo(conn, antigo, 70, 700, "2024-07-01")
@@ -784,7 +784,7 @@ def test_estado_atual_empresa_usa_data_nao_numero(conn):
 
 def test_salvar_vinculo_rejeita_data_saida_anterior_a_entrada(conn):
     empresa_id = _nova_empresa(conn)
-    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="Fulano", cpf="111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="FULANO", cpf="111.111.111-11"))
     with pytest.raises(ValueError, match="data de saída"):
         repo.salvar_vinculo(
             conn,
@@ -798,7 +798,7 @@ def test_salvar_vinculo_rejeita_data_saida_anterior_a_entrada(conn):
 
 def test_encerrar_vinculo_rejeita_data_saida_anterior_a_entrada(conn):
     empresa_id = _nova_empresa(conn)
-    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="Fulano", cpf="111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="FULANO", cpf="111.111.111-11"))
     vinculo_id = repo.salvar_vinculo(
         conn,
         VinculoSocietario(
@@ -816,7 +816,7 @@ def test_encerrar_vinculo_registrando_alteracao_nao_deixa_alteracao_orfa_em_data
     automática — senão uma data inválida deixava uma alteração vazia (sem
     nenhuma saída de sócio de fato) já salva no banco."""
     empresa_id = _nova_empresa(conn)
-    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="Fulano", cpf="111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="FULANO", cpf="111.111.111-11"))
     vinculo_id = repo.associar_socio_a_empresa(conn, empresa_id, socio_id, 100.0, 100, "2024-06-01")
     vinculo = repo.buscar_vinculo(conn, vinculo_id)
 
@@ -828,7 +828,7 @@ def test_encerrar_vinculo_registrando_alteracao_nao_deixa_alteracao_orfa_em_data
 
 def test_atualizar_cotas_vinculo_rejeita_data_anterior_a_entrada(conn):
     empresa_id = _nova_empresa(conn)
-    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="Fulano", cpf="111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="FULANO", cpf="111.111.111-11"))
     vinculo_id = repo.associar_socio_a_empresa(conn, empresa_id, socio_id, 100.0, 100, "2024-06-01")
     vinculo = repo.buscar_vinculo(conn, vinculo_id)
 
@@ -884,7 +884,7 @@ def test_periodo_trancado_bloqueia_movimentacao(conn):
 
 def test_periodo_trancado_bloqueia_vinculo(conn):
     empresa_id = _nova_empresa(conn)
-    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="Fulano", cpf="111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="FULANO", cpf="111.111.111-11"))
     repo.fechar_periodo(conn, empresa_id, 2024)
 
     with pytest.raises(ValueError, match="trancado"):
@@ -912,7 +912,7 @@ def test_periodo_trancado_bloqueia_wrappers_sem_deixar_alteracao_orfa(conn):
     automática antes da operação principal — o trancamento precisa barrar
     ANTES disso, senão sobra uma alteração vazia no histórico."""
     empresa_id = _nova_empresa(conn)
-    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="Fulano", cpf="111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="FULANO", cpf="111.111.111-11"))
     repo.fechar_periodo(conn, empresa_id, 2025)
 
     with pytest.raises(ValueError, match="trancado"):
@@ -963,7 +963,7 @@ def test_importacao_cadastro_registra_saida_de_socio_ja_vinculado(conn):
     (importado antes, ou cadastrado manualmente), o vínculo é encerrado —
     não fica preso achando que "já existe" e ignorando a saída."""
     empresa_id = _nova_empresa(conn)
-    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="Fulano de Tal", cpf="111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="FULANO DE TAL", cpf="111.111.111-11"))
     repo.salvar_vinculo(
         conn,
         VinculoSocietario(
@@ -987,7 +987,7 @@ def test_importacao_cadastro_registra_saida_de_socio_ja_vinculado(conn):
 def test_importacao_cadastro_cria_vinculo_ja_encerrado_quando_entrada_e_saida_vem_juntas(conn):
     """Sócio novo que já entrou e saiu dentro do período coberto pela
     planilha (raro, mas acontece) — precisa criar o vínculo já fechado."""
-    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="Fulano de Tal", cpf="111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="FULANO DE TAL", cpf="111.111.111-11"))
     resultado = repo.preparar_importacao_cadastro(
         conn, [_linha_cadastro(data_entrada="2025-01-01", data_saida="2025-06-15")]
     )
@@ -1003,7 +1003,7 @@ def test_importacao_cadastro_cria_vinculo_ja_encerrado_quando_entrada_e_saida_ve
 
 def test_importacao_cadastro_lanca_distribuicao_do_ano(conn):
     empresa_id = _nova_empresa(conn)
-    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="Fulano de Tal", cpf="111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="FULANO DE TAL", cpf="111.111.111-11"))
 
     resultado = repo.preparar_importacao_cadastro(
         conn,
@@ -1033,7 +1033,7 @@ def test_importacao_cadastro_com_alteracao_id_amarra_vinculo_a_ela(conn):
     criado (e, se houver, encerrado) pela linha entra amarrado à mesma
     alteração já aberta — não é criada nenhuma outra."""
     empresa_id = _nova_empresa(conn)
-    repo.salvar_socio(conn, Socio(id=None, nome="Fulano de Tal", cpf="111.111.111-11"))
+    repo.salvar_socio(conn, Socio(id=None, nome="FULANO DE TAL", cpf="111.111.111-11"))
     alteracao_id = repo.salvar_alteracao(
         conn,
         AlteracaoContratual(
@@ -1055,12 +1055,12 @@ def test_importacao_cadastro_criar_alteracao_por_empresa_abre_uma_por_empresa(co
     """Sem alteração já escolhida (import pela tela geral), cada empresa
     tocada por um vínculo novo ganha sua própria alteração automática —
     linhas da mesma empresa reaproveitam a mesma, não uma por linha."""
-    socio_a = repo.salvar_socio(conn, Socio(id=None, nome="Fulano de Tal", cpf="111.111.111-11"))
+    socio_a = repo.salvar_socio(conn, Socio(id=None, nome="FULANO DE TAL", cpf="111.111.111-11"))
     socio_b = repo.salvar_socio(conn, Socio(id=None, nome="Ciclana de Tal", cpf="222.222.222-22"))
     linhas = [
-        _linha_cadastro(numero_chamada="101", empresa_nome="Empresa A LTDA", cnpj="", socio_nome="Fulano de Tal", socio_cpf="111.111.111-11"),
+        _linha_cadastro(numero_chamada="101", empresa_nome="Empresa A LTDA", cnpj="", socio_nome="FULANO DE TAL", socio_cpf="111.111.111-11"),
         _linha_cadastro(numero_chamada="101", empresa_nome="Empresa A LTDA", cnpj="", socio_nome="Ciclana de Tal", socio_cpf="222.222.222-22"),
-        _linha_cadastro(numero_chamada="102", empresa_nome="Empresa B LTDA", cnpj="", socio_nome="Fulano de Tal", socio_cpf="111.111.111-11"),
+        _linha_cadastro(numero_chamada="102", empresa_nome="Empresa B LTDA", cnpj="", socio_nome="FULANO DE TAL", socio_cpf="111.111.111-11"),
     ]
     resultado = repo.preparar_importacao_cadastro(conn, linhas)
     aplicado = repo.aplicar_importacao_cadastro(conn, resultado["prontas"], criar_alteracao_por_empresa=True)
@@ -1083,7 +1083,7 @@ def test_importacao_com_entrada_antiga_nao_cria_alteracao_antiga(conn, ano_2024)
     """O caso que motivou a regra: relatório com sócios que entraram há anos
     criava uma alteração "nova" datada lá atrás. A data de entrada fica, a
     alteração não é inventada."""
-    repo.salvar_socio(conn, Socio(id=None, nome="Fulano de Tal", cpf="111.111.111-11"))
+    repo.salvar_socio(conn, Socio(id=None, nome="FULANO DE TAL", cpf="111.111.111-11"))
     resultado = repo.preparar_importacao_cadastro(conn, [_linha_cadastro(data_entrada="2015-08-10")])
     aplicado = repo.aplicar_importacao_cadastro(conn, resultado["prontas"], criar_alteracao_por_empresa=True)
 
@@ -1100,7 +1100,7 @@ def test_importacao_cadastro_sem_flags_nao_cria_nem_amarra_alteracao(conn):
     passar alteracao_id nem criar_alteracao_por_empresa) não mexe em
     alteração contratual nenhuma."""
     empresa_id = _nova_empresa(conn)
-    repo.salvar_socio(conn, Socio(id=None, nome="Fulano de Tal", cpf="111.111.111-11"))
+    repo.salvar_socio(conn, Socio(id=None, nome="FULANO DE TAL", cpf="111.111.111-11"))
     resultado = repo.preparar_importacao_cadastro(conn, [_linha_cadastro()])
     aplicado = repo.aplicar_importacao_cadastro(conn, resultado["prontas"])
 
@@ -1115,7 +1115,7 @@ def test_excluir_vinculo_bloqueado_por_alteracao_fechada(conn):
     amarrado a uma alteração contratual fechada, mesmo sem poder editá-lo.
     Exclusão é uma edição mais drástica — precisa da mesma trava."""
     empresa_id = _nova_empresa(conn)
-    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="Fulano", cpf="111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="FULANO", cpf="111.111.111-11"))
     alteracao_id = repo.salvar_alteracao(
         conn, AlteracaoContratual(id=None, empresa_id=empresa_id, numero=1, data="2024-01-10",
                                    nome_empresa="ACME LTDA", capital_social=10000, quantidade_cotas=1000,
@@ -1177,7 +1177,7 @@ def test_panorama_saida_anterior_fora_do_ano_nao_conta_como_reentrada(conn):
     """Se a saída anterior foi em outro ano (não neste), não é uma
     reentrada "deste ano" — só uma continuação normal da sociedade."""
     empresa_id = _nova_empresa(conn)
-    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="Fulano", cpf="111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="FULANO", cpf="111.111.111-11"))
 
     repo.salvar_vinculo(
         conn,
@@ -1209,7 +1209,7 @@ def test_panorama_nao_trava_com_vinculo_de_data_entrada_igual_saida(conn):
     sócio entrou) fazia _inicio_do_vinculo_continuo bater consigo mesmo
     como "segmento anterior" e nunca sair do laço."""
     empresa_id = _nova_empresa(conn)
-    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="Fulano", cpf="111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="FULANO", cpf="111.111.111-11"))
 
     # simula o cenario real: vinculo fechado no mesmo dia que comecou
     # (ex.: atualizar_cotas_vinculo com data == data_entrada do vinculo)
@@ -1384,7 +1384,7 @@ def test_importacao_sem_callback_continua_funcionando(conn):
 
 def _empresa_com_socio_ativo(conn, percentual=100.0, data_entrada="2023-01-01"):
     empresa_id = _nova_empresa(conn)
-    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="Fulano de Tal", cpf="111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="FULANO DE TAL", cpf="111.111.111-11"))
     repo.salvar_vinculo(
         conn,
         VinculoSocietario(
@@ -1495,7 +1495,7 @@ def test_reimportar_com_coluna_em_branco_nao_apaga_o_que_ja_existe(conn):
 
 
 def test_importacao_grava_o_capital_do_socio(conn):
-    repo.salvar_socio(conn, Socio(id=None, nome="Fulano de Tal", cpf="111.111.111-11"))
+    repo.salvar_socio(conn, Socio(id=None, nome="FULANO DE TAL", cpf="111.111.111-11"))
     resultado = repo.preparar_importacao_cadastro(conn, [_linha_cadastro(valor_capital_socio=12345.67)])
     repo.aplicar_importacao_cadastro(conn, resultado["prontas"])
 
@@ -1546,8 +1546,8 @@ def test_encerra_apenas_quem_nao_esta_no_quadro_do_relatorio(conn):
     """Opção "o relatório é o quadro completo": quem continua ativo aqui e
     não está no arquivo recebe saída na data da alteração."""
     empresa_id = _nova_empresa(conn)
-    fica = repo.salvar_socio(conn, Socio(id=None, nome="Fulano de Tal", cpf="111.111.111-11"))
-    sai = repo.salvar_socio(conn, Socio(id=None, nome="Beltrano Ausente", cpf="222.222.222-22"))
+    fica = repo.salvar_socio(conn, Socio(id=None, nome="FULANO DE TAL", cpf="111.111.111-11"))
+    sai = repo.salvar_socio(conn, Socio(id=None, nome="BELTRANO AUSENTE", cpf="222.222.222-22"))
     for socio_id in (fica, sai):
         repo.salvar_vinculo(
             conn,
@@ -1569,7 +1569,7 @@ def test_encerra_apenas_quem_nao_esta_no_quadro_do_relatorio(conn):
         conn, empresa_id, {"11111111111"}, "2025-06-01", alteracao_id
     )
 
-    assert encerrados == ["Beltrano Ausente"]
+    assert encerrados == ["BELTRANO AUSENTE"]
     por_socio = {v.socio_id: v for v in repo.listar_vinculos_empresa(conn, empresa_id)}
     assert por_socio[fica].data_saida is None
     assert por_socio[sai].data_saida == "2025-06-01"
@@ -1603,7 +1603,7 @@ def test_baixa_por_ausencia_olha_o_quadro_na_data_da_alteracao(conn):
     entra na conta: naquela data ele ainda não era sócio, e não há vínculo a
     encerrar."""
     empresa_id = _nova_empresa(conn)
-    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="Entrou Depois", cpf="222.222.222-22"))
+    socio_id = repo.salvar_socio(conn, Socio(id=None, nome="ENTROU DEPOIS", cpf="222.222.222-22"))
     repo.salvar_vinculo(
         conn,
         VinculoSocietario(
@@ -1623,7 +1623,7 @@ def test_baixa_por_ausencia_olha_o_quadro_na_data_da_alteracao(conn):
     # Alteração posterior: aí sim ele está no quadro e recebe a saída.
     assert repo.encerrar_vinculos_fora_da_lista(
         conn, empresa_id, {"11111111111"}, "2026-06-01", None
-    ) == ["Entrou Depois"]
+    ) == ["ENTROU DEPOIS"]
     (vinculo,) = repo.listar_vinculos_empresa(conn, empresa_id)
     assert vinculo.data_saida == "2026-06-01"
 
@@ -1647,7 +1647,7 @@ def test_valor_da_cota_desconhecido_sem_capital_nem_cotas(conn):
 def test_capital_do_socio_pelas_cotas_usa_o_valor_da_cota(conn):
     empresa_id = _nova_empresa(conn, capital_social=0, quantidade_cotas=0)
     repo.definir_valor_da_cota(conn, empresa_id, 0.01)
-    socio_id = repo.salvar_socio(conn, Socio(None, "Fulano", "111.111.111-11"))
+    socio_id = repo.salvar_socio(conn, Socio(None, "FULANO", "111.111.111-11"))
     vinculo_id = repo.salvar_vinculo(conn, VinculoSocietario(None, empresa_id, socio_id, 50, 250_000, "2020-01-01", None))
     assert repo.valor_participacao(conn, repo.buscar_vinculo(conn, vinculo_id)) == 2500.0
 
@@ -1657,7 +1657,7 @@ def test_importacao_calcula_o_capital_pelo_valor_da_cota(conn):
     o valor da cota informado na empresa, o capital sai certo."""
     empresa_id = _nova_empresa(conn)
     repo.definir_valor_da_cota(conn, empresa_id, 0.01)
-    repo.salvar_socio(conn, Socio(id=None, nome="Fulano de Tal", cpf="111.111.111-11"))
+    repo.salvar_socio(conn, Socio(id=None, nome="FULANO DE TAL", cpf="111.111.111-11"))
 
     resultado = repo.preparar_importacao_cadastro(conn, [_linha_cadastro(cotas_socio=250_000)])
     repo.aplicar_importacao_cadastro(conn, resultado["prontas"])
@@ -1673,8 +1673,18 @@ def test_importacao_calcula_o_capital_pelo_valor_da_cota(conn):
 
 def test_importacao_sem_valor_da_cota_nao_inventa_capital(conn):
     empresa_id = _nova_empresa(conn)
-    repo.salvar_socio(conn, Socio(id=None, nome="Fulano de Tal", cpf="111.111.111-11"))
+    repo.salvar_socio(conn, Socio(id=None, nome="FULANO DE TAL", cpf="111.111.111-11"))
     resultado = repo.preparar_importacao_cadastro(conn, [_linha_cadastro(cotas_socio=500)])
     repo.aplicar_importacao_cadastro(conn, resultado["prontas"])
     (vinculo,) = repo.listar_vinculos_empresa(conn, empresa_id)
     assert vinculo.valor_capital is None
+
+
+def test_nomes_ficam_em_maiusculo_ao_salvar(conn):
+    """Digitado à mão em minúsculo ou vindo da importação, o nome fica igual:
+    MAIÚSCULO, sem espaço sobrando (os acentos ficam)."""
+    empresa_id = repo.salvar_empresa(conn, Empresa(None, " 042 ", "clínica   ammare ltda", "", 0, 0))
+    socio_id = repo.salvar_socio(conn, Socio(None, "  joão da   silva ", ""))
+    empresa = repo.buscar_empresa(conn, empresa_id)
+    assert (empresa.nome, empresa.numero_chamada) == ("CLÍNICA AMMARE LTDA", "042")
+    assert next(s for s in repo.listar_socios(conn) if s.id == socio_id).nome == "JOÃO DA SILVA"

@@ -30,35 +30,35 @@ def app():
 def test_acha_pelo_documento_mesmo_com_nome_diferente(conn):
     """CPF é o indício mais forte: nome digitado diferente não deve esconder
     que a pessoa já existe."""
-    repo.salvar_socio(conn, Socio(None, "João da Silva", "005.169.717-35"))
+    repo.salvar_socio(conn, Socio(None, "JOÃO DA SILVA", "005.169.717-35"))
     (achado, motivo), = repo.socios_semelhantes(conn, "Outro Nome", "005.169.717-35")
-    assert achado.nome == "João da Silva"
+    assert achado.nome == "JOÃO DA SILVA"
     assert motivo == "mesmo CPF/CNPJ"
 
 
 def test_acha_ignorando_acento_caixa_e_espaco(conn):
-    repo.salvar_socio(conn, Socio(None, "João da Silva", ""))
+    repo.salvar_socio(conn, Socio(None, "JOÃO DA SILVA", ""))
     for digitado in ("JOAO DA SILVA", "joão  da  silva", "  João da Silva "):
         achados = repo.socios_semelhantes(conn, digitado, "")
         assert [m for _, m in achados] == ["mesmo nome"], digitado
 
 
 def test_nome_parcial_vira_parecido_e_nao_igual(conn):
-    repo.salvar_socio(conn, Socio(None, "João da Silva", ""))
+    repo.salvar_socio(conn, Socio(None, "JOÃO DA SILVA", ""))
     (_, motivo), = repo.socios_semelhantes(conn, "João", "")
     assert motivo == "nome parecido"
 
 
 def test_nao_sugere_nada_com_pouca_coisa_digitada(conn):
     """Duas letras casariam com meio cadastro e o aviso viraria ruído."""
-    repo.salvar_socio(conn, Socio(None, "João da Silva", ""))
+    repo.salvar_socio(conn, Socio(None, "JOÃO DA SILVA", ""))
     assert repo.socios_semelhantes(conn, "Jo", "") == []
     assert repo.socios_semelhantes(conn, "", "") == []
 
 
 def test_editar_um_socio_nao_sugere_ele_mesmo(conn):
-    socio_id = repo.salvar_socio(conn, Socio(None, "João da Silva", "005.169.717-35"))
-    assert repo.socios_semelhantes(conn, "João da Silva", "005.169.717-35", ignorar_id=socio_id) == []
+    socio_id = repo.salvar_socio(conn, Socio(None, "JOÃO DA SILVA", "005.169.717-35"))
+    assert repo.socios_semelhantes(conn, "JOÃO DA SILVA", "005.169.717-35", ignorar_id=socio_id) == []
 
 
 def test_documento_vem_antes_de_nome_parecido(conn):
@@ -69,21 +69,21 @@ def test_documento_vem_antes_de_nome_parecido(conn):
 
 
 def test_aviso_aparece_ao_digitar_nome_ja_cadastrado(conn):
-    repo.salvar_socio(conn, Socio(None, "João da Silva", "005.169.717-35"))
+    repo.salvar_socio(conn, Socio(None, "JOÃO DA SILVA", "005.169.717-35"))
     dialogo = DialogoSocio(conn)
     assert not dialogo.aviso_duplicado.isVisibleTo(dialogo)
 
     dialogo.nome.setText("JOAO DA SILVA")
     assert dialogo.aviso_duplicado.isVisibleTo(dialogo)
-    assert "João da Silva" in dialogo.aviso_duplicado.text()
+    assert "JOÃO DA SILVA" in dialogo.aviso_duplicado.text()
     # Cadastrando um novo, dá pra pular direto pro cadastro que já existe.
     assert dialogo.btn_abrir_semelhante.isVisibleTo(dialogo)
 
 
 def test_aviso_some_quando_o_nome_deixa_de_bater(conn):
-    repo.salvar_socio(conn, Socio(None, "João da Silva", ""))
+    repo.salvar_socio(conn, Socio(None, "JOÃO DA SILVA", ""))
     dialogo = DialogoSocio(conn)
-    dialogo.nome.setText("João da Silva")
+    dialogo.nome.setText("JOÃO DA SILVA")
     assert dialogo.aviso_duplicado.isVisibleTo(dialogo)
     dialogo.nome.setText("Carlos Andrade")
     assert not dialogo.aviso_duplicado.isVisibleTo(dialogo)
@@ -91,20 +91,20 @@ def test_aviso_some_quando_o_nome_deixa_de_bater(conn):
 
 def test_editando_nao_oferece_abrir_outro_cadastro(conn):
     """Abrir outro cadastro no meio da edição descartaria o que está na tela."""
-    repo.salvar_socio(conn, Socio(None, "João da Silva", ""))
+    repo.salvar_socio(conn, Socio(None, "JOÃO DA SILVA", ""))
     outro_id = repo.salvar_socio(conn, Socio(None, "Carlos Andrade", ""))
     dialogo = DialogoSocio(conn, next(s for s in repo.listar_socios(conn) if s.id == outro_id))
-    dialogo.nome.setText("João da Silva")
+    dialogo.nome.setText("JOÃO DA SILVA")
     assert dialogo.aviso_duplicado.isVisibleTo(dialogo)
     assert not dialogo.btn_abrir_semelhante.isVisibleTo(dialogo)
 
 
 def test_abrir_o_semelhante_leva_pro_cadastro_existente(conn, monkeypatch):
-    socio_id = repo.salvar_socio(conn, Socio(None, "João da Silva", ""))
+    socio_id = repo.salvar_socio(conn, Socio(None, "JOÃO DA SILVA", ""))
     aba = SociosTab(conn)
 
     def digitar_e_abrir(dialogo):
-        dialogo.nome.setText("João da Silva")
+        dialogo.nome.setText("JOÃO DA SILVA")
         dialogo._abrir_semelhante()
         return dialogo.result()
 
@@ -115,12 +115,12 @@ def test_abrir_o_semelhante_leva_pro_cadastro_existente(conn, monkeypatch):
 
 def test_o_aviso_nao_impede_cadastrar_homonimo(conn):
     """Homônimo existe; o aviso informa, não bloqueia."""
-    repo.salvar_socio(conn, Socio(None, "João da Silva", "005.169.717-35"))
+    repo.salvar_socio(conn, Socio(None, "JOÃO DA SILVA", "005.169.717-35"))
     dialogo = DialogoSocio(conn)
-    dialogo.nome.setText("João da Silva")
+    dialogo.nome.setText("JOÃO DA SILVA")
     dialogo.cpf.setText("072.525.437-81")
     dialogo._salvar(associar=False)
-    assert len([s for s in repo.listar_socios(conn) if s.nome == "João da Silva"]) == 2
+    assert len([s for s in repo.listar_socios(conn) if s.nome == "JOÃO DA SILVA"]) == 2
 
 
 # ==================================== 3. responsável padrão do informe =====
@@ -286,7 +286,7 @@ def test_montar_a_tela_nao_dispara_erro_no_aviso(conn):
     já na construção (o ajuste da máscara limpa o documento). Como o Qt engole
     exceção dentro de slot, um erro aqui passaria despercebido — este teste
     chama o handler direto, sem a rede de proteção do Qt."""
-    repo.salvar_socio(conn, Socio(None, "João da Silva", "005.169.717-35"))
+    repo.salvar_socio(conn, Socio(None, "JOÃO DA SILVA", "005.169.717-35"))
     dialogo = DialogoSocio(conn)
     dialogo._procurar_semelhantes()  # não pode levantar
     assert not dialogo.aviso_duplicado.isVisibleTo(dialogo)

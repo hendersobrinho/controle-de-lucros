@@ -72,7 +72,18 @@ def buscar_empresa(conn: Conexao, empresa_id: int) -> Empresa | None:
     return Empresa(**dict(row)) if row else None
 
 
+def normalizar_nome(texto: str | None) -> str:
+    """Nome de empresa ou sócio como o sistema guarda: MAIÚSCULO, sem espaço
+    sobrando. Sem isso, "Clínica Ammare" digitado à mão e "CLÍNICA AMMARE"
+    vindo da importação viram cadastros que parecem diferentes — e a busca,
+    a ordem da lista e a conferência com o relatório tropeçam nisso. Os
+    acentos ficam: são parte do nome."""
+    return re.sub(r"\s+", " ", texto or "").strip().upper()
+
+
 def salvar_empresa(conn: Conexao, e: Empresa) -> int:
+    e.nome = normalizar_nome(e.nome)
+    e.numero_chamada = (e.numero_chamada or "").strip()
     if e.id is None:
         cur = conn.execute(
             """INSERT INTO empresa (numero_chamada, nome, cnpj, capital_social, quantidade_cotas, valor_cota)
@@ -194,6 +205,7 @@ def socios_semelhantes(
 
 
 def salvar_socio(conn: Conexao, s: Socio) -> int:
+    s.nome = normalizar_nome(s.nome)
     cpf_normalizado = normalizar_documento(s.cpf)
     if cpf_normalizado:
         outros = conn.execute("SELECT id, nome, cpf FROM socio WHERE id IS DISTINCT FROM %s", (s.id,)).fetchall()
@@ -299,6 +311,7 @@ def _validar_numero_alteracao(conn: Conexao, a: AlteracaoContratual) -> None:
 
 
 def salvar_alteracao(conn: Conexao, a: AlteracaoContratual) -> int:
+    a.nome_empresa = normalizar_nome(a.nome_empresa)
     if a.id is not None:
         existente = buscar_alteracao(conn, a.id)
         if existente is not None and existente.fechada:
@@ -1409,15 +1422,14 @@ def panorama_distribuicao_anual(conn: Conexao, empresa_id: int, ano_base: int) -
         for socio_id, vinculos in vinculos_por_socio.items()
         if any(v["data_entrada"] <= fim and (v["data_saida"] is None or v["data_saida"] >= inicio) for v in vinculos)
     ]
-    emprestimos = {
-        r["socio_id"]: r["total"]
-        for r in conn.execute(
-            """SELECT socio_id, SUM(valor) AS total FROM movimentacao
-               WHERE empresa_id=%s AND tipo='emprestimo_empresa_para_socio' AND left(data, 4)=%s
-               GROUP BY socio_id""",
-            (empresa_id, str(ano_base)),
-        ).fetchall()
-    }
+    movimentos: dict[int, dict[str, float]] = {}
+    for r in conn.execute(
+        """SELECT socio_id, tipo, SUM(valor) AS total FROM movimentacao
+           WHERE empresa_id=%s AND left(data, 4)=%s GROUP BY socio_id, tipo""",
+        (empresa_id, str(ano_base)),
+    ).fetchall():
+        movimentos.setdefault(r["socio_id"], {})[r["tipo"]] = r["total"]
+    emprestimos = {sid: m.get("emprestimo_empresa_para_socio", 0.0) for sid, m in movimentos.items()}
 
     distribuicoes = {d.socio_id: d for d in listar_distribuicoes(conn, empresa_id, ano_base)}
     total_distribuido = total_distribuido_empresa_ano(conn, empresa_id, ano_base)
@@ -1492,6 +1504,9 @@ def panorama_distribuicao_anual(conn: Conexao, empresa_id: int, ano_base: int) -
                 "acumulado_trimestral": somas["valor_distribuido"] if somas else 0.0,
                 "origem_valor": origem_valor,
                 "emprestimo_recebido": emprestimo,
+                "adiantamento": movimentos.get(socio_id, {}).get("adiantamento_lucro", 0.0),
+                "emprestimo_feito": movimentos.get(socio_id, {}).get("emprestimo_socio_para_empresa", 0.0),
+                "devolucao_capital": movimentos.get(socio_id, {}).get("devolucao_capital", 0.0),
                 "data_entrada": vinculo_atual["data_entrada"],
                 "data_saida": None if ainda_ativo else vinculo_atual["data_saida"],
                 "entrou_no_ano": inicio <= primeira_entrada <= fim,
@@ -1523,6 +1538,18 @@ def listar_distribuicoes_trimestrais(
             (empresa_id, ano_base, trimestre),
         ).fetchall()
     return [DistribuicaoTrimestral(**dict(r)) for r in rows]
+
+
+def ultimo_ano_com_distribuicao(conn: Conexao, empresa_id: int | None = None) -> int | None:
+    """O ano mais recente com distribuição lançada (da empresa, ou de
+    qualquer uma) — é onde as telas de distribuição abrem, em vez de num ano
+    ainda vazio."""
+    if empresa_id is None:
+        row = conn.execute("SELECT MAX(ano_base) AS a FROM distribuicao_lucro").fetchone()
+    else:
+        row = conn.execute("SELECT MAX(ano_base) AS a FROM distribuicao_lucro WHERE empresa_id=%s",
+                           (empresa_id,)).fetchone()
+    return row["a"]
 
 
 def trimestres_lancados(conn: Conexao, empresa_id: int, ano_base: int) -> list[int]:
@@ -1812,6 +1839,21 @@ def preparar_importacao_cadastro(conn: Conexao, linhas: list[dict]) -> dict:
     return {"prontas": prontas, "pendencias": pendencias, "conflitos": conflitos}
 
 
+def _lancar_distribuicao_da_linha(conn: Conexao, empresa_id: int, linha: dict) -> int:
+    if linha.get("ano_base") and (linha.get("valor_distribuido") or linha.get("pro_labore") or linha.get("irrf")):
+        salvar_distribuicao(
+            conn,
+            empresa_id,
+            linha["ano_base"],
+            linha["socio_id"],
+            linha.get("valor_distribuido") or 0.0,
+            pro_labore=linha.get("pro_labore") or 0.0,
+            irrf=linha.get("irrf") or 0.0,
+        )
+        return 1
+    return 0
+
+
 def aplicar_importacao_cadastro(
     conn: Conexao,
     linhas_resolvidas: list[dict],
@@ -1934,6 +1976,9 @@ def aplicar_importacao_cadastro(
                 # A data de saída gravada não é mexida de propósito: se o
                 # relatório mudou de ideia sobre ela, isso é correção de
                 # histórico e se faz na aba Sócios, onde fica registrada.
+                # A distribuição da linha entra assim mesmo — pular a linha
+                # inteira perdia o lucro do ano de quem já tinha saído.
+                distribuicoes_lancadas += _lancar_distribuicao_da_linha(conn, empresa_id, linha)
                 continue
 
         if vinculo_ativo is None:
@@ -1990,17 +2035,7 @@ def aplicar_importacao_cadastro(
             )
             vinculos_encerrados += 1
 
-        if linha.get("ano_base") and (linha.get("valor_distribuido") or linha.get("pro_labore") or linha.get("irrf")):
-            salvar_distribuicao(
-                conn,
-                empresa_id,
-                linha["ano_base"],
-                linha["socio_id"],
-                linha.get("valor_distribuido") or 0.0,
-                pro_labore=linha.get("pro_labore") or 0.0,
-                irrf=linha.get("irrf") or 0.0,
-            )
-            distribuicoes_lancadas += 1
+        distribuicoes_lancadas += _lancar_distribuicao_da_linha(conn, empresa_id, linha)
 
     return {
         "empresas_criadas": empresas_criadas,

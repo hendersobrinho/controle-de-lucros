@@ -40,7 +40,7 @@ def avisos(monkeypatch):
 def empresas(conn):
     acme = repo.salvar_empresa(conn, Empresa(None, "001", "ACME LTDA", "11.222.333/0001-81", 100000, 1000))
     repo.salvar_empresa(conn, Empresa(None, "002", "BETA LTDA", "", 50000, 500))
-    fulano = repo.salvar_socio(conn, Socio(None, "Fulano de Tal", "005.169.717-35"))
+    fulano = repo.salvar_socio(conn, Socio(None, "FULANO DE TAL", "005.169.717-35"))
     repo.salvar_vinculo(conn, VinculoSocietario(None, acme, fulano, 60, 600, "2020-01-01", None, valor_capital=60000))
     return EmpresasTab(conn)
 
@@ -89,7 +89,7 @@ def test_ficha_mostra_capital_valor_da_cota_e_quadro(empresas):
     assert "R$ 100.000,00" in textos            # capital social
     assert "R$ 100,00" in textos                # valor da cota (capital ÷ cotas)
     assert "capital ÷ cotas" in textos
-    assert "Fulano de Tal" in textos
+    assert "FULANO DE TAL" in textos
     assert "60,0000%" in textos
     assert "As participações somam 60,0000%, não 100%" in textos
 
@@ -239,7 +239,7 @@ def test_dois_cliques_no_socio_do_quadro_abre_o_socio(empresas):
     (linha,) = empresas.findChildren(mod._LinhaQuadro)
     linha.mouseDoubleClickEvent(QMouseEvent(
         QEvent.MouseButtonDblClick, QPointF(5, 5), QPointF(5, 5), Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
-    fulano = next(s for s in repo.listar_socios(empresas.conn) if s.nome == "Fulano de Tal")
+    fulano = next(s for s in repo.listar_socios(empresas.conn) if s.nome == "FULANO DE TAL")
     assert abertos == [fulano.id]
 
 

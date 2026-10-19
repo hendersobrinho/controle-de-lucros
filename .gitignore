@@ -13,3 +13,8 @@ dist/
 
 # saída do Inno Setup — instalador gerado localmente
 installer/
+
+# Planilhas reais de clientes e o que é gerado a partir delas: nunca no git
+001.Distribui*.xlsx
+dados_tratados/
+Mfinanceiro.svg

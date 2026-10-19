@@ -30,8 +30,8 @@ def app():
 def cenario(conn):
     acme = repo.salvar_empresa(conn, Empresa(None, "001", "ACME LTDA", "", 100000, 1000))
     repo.salvar_empresa(conn, Empresa(None, "002", "BETA LTDA", "", 50000, 500))
-    fulano = repo.salvar_socio(conn, Socio(None, "Fulano de Tal", "005.169.717-35"))
-    repo.salvar_socio(conn, Socio(None, "Zeca Sem Empresa", ""))
+    fulano = repo.salvar_socio(conn, Socio(None, "FULANO DE TAL", "005.169.717-35"))
+    repo.salvar_socio(conn, Socio(None, "ZECA SEM EMPRESA", ""))
     repo.salvar_vinculo(conn, VinculoSocietario(None, acme, fulano, 100, 1000, "2020-01-01", None))
     return {"acme": acme, "fulano": fulano}
 
@@ -59,7 +59,7 @@ def test_clicar_num_socio_mostra_a_ficha(conn, cenario):
     tela = SociosTab(conn)
     _clicar(tela, 0)  # Fulano de Tal
     assert tela._socio_atual_id == cenario["fulano"]
-    assert tela.titulo_socio.text() == "Fulano de Tal"
+    assert tela.titulo_socio.text() == "FULANO DE TAL"
     assert len(tela.cartoes) == 1
 
 
@@ -75,4 +75,4 @@ def test_setas_do_teclado_tambem_trocam_a_ficha(conn, cenario):
     _clicar(tela, 0)
     QTest.keyClick(tela.lista, Qt.Key_Down)
     QApplication.processEvents()
-    assert tela.titulo_socio.text() == "Zeca Sem Empresa"
+    assert tela.titulo_socio.text() == "ZECA SEM EMPRESA"

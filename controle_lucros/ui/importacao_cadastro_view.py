@@ -18,7 +18,6 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QFrame,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -442,6 +441,69 @@ class _CartaoFormato(QFrame):
         event.accept()
 
 
+class _LinhaLayout(QFrame):
+    """Um layout criado pelo escritório, como linha de lista: o nome, de que
+    linha os dados começam e quais colunas ele lê ("A Nº · B Empresa · D
+    Sócio…"). Lista, e não cartões: o escritório pode criar muitos layouts, e
+    uma lista cresce sem bagunçar a tela."""
+
+    clicado = Signal(str)
+
+    def __init__(self, chave: str, layout: LayoutImportacao | None, parent=None):
+        super().__init__(parent)
+        self.chave = chave
+        self.setProperty("role", "linhaLayout")
+        self.setProperty("escolhido", "false")
+        self.setCursor(Qt.PointingHandCursor)
+
+        self.marca = QLabel("○")
+        self.marca.setProperty("role", "marcaRadio")
+        self.marca.setFixedWidth(18)
+        nome = QLabel(layout.nome if layout and layout.nome else "Layout novo (ainda não salvo)")
+        nome.setProperty("role", "valorCampo")
+        fonte = nome.font()
+        fonte.setBold(True)
+        nome.setFont(fonte)
+        if layout is not None and layout.colunas:
+            mapeados = layout.campos_mapeados()
+            pedacos = [f"{layout.letra(c)} {ROTULOS_CAMPOS[c]}" for c in mapeados[:6]]
+            colunas = "  ·  ".join(pedacos) + (f"  · +{len(mapeados) - 6}" if len(mapeados) > 6 else "")
+            detalhe = f"dados a partir da linha {layout.linha_inicial}"
+        else:
+            colunas = "nenhuma coluna configurada ainda"
+            detalhe = "termine de configurar e salve"
+        texto_colunas = QLabel(colunas)
+        texto_colunas.setProperty("role", "mono")
+        texto_colunas.setStyleSheet("font-size: 12px;")
+        texto_detalhe = QLabel(detalhe)
+        texto_detalhe.setProperty("role", "subtitulo")
+
+        coluna = QVBoxLayout()
+        coluna.setSpacing(1)
+        topo = QHBoxLayout()
+        topo.addWidget(nome)
+        topo.addStretch()
+        topo.addWidget(texto_detalhe)
+        coluna.addLayout(topo)
+        coluna.addWidget(texto_colunas)
+        linha = QHBoxLayout(self)
+        linha.setContentsMargins(12, 8, 14, 8)
+        linha.setSpacing(10)
+        linha.addWidget(self.marca, 0, Qt.AlignTop)
+        linha.addLayout(coluna, 1)
+
+    def escolher(self, escolhido: bool) -> None:
+        self.setProperty("escolhido", "true" if escolhido else "false")
+        self.marca.setText("●" if escolhido else "○")
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        if event.button() == Qt.LeftButton:
+            self.clicado.emit(self.chave)
+        event.accept()
+
+
 def _botao_acao(titulo: str, detalhe: str, primario: bool = False) -> QPushButton:
     """Botão grande de ação, com o que ele faz em duas linhas."""
     botao = QPushButton(f"{titulo}\n{detalhe}")
@@ -565,41 +627,62 @@ class ImportacaoCadastroView(QWidget):
         return caixa
 
     def _montar_card_formato(self) -> QWidget:
-        card, col = _passo("1", "Formato do arquivo", "Como as colunas da planilha estão organizadas.")
+        card, col = _passo("1", "Formato do arquivo", "Escolha um: o padrão do sistema ou um layout seu.")
 
-        self.grade_formatos = QGridLayout()
-        self.grade_formatos.setHorizontalSpacing(10)
-        self.grade_formatos.setVerticalSpacing(10)
+        # ---- grupo 1: os modelos do sistema
+        titulo_modelos = QLabel("PLANILHA NO PADRÃO DO SISTEMA")
+        titulo_modelos.setProperty("role", "rotuloCampo")
+        self.grade_formatos = QHBoxLayout()
+        self.grade_formatos.setSpacing(10)
+        col.addWidget(titulo_modelos)
         col.addLayout(self.grade_formatos)
+        col.addSpacing(6)
 
-        self.btn_novo_layout = QPushButton("+  Novo layout")
+        # ---- grupo 2: os layouts criados pelo escritório
+        titulo_layouts = QLabel("LAYOUTS CRIADOS PELO ESCRITÓRIO — para planilha de outra origem")
+        titulo_layouts.setProperty("role", "rotuloCampo")
+        self.btn_novo_layout = QPushButton("+  Criar layout")
+        self.btn_novo_layout.setProperty("role", "primario")
         self.btn_novo_layout.setToolTip(
             "Para planilha de outra origem: você diz em que coluna (A, B, C…) está cada informação."
         )
         self.btn_novo_layout.clicked.connect(self._novo_layout)
-        self.btn_duplicar = QPushButton("Duplicar como layout")
-        self.btn_duplicar.setToolTip("Cria um layout já preenchido a partir do formato selecionado.")
+        self.btn_duplicar = QPushButton("Copiar o selecionado")
+        self.btn_duplicar.setToolTip(
+            "Cria um layout novo já preenchido com as colunas do formato selecionado (modelo ou layout)."
+        )
         self.btn_duplicar.clicked.connect(self._duplicar_como_layout)
-        self.btn_editar_layout = QPushButton("Editar layout")
-        self.btn_editar_layout.setToolTip("Mudar as colunas ou a linha inicial deste layout.")
+        self.btn_editar_layout = QPushButton("Editar")
+        self.btn_editar_layout.setToolTip("Mudar as colunas ou a linha inicial do layout selecionado.")
         self.btn_editar_layout.clicked.connect(self._editar_layout)
-        self.btn_excluir_layout = QPushButton("Excluir layout")
+        self.btn_excluir_layout = QPushButton("Excluir")
         self.btn_excluir_layout.setProperty("role", "perigo")
         self.btn_excluir_layout.clicked.connect(self._excluir_layout)
+        cabeca_layouts = QHBoxLayout()
+        cabeca_layouts.setSpacing(8)
+        cabeca_layouts.addWidget(titulo_layouts, 1)
+        cabeca_layouts.addWidget(self.btn_editar_layout)
+        cabeca_layouts.addWidget(self.btn_excluir_layout)
+        cabeca_layouts.addWidget(self.btn_duplicar)
+        cabeca_layouts.addWidget(self.btn_novo_layout)
+        col.addLayout(cabeca_layouts)
 
+        self.lista_layouts = QVBoxLayout()
+        self.lista_layouts.setSpacing(6)
+        col.addLayout(self.lista_layouts)
+        self.vazio_layouts = QLabel(
+            "Nenhum layout criado ainda. Crie um quando a planilha vier de outro sistema, com as "
+            "colunas em outra ordem."
+        )
+        self.vazio_layouts.setProperty("role", "subtitulo")
+        self.vazio_layouts.setWordWrap(True)
+        col.addWidget(self.vazio_layouts)
+
+        col.addSpacing(4)
         self.descricao_formato = QLabel()
         self.descricao_formato.setWordWrap(True)
-        self.descricao_formato.setProperty("role", "subtitulo")
-
-        acoes = QHBoxLayout()
-        acoes.setSpacing(8)
-        acoes.addWidget(self.btn_novo_layout)
-        acoes.addWidget(self.btn_duplicar)
-        acoes.addStretch()
-        acoes.addWidget(self.btn_editar_layout)
-        acoes.addWidget(self.btn_excluir_layout)
+        self.descricao_formato.setProperty("role", "formatoEscolhido")
         col.addWidget(self.descricao_formato)
-        col.addLayout(acoes)
         return card
 
     def _montar_card_layout(self) -> QWidget:
@@ -699,30 +782,29 @@ class ImportacaoCadastroView(QWidget):
         self._ao_trocar_formato()
 
     def _montar_cartoes(self) -> None:
-        while self.grade_formatos.count():
-            item = self.grade_formatos.takeAt(0)
-            if item.widget() is not None:
-                item.widget().hide()
-                item.widget().deleteLater()
+        for arranjo in (self.grade_formatos, self.lista_layouts):
+            while arranjo.count():
+                item = arranjo.takeAt(0)
+                if item.widget() is not None:
+                    item.widget().hide()
+                    item.widget().deleteLater()
         self._cartoes = {}
-        cartoes = []
         for modelo in MODELOS_CADASTRO:
-            cartoes.append(_CartaoFormato(
+            cartao = _CartaoFormato(
                 f"modelo:{modelo.id}", modelo.nome, "Modelo do sistema",
                 f"{len(modelo.colunas)} colunas, lidas pelo cabeçalho",
-            ))
-        for layout in self._layouts_salvos.values():
-            cartoes.append(_CartaoFormato(
-                f"layout:{layout.id}", layout.nome, "Seu layout", layout.resumo(),
-            ))
-        if self.formato.findData("novo:") >= 0:
-            cartoes.append(_CartaoFormato("novo:", "Layout novo", "Não salvo", "termine de configurar e salve"))
-        for indice, cartao in enumerate(cartoes):
+            )
             cartao.clicado.connect(self._escolher_cartao)
             self._cartoes[cartao.chave] = cartao
-            self.grade_formatos.addWidget(cartao, indice // 3, indice % 3)
-        for coluna in range(3):
-            self.grade_formatos.setColumnStretch(coluna, 1)
+            self.grade_formatos.addWidget(cartao, 1)
+        linhas = [_LinhaLayout(f"layout:{layout.id}", layout) for layout in self._layouts_salvos.values()]
+        if self.formato.findData("novo:") >= 0:
+            linhas.append(_LinhaLayout("novo:", self.editor.layout_atual() if self._editor_aberto else None))
+        for linha in linhas:
+            linha.clicado.connect(self._escolher_cartao)
+            self._cartoes[linha.chave] = linha
+            self.lista_layouts.addWidget(linha)
+        self.vazio_layouts.setVisible(not linhas)
 
     def _escolher_cartao(self, chave: str) -> None:
         indice = self.formato.findData(chave)
@@ -785,7 +867,7 @@ class ImportacaoCadastroView(QWidget):
         # preencher); layout salvo aparece recolhido até pedirem pra editar.
         self._editor_aberto = tipo == "novo"
         self._atualizar_visibilidade_editor()
-        self.btn_excluir_layout.setVisible(tipo == "layout")
+        self.btn_excluir_layout.setEnabled(tipo == "layout")
         self.btn_duplicar.setEnabled(tipo != "novo")
         chave = self.formato.currentData()
         for chave_cartao, cartao in self._cartoes.items():
@@ -797,16 +879,15 @@ class ImportacaoCadastroView(QWidget):
             layout = self._layout_escolhido()
             # Com a grade recolhida, o resumo é a única prova na tela de qual
             # desenho vai ser usado — e de que dá pra mexer nele.
-            dica = "" if self._editor_aberto else " Use “Editar layout” para ver as colunas."
+            dica = "" if self._editor_aberto else " Para mudar as colunas, use “Editar layout”."
             self.descricao_formato.setText(
-                "Layout configurado por você: as colunas são lidas pela <b>posição</b> "
-                f"(letra), não pelo cabeçalho. {layout.resumo()}.{dica}"
+                f"✓ <b>Selecionado: layout “{layout.nome or 'novo'}”</b> — lê as colunas pela "
+                f"<b>letra</b>, não pelo cabeçalho. {layout.resumo()}.{dica}"
             )
         else:
             modelo = self._modelo_escolhido()
             self.descricao_formato.setText(
-                f"{modelo.descricao}  ({len(modelo.colunas)} colunas, reconhecidas pelo "
-                "cabeçalho da planilha.)"
+                f"✓ <b>Selecionado: {modelo.nome}</b> — {modelo.descricao}"
             )
         self._atualizar_aviso_layout()
 
@@ -824,7 +905,6 @@ class ImportacaoCadastroView(QWidget):
         # grade sem querer precisa de um caminho de volta que não seja
         # começar tudo de novo.
         self.btn_editar_layout.setEnabled(self._modo_layout() and not self._editor_aberto)
-        self.btn_editar_layout.setVisible(self._modo_layout())
 
     def _editar_layout(self) -> None:
         self._editor_aberto = True

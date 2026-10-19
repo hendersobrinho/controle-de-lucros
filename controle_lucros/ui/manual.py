@@ -66,6 +66,11 @@ uma distribuição de três anos atrás.</p>
 não há nuvem. Por isso o <b>backup é responsabilidade do escritório</b>: veja
 os tópicos <i>Backup</i> e <i>Servidor PostgreSQL</i>.</p>
 
+<h3>Nomes sempre em maiúsculo</h3>
+<p>Nome de empresa e de sócio é gravado em <b>MAIÚSCULO</b> e sem espaço
+sobrando — digitado à mão ou vindo de importação. Assim "Clínica Ammare" e
+"CLÍNICA AMMARE" não viram dois cadastros. Os acentos são mantidos.</p>
+
 <h3>Digitar valores</h3>
 <p>Nos campos de valor e de cotas, os pontos de milhar aparecem <b>enquanto
 você digita</b>: 1500000 vira 1.500.000 na hora; a vírgula separa os
@@ -226,9 +231,13 @@ no fim desta página).</p>
 
 <h3>A tela em três passos</h3>
 <ol>
-<li><b>Formato do arquivo</b> — os formatos aparecem como cartões; clique no
-que corresponde à sua planilha. O escolhido fica com a borda laranja e
-<b>✓ Selecionado</b>.</li>
+<li><b>Formato do arquivo</b> — em dois grupos: <b>Planilha no padrão do
+sistema</b> (os três modelos) e <b>Layouts criados pelo escritório</b> (uma
+lista, uma linha por layout, mostrando quais colunas ele lê: "B Empresa · D
+Sócio…"). Clique no que corresponde à sua planilha; o escolhido fica com a borda
+laranja, e a faixa embaixo diz <b>✓ Selecionado: …</b>. Os botões
+<b>+ Criar layout</b>, <b>Editar</b>, <b>Excluir</b> e <b>Copiar o
+selecionado</b> ficam no cabeçalho da lista.</li>
 <li><b>Importar</b> — <b>Importar planilha</b> usa o formato escolhido (o nome
 dele aparece no próprio botão); <b>Importar relatório de sócios</b> lê o PDF ou
 Excel de outro sistema e não depende do formato.</li>
@@ -634,10 +643,14 @@ dados fictícios. Importar substitui os valores dos sócios que estiverem na
 planilha; quem não estiver nela não é alterado.</p>
 
 <h3>Movimentações</h3>
-<p><b>Gerenciar movimentações</b> registra empréstimos (nos dois sentidos),
-adiantamento de lucro e devolução de capital do sócio selecionado. A soma dos
-empréstimos <i>da empresa para o sócio</i> alimenta a coluna "Empréstimo (ano)"
-e o Quadro 7 do informe de rendimentos.</p>
+<p><b>Movimentações do sócio</b> registra empréstimos (nos dois sentidos),
+adiantamento de lucro e devolução de capital do sócio selecionado. Na tabela,
+cada tipo tem a sua coluna — <b>Empréstimo ao sócio</b>, <b>Adiantamento</b>,
+<b>Empréstimo do sócio</b> e <b>Devolução de capital</b> —, que só aparece
+quando há valor no ano. Os empréstimos <i>da empresa para o sócio</i> também
+vão para o Quadro 7 do informe de rendimentos.</p>
+<p>A tela abre no ano corrente; se ele ainda não tem nada lançado, abre no
+último ano com distribuição.</p>
 """
 
 _TRIMESTRAL = """
