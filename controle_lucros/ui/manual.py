@@ -814,34 +814,50 @@ aparece meses depois.</p>
 
 _DASHBOARD = """
 <h2>Dashboards</h2>
-<h3>Os dois alertas</h3>
-<p>Além dos totais, as telas de dashboard cruzam dados que já estavam no
-sistema mas ninguém via juntos:</p>
-<ul>
-<li><b>Distribuição sem pró-labore</b> (Visão geral) — sócio <b>pessoa
-física</b> que recebeu lucros e nenhum pró-labore no ano. É o cruzamento que a
-fiscalização faz para requalificar a distribuição como remuneração. A frase
-acima dos gráficos resume o período, e o gráfico mostra quem e quanto; quando
-são vários anos, o rótulo diz há quantos anos a situação se repete. Sócio
-pessoa jurídica não entra: holding não tem pró-labore.</li>
-<li><b>Desvio em relação à participação</b> (Análise por empresa) — quanto cada
-sócio recebeu <b>além ou aquém</b>, em reais, do que a participação dele daria.
-A classificação diz <i>se</i> houve desproporção; o desvio diz <b>quanto</b>,
-que é o número que cabe numa conversa com o cliente. Não há verde no gráfico de
-propósito: receber aquém é tão fora do eixo quanto receber além.</li>
-</ul>
-<p>O programa aponta o fato, não dá o veredito: se o pró-labore lançado é
-compatível com o trabalho do sócio, ou se a desproporção está amparada no
-contrato social, é análise de quem entende do caso.</p>
-<p>Duas visões de leitura, sem edição.</p>
+<p>Duas telas de leitura, sem edição. As duas abrem no último ano com
+distribuição lançada.</p>
+
+<h3>Escolher o período</h3>
+<p>Os anos com lançamento aparecem como fichas no alto. <b>Clique num ano</b>
+para ver só ele; <b>Shift+clique</b> em outro ano escolhe o intervalo entre os
+dois; <b>Todo o período</b> pega tudo. Clicar numa barra do gráfico de anos
+também escolhe aquele ano.</p>
 
 <h3>Visão geral</h3>
-<p>Panorama de todas as empresas num intervalo de anos: totais distribuídos,
-comparativos e a classificação de cada distribuição.</p>
+<ul>
+<li><b>Painel azul</b> — o lucro distribuído no período, com a variação em
+relação ao período anterior do mesmo tamanho (▲ subiu, ▼ caiu); quantas
+empresas distribuíram e quantos sócios receberam (de quantos ativos);
+pró-labore, IRRF, empréstimos e adiantamentos.</li>
+<li><b>Evolução ano a ano</b> — o total de cada ano; o período escolhido fica
+em destaque.</li>
+<li><b>Pontos de atenção</b> — o que pede providência: distribuição
+<b>fora da proporção</b> do capital, <b>lucro sem pró-labore</b>, empresas
+<b>sem distribuição</b> no período e <b>empréstimos a sócios</b>. A borda do
+cartão diz a gravidade: vermelho, laranja, azul ou verde (tudo certo).</li>
+<li><b>Empresas que mais distribuíram</b> e <b>sócios que mais receberam</b> —
+clique numa empresa para abrir a análise dela no mesmo período; num sócio,
+para abrir a ficha dele.</li>
+</ul>
 
 <h3>Análise por empresa</h3>
-<p>Uma empresa por vez, com a evolução ao longo dos anos e a situação de cada
-sócio.</p>
+<ul>
+<li><b>Painel azul</b> — total, média por ano, quantos sócios receberam,
+quanto saiu na proporção, pró-labore, IRRF e empréstimos.</li>
+<li><b>Distribuição por ano</b> — uma barra por ano, dividida pelos sócios,
+cada um na sua cor (passe o mouse para ver os valores).</li>
+<li><b>Pontos de atenção</b> da empresa — fora da proporção, sem pró-labore e
+sócios que não receberam.</li>
+<li><b>Fatia do capital × fatia do que recebeu</b> — para cada sócio, a barra
+cinza é o percentual do capital e a colorida o percentual do que ele recebeu;
+à direita, quanto ele recebeu <b>acima</b> ou <b>abaixo</b> da proporção, em
+reais — o número que cabe numa conversa com o cliente.</li>
+</ul>
+
+<h3>Lucro sem pró-labore</h3>
+<p>Sócio <b>pessoa física</b> que recebeu lucros e nenhum pró-labore no ano. É o
+cruzamento que a fiscalização faz para requalificar a distribuição como
+remuneração. Pessoa jurídica não entra: holding não tem pró-labore.</p>
 
 <h3>Proporcional e desproporcional</h3>
 <p>Uma distribuição é <b>proporcional</b> quando o percentual recebido bate com

@@ -554,6 +554,52 @@ def build_stylesheet() -> str:
         color: {p["PAPER_RAISED"]};
         font-weight: 600;
     }}
+    /* Dashboards. */
+    QPushButton[role="fichaAno"] {{
+        background: {p["PAPER_RAISED"]};
+        border: 1px solid {p["HAIRLINE"]};
+        border-radius: 14px;
+        padding: 5px 14px;
+        min-height: 16px;
+        font-size: 13px;
+        font-weight: 600;
+        color: {p["INK_MUTED"]};
+    }}
+    QPushButton[role="fichaAno"]:hover {{
+        border-color: {p["BRASS"]};
+        color: {p["INK"]};
+    }}
+    QPushButton[role="fichaAno"]:checked {{
+        background: {p["INK"]};
+        border-color: {p["INK"]};
+        color: {p["PAPER_RAISED"]};
+    }}
+    QFrame[role="cartaoAtencao"] {{
+        background: {p["PAPER_RAISED"]};
+        border: 1px solid {p["HAIRLINE"]};
+        border-left: 5px solid {p["HAIRLINE"]};
+        border-radius: 8px;
+    }}
+    QFrame[role="cartaoAtencao"][tom="alerta"] {{ border-left-color: {p["SAIU_FG"]}; }}
+    QFrame[role="cartaoAtencao"][tom="aviso"] {{ border-left-color: {p["BRASS"]}; }}
+    QFrame[role="cartaoAtencao"][tom="ok"] {{ border-left-color: {p["SEAL_GREEN"]}; }}
+    QFrame[role="cartaoAtencao"][tom="info"] {{ border-left-color: {p["INK"]}; }}
+    QLabel[role="numeroAtencao"] {{
+        font-family: {FONT_DISPLAY};
+        font-size: 22px;
+        font-weight: 700;
+        color: {p["INK"]};
+    }}
+    QFrame[role="cartaoAtencao"][tom="alerta"] QLabel[role="numeroAtencao"] {{ color: {p["SAIU_FG"]}; }}
+    QFrame[role="cartaoAtencao"][tom="ok"] QLabel[role="numeroAtencao"] {{ color: {p["SEAL_GREEN"]}; }}
+    QLabel[role="variacao"] {{
+        border-radius: 10px;
+        padding: 2px 10px;
+        font-size: 12px;
+        font-weight: 700;
+    }}
+    QLabel[role="variacao"][tom="sobe"] {{ background: {p["SEAL_GREEN"]}; color: {p["PAPER_RAISED"]}; }}
+    QLabel[role="variacao"][tom="desce"] {{ background: {p["SAIU_FG"]}; color: {p["PAPER_RAISED"]}; }}
     /* Aviso dentro da tela: faixa clara com borda à esquerda, em vez de um
        bloco de cor chapada que gritava mais que os próprios números. */
     QLabel[role="alerta"] {{

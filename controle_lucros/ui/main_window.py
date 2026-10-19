@@ -62,6 +62,8 @@ class MainWindow(QMainWindow):
         self.cadastro.definir_callback_selecao(lambda empresa: self.alteracoes.selecionar_empresa(empresa.id))
         self.cadastro.ao_abrir_alteracoes = self._abrir_alteracoes_da_empresa
         self.cadastro.ao_abrir_socio = self._abrir_socio
+        self.dashboard_geral.ao_abrir_empresa = self._abrir_analise_da_empresa
+        self.dashboard_geral.ao_abrir_socio = self._abrir_socio
 
         self._paginas = {
             "empresas.cadastro": self.cadastro,
@@ -131,6 +133,11 @@ class MainWindow(QMainWindow):
     def _abrir_alteracoes_da_empresa(self, empresa_id: int) -> None:
         self.alteracoes.selecionar_empresa(empresa_id)
         self._ir_para("empresas.alteracoes")
+
+    def _abrir_analise_da_empresa(self, empresa_id: int, ano_de: int, ano_ate: int, tolerancia: float) -> None:
+        """Do ranking da visão geral para a análise da empresa, no mesmo período."""
+        self.dashboard_empresa.selecionar(empresa_id, ano_de, ano_ate, tolerancia, carregar=False)
+        self._ir_para("dashboard.empresa")  # abrir a página já recarrega, uma vez
 
     def _abrir_socio(self, socio_id: int) -> None:
         """Do quadro da ficha da empresa direto pro sócio, na aba Sócios."""

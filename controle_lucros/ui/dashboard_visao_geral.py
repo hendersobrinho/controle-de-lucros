@@ -1,36 +1,47 @@
-"""Dashboard — visão geral de todas as empresas: quanto foi distribuído
-proporcional/desproporcionalmente, quanto foi emprestado, e quais empresas
-não distribuíram nada no período selecionado. Só cartões e gráficos — sem
-tabela — pra ficar um raio-x rápido, não mais uma lista pra ler."""
+"""Dashboard — visão geral do escritório no período escolhido.
+
+De cima para baixo, na ordem em que se pergunta:
+
+1. Quanto foi distribuído, se cresceu ou caiu em relação ao período
+   anterior, e o tamanho da carteira (empresas, sócios, pró-labore, IRRF,
+   empréstimos) — o painel azul.
+2. Como isso evoluiu ano a ano — clicar num ano escolhe aquele ano.
+3. Pontos de atenção — o que pede providência: distribuição fora da
+   proporção do capital, lucro sem pró-labore, empresa sem distribuição,
+   empréstimo a sócio.
+4. Quem mais distribuiu e quem mais recebeu — clicar abre o detalhe.
+"""
 from __future__ import annotations
 
 import datetime as dt
 from pathlib import Path
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QApplication,
     QDoubleSpinBox,
     QFileDialog,
+    QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
 from .. import repositories as repo
+from ..analise import sem_pro_labore
 from ..planilha import exportar_relatorio_excel
+from . import formulario as form_ui
 from .classificacao import CLASSE_PDF, LABEL
-from . import theme
-from ..analise import resumo_sem_pro_labore, sem_pro_labore
-from .common import CartaoEstatistica, formatar_percentual, formatar_valor_br
-from .graficos import (
-    grafico_barras_emprestimos_por_empresa,
-    grafico_barras_por_empresa,
-    grafico_sem_pro_labore,
-    nova_chart_view,
-)
+from .common import formatar_percentual, formatar_valor_br
+from .painel_distribuicao import divisor_hero, kpi
+from .paineis_dashboard import CartaoAtencao, EvolucaoAnos, Ranking, SeletorPeriodo, bloco, nomes_unicos
+from .paineis_dashboard import reais as _reais
 from .relatorio_pdf import exportar_relatorio_pdf
 
 COLUNAS_RELATORIO = [
@@ -39,15 +50,8 @@ COLUNAS_RELATORIO = [
 ]
 
 
-def _lista_curta(nomes: list[str], quantos: int = 2) -> str:
-    """Os primeiros nomes e um "e mais N". O cartão tem uma linha para o
-    contexto; despejar dez razões sociais ali esticava a caixa e desalinhava a
-    fileira inteira."""
-    if not nomes:
-        return ""
-    mostrados = ", ".join(nomes[:quantos])
-    resto = len(nomes) - quantos
-    return f"{mostrados} e mais {resto}" if resto > 0 else mostrados
+def _rotulo_periodo(de: int, ate: int) -> str:
+    return str(de) if de == ate else f"{de} a {ate}"
 
 
 class DashboardVisaoGeralView(QWidget):
@@ -55,173 +59,289 @@ class DashboardVisaoGeralView(QWidget):
         super().__init__(parent)
         self.conn = conn
         self._resultado: dict | None = None
+        self._painel: dict | None = None
+        # A classificação (proporcional, sem pró-labore…) é a consulta cara:
+        # guardada por período e tolerância, e esquecida em atualizar(), que é
+        # quando os dados podem ter mudado.
+        self._cache_classificacao: dict[tuple, dict] = {}
+        # A janela principal liga: abrir a análise de uma empresa e a ficha de um sócio.
+        self.ao_abrir_empresa = None
+        self.ao_abrir_socio = None
 
-        ano_atual = dt.date.today().year
-
+        # O período fica nestes dois (as exportações leem deles); as fichas de
+        # ano os mudam. Não entram no layout.
+        ano = repo.ultimo_ano_com_distribuicao(conn) or dt.date.today().year
         self.ano_de = QSpinBox()
         self.ano_de.setRange(2000, 2100)
-        self.ano_de.setValue(ano_atual)
-        self.ano_de.valueChanged.connect(lambda _: self._carregar())
-
+        self.ano_de.setValue(ano)
         self.ano_ate = QSpinBox()
         self.ano_ate.setRange(2000, 2100)
-        self.ano_ate.setValue(ano_atual)
-        self.ano_ate.valueChanged.connect(lambda _: self._carregar())
+        self.ano_ate.setValue(ano)
+        for spin in (self.ano_de, self.ano_ate):
+            spin.hide()
+
+        self.periodo = SeletorPeriodo()
+        self.periodo.mudou.connect(self._ao_mudar_periodo)
 
         self.tolerancia = QDoubleSpinBox()
         self.tolerancia.setRange(0, 100)
         self.tolerancia.setValue(0)
         self.tolerancia.setSuffix(" p.p.")
+        self.tolerancia.setFixedWidth(100)
         self.tolerancia.valueChanged.connect(lambda _: self._carregar())
-
-        btn_todo_periodo = QPushButton("Todo o período")
-        btn_todo_periodo.clicked.connect(self._selecionar_todo_periodo)
-
-        topo = QHBoxLayout()
-        topo.addWidget(QLabel("De:"))
-        topo.addWidget(self.ano_de)
-        topo.addWidget(QLabel("até:"))
-        topo.addWidget(self.ano_ate)
-        topo.addWidget(btn_todo_periodo)
-        topo.addSpacing(16)
-        topo.addWidget(QLabel("Tolerância:"))
-        topo.addWidget(self.tolerancia)
-        topo.addStretch()
-
-        self.cartao_empresas = CartaoEstatistica(
-            "Empresas", descricao="Empresas com movimento no período filtrado acima")
-        self.cartao_sem_distribuicao = CartaoEstatistica(
-            "Sem distribuição", descricao="Empresas sem nenhuma distribuição no período")
-        self.cartao_total = CartaoEstatistica(
-            "Total distribuído", descricao="Soma de tudo o que foi distribuído no período")
-        self.cartao_proporcional = CartaoEstatistica(
-            "Proporcional", descricao="Distribuído na proporção do capital de cada sócio")
-        self.cartao_desproporcional = CartaoEstatistica(
-            "Desproporcional", descricao="Distribuído fora da proporção do capital")
-        self.cartao_emprestimos = CartaoEstatistica(
-            "Emprestado a sócios", descricao="Total emprestado a sócios no período")
-
-        cartoes = QHBoxLayout()
-        cartoes.setSpacing(12)
-        for cartao in (
-            self.cartao_empresas,
-            self.cartao_sem_distribuicao,
-            self.cartao_total,
-            self.cartao_proporcional,
-            self.cartao_desproporcional,
-            self.cartao_emprestimos,
-        ):
-            cartoes.addWidget(cartao, 1)
-
-        # A frase que resume o achado do período. Fica entre os cartões e os
-        # gráficos porque é a única linha da tela que pede uma providência —
-        # os números acima descrevem, esta aponta.
-        self.aviso_pro_labore = QLabel("")
-        self.aviso_pro_labore.setWordWrap(True)
-
-        self.grafico_pizza = nova_chart_view()
-        self.grafico_barras = nova_chart_view()
-        self.grafico_emprestimos = nova_chart_view()
-        graficos = QHBoxLayout()
-        graficos.setSpacing(12)
-        graficos.addWidget(self.grafico_pizza, 1)
-        graficos.addWidget(self.grafico_barras, 1)
-        graficos.addWidget(self.grafico_emprestimos, 1)
 
         self.btn_exportar_excel = QPushButton("Exportar Excel")
         self.btn_exportar_excel.clicked.connect(self._exportar_excel)
-
         self.btn_exportar_pdf = QPushButton("Exportar PDF")
         self.btn_exportar_pdf.clicked.connect(self._exportar_pdf)
 
-        botoes = QHBoxLayout()
+        topo = QHBoxLayout()
+        topo.setSpacing(14)
+        topo.addWidget(form_ui.campo("Período", self.periodo,
+                                     info="Clique num ano. Shift+clique escolhe de um ano até outro."), 1)
+        topo.addWidget(form_ui.campo(
+            "Tolerância", self.tolerancia,
+            info="Quanto a fatia recebida pode se afastar da fatia do capital (em pontos "
+                 "percentuais) e ainda contar como proporcional."))
+        botoes = QVBoxLayout()
         botoes.addStretch()
-        botoes.addWidget(self.btn_exportar_excel)
-        botoes.addWidget(self.btn_exportar_pdf)
+        linha_botoes = QHBoxLayout()
+        linha_botoes.addWidget(self.btn_exportar_excel)
+        linha_botoes.addWidget(self.btn_exportar_pdf)
+        botoes.addLayout(linha_botoes)
+        topo.addLayout(botoes)
+
+        # ---- painel azul
+        self.selo = QLabel()
+        self.selo.setProperty("role", "heroAno")
+        bloco_total, self.valor_total, self.nota_total = kpi("Lucro distribuído", grande=True)
+        self.variacao = QLabel()
+        self.variacao.setProperty("role", "variacao")
+        linha_total = QHBoxLayout()
+        linha_total.addWidget(bloco_total)
+        linha_total.addWidget(self.variacao, 0, Qt.AlignTop)
+        linha_total.addStretch()
+        esquerda = QVBoxLayout()
+        esquerda.setSpacing(8)
+        esquerda.addWidget(self.selo, 0, Qt.AlignLeft)
+        esquerda.addLayout(linha_total)
+
+        grade = QGridLayout()
+        grade.setHorizontalSpacing(28)
+        grade.setVerticalSpacing(14)
+        self.kpis = {}
+        for i, (chave, rotulo) in enumerate((
+            ("empresas", "Empresas que distribuíram"), ("socios", "Sócios que receberam"),
+            ("pro_labore", "Pró-labore"), ("irrf", "IRRF retido"),
+            ("emprestado", "Emprestado a sócios"), ("adiantado", "Adiantamento de lucro"),
+        )):
+            caixa, valor, nota = kpi(rotulo)
+            self.kpis[chave] = (valor, nota)
+            grade.addWidget(caixa, i // 3, i % 3)
+
+        self.hero = QFrame()
+        self.hero.setProperty("role", "hero")
+        dentro = QHBoxLayout(self.hero)
+        dentro.setContentsMargins(28, 22, 28, 22)
+        dentro.setSpacing(26)
+        dentro.addLayout(esquerda, 2)
+        dentro.addWidget(divisor_hero())
+        dentro.addLayout(grade, 3)
+
+        # ---- evolução + pontos de atenção
+        self.evolucao = EvolucaoAnos()
+        self.evolucao.clicado.connect(lambda ano: self.periodo.escolher(ano, ano))
+        quadro_evolucao, col = bloco("Evolução ano a ano", "Lucro distribuído em cada ano. Clique numa barra para ver o ano.")
+        col.addWidget(self.evolucao, 1)
+
+        self.atencao_desproporcional = CartaoAtencao("Fora da proporção")
+        self.atencao_pro_labore = CartaoAtencao("Lucro sem pró-labore")
+        self.atencao_sem_distribuicao = CartaoAtencao("Empresas sem distribuição")
+        self.atencao_emprestimos = CartaoAtencao("Empréstimos a sócios")
+        quadro_atencao, col = bloco("Pontos de atenção", "O que vale olhar antes de fechar o período.")
+        grade_atencao = QGridLayout()
+        grade_atencao.setSpacing(10)
+        for i, cartao in enumerate((self.atencao_desproporcional, self.atencao_pro_labore,
+                                    self.atencao_sem_distribuicao, self.atencao_emprestimos)):
+            grade_atencao.addWidget(cartao, i // 2, i % 2)
+        col.addLayout(grade_atencao)
+
+        meio = QHBoxLayout()
+        meio.setSpacing(14)
+        meio.addWidget(quadro_evolucao, 5)
+        meio.addWidget(quadro_atencao, 4)
+
+        # ---- rankings
+        self.ranking_empresas = Ranking()
+        self.ranking_empresas.clicado.connect(self._abrir_empresa)
+        self.ranking_socios = Ranking()
+        self.ranking_socios.clicado.connect(self._abrir_socio)
+        self.quadro_empresas, col = bloco("Empresas que mais distribuíram", "Clique para ver a análise da empresa.")
+        col.addWidget(self.ranking_empresas)
+        col.addStretch()
+        self.quadro_socios, col = bloco("Sócios que mais receberam", "Somando todas as empresas. Clique para abrir o sócio.")
+        col.addWidget(self.ranking_socios)
+        col.addStretch()
+        rankings = QHBoxLayout()
+        rankings.setSpacing(14)
+        rankings.addWidget(self.quadro_empresas, 1)
+        rankings.addWidget(self.quadro_socios, 1)
+
+        corpo = form_ui.Caixa()
+        coluna = QVBoxLayout(corpo)
+        coluna.setContentsMargins(0, 0, 8, 12)
+        coluna.setSpacing(14)
+        coluna.addLayout(topo)
+        coluna.addWidget(self.hero)
+        coluna.addLayout(meio)
+        coluna.addLayout(rankings)
+        coluna.addStretch()
+        rolagem = QScrollArea()
+        rolagem.setProperty("role", "listaCartoes")
+        rolagem.setWidgetResizable(True)
+        rolagem.setFrameShape(QFrame.NoFrame)
+        rolagem.setWidget(corpo)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(14)
-        layout.addLayout(topo)
-        layout.addLayout(cartoes)
-        layout.addWidget(self.aviso_pro_labore)
-        layout.addLayout(graficos, 1)
-        layout.addLayout(botoes)
+        layout.addWidget(rolagem)
 
+        self.periodo.definir_anos(repo.anos_disponiveis(conn), ano, ano)
         self._carregar()
 
-    def _selecionar_todo_periodo(self) -> None:
-        anos = repo.anos_disponiveis(self.conn)
-        self.ano_de.blockSignals(True)
-        self.ano_de.setValue(min(anos))
-        self.ano_de.blockSignals(False)
-        self.ano_ate.setValue(max(anos))
+    # ------------------------------------------------------------ período --
+    def _ao_mudar_periodo(self, de: int, ate: int) -> None:
+        self.ano_de.setValue(de)
+        self.ano_ate.setValue(ate)
+        self._carregar()
 
     def atualizar(self) -> None:
+        self._cache_classificacao.clear()
+        self.periodo.definir_anos(repo.anos_disponiveis(self.conn), self.ano_de.value(), self.ano_ate.value())
         self._carregar()
 
-    def _carregar(self) -> None:
-        if self.ano_de.value() > self.ano_ate.value():
-            self.ano_de.blockSignals(True)
-            self.ano_de.setValue(self.ano_ate.value())
-            self.ano_de.blockSignals(False)
+    def _abrir_empresa(self, empresa_id: int) -> None:
+        if self.ao_abrir_empresa is not None:
+            self.ao_abrir_empresa(empresa_id, self.ano_de.value(), self.ano_ate.value(), self.tolerancia.value())
 
-        self._resultado = repo.visao_geral(self.conn, self.ano_de.value(), self.ano_ate.value(), self.tolerancia.value())
-        self._atualizar_cartoes()
-        self._atualizar_graficos()
+    def _abrir_socio(self, socio_id: int) -> None:
+        if self.ao_abrir_socio is not None:
+            self.ao_abrir_socio(socio_id)
+
+    # -------------------------------------------------------------- dados --
+    def _carregar(self) -> None:
+        de, ate = self.ano_de.value(), self.ano_ate.value()
+        chave = (de, ate, self.tolerancia.value())
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            self._painel = repo.painel_geral(self.conn, de, ate)
+            if chave not in self._cache_classificacao:
+                self._cache_classificacao[chave] = repo.visao_geral(self.conn, de, ate, self.tolerancia.value())
+            self._resultado = self._cache_classificacao[chave]
+        finally:
+            QApplication.restoreOverrideCursor()
+        self._mostrar_painel(de, ate)
+        self._mostrar_atencao()
         self._atualizar_disponibilidade_botoes()
 
-    def _atualizar_cartoes(self) -> None:
-        r = self._resultado
-        total = r["total_distribuido"]
+    def _mostrar_painel(self, de: int, ate: int) -> None:
+        painel = self._painel
+        periodo = _rotulo_periodo(de, ate)
+        self.selo.setText(f"Período: {periodo}")
+        self.valor_total.setText(_reais(painel["total"]))
+        anterior = painel["total_anterior"]
+        if anterior:
+            variacao = 100 * (painel["total"] - anterior) / anterior
+            self.variacao.setText(f"{'▲' if variacao >= 0 else '▼'} {formatar_valor_br(abs(variacao), 1)}%")
+            self.variacao.setProperty("tom", "sobe" if variacao >= 0 else "desce")
+            tamanho = ate - de + 1
+            self.nota_total.setText(
+                f"em {periodo} · {_reais(anterior)} em {_rotulo_periodo(de - tamanho, de - 1)}"
+            )
+        else:
+            self.variacao.setText("")
+            self.nota_total.setText(f"em {periodo}")
+        self.variacao.setVisible(bool(anterior))
+        self.variacao.style().unpolish(self.variacao)
+        self.variacao.style().polish(self.variacao)
 
-        self.cartao_empresas.definir(str(r["total_empresas"]))
+        movimentos = painel["movimentos"]
+        valores = {
+            "empresas": (str(painel["empresas_que_distribuiram"]), f"de {painel['empresas_ativas']} ativas no fim do período"),
+            "socios": (str(painel["socios_que_receberam"]), f"de {painel['socios_ativos']} sócios ativos"),
+            "pro_labore": (_reais(painel["pro_labore"]), ""),
+            "irrf": (_reais(painel["irrf"]), ""),
+            "emprestado": (_reais(movimentos.get("emprestimo_empresa_para_socio", 0)),
+                           f"sócios emprestaram {_reais(movimentos.get('emprestimo_socio_para_empresa', 0))}"),
+            "adiantado": (_reais(movimentos.get("adiantamento_lucro", 0)),
+                          f"devolução de capital {_reais(movimentos.get('devolucao_capital', 0))}"),
+        }
+        for chave, (valor, nota) in valores.items():
+            rotulo_valor, rotulo_nota = self.kpis[chave]
+            rotulo_valor.setText(valor)
+            rotulo_nota.setText(nota)
+
+        colunas = [(a["ano"], a["total"], []) for a in painel["por_ano"]]
+        self.evolucao.definir(colunas, de, ate)
+
+        total = painel["total"]
+        self.ranking_empresas.definir(
+            [(e["empresa_id"], e["nome"], f"nº {e['numero']} · {e['socios']} sócio(s) receberam", e["total"])
+             for e in painel["top_empresas"]], total, "Nenhuma empresa distribuiu no período.")
+        self.ranking_socios.definir(
+            [(s["socio_id"], s["nome"],
+              (s["documento"] or "sem CPF") + f" · {s['empresas']} empresa(s)", s["total"])
+             for s in painel["top_socios"]], total, "Ninguém recebeu no período.")
+
+    def _mostrar_atencao(self) -> None:
+        r = self._resultado
+        # A mesma base do painel azul, pra porcentagem do cartão bater com o
+        # total que está logo acima dele.
+        total = self._painel["total"]
+        empresas_fora = [e for e in r["resumo_empresas"] if e["socios_desproporcionais"]]
+        empresas_fora.sort(key=lambda e: -e["socios_desproporcionais"])
+        if r["total_desproporcional"]:
+            pct = 100 * r["total_desproporcional"] / total if total else 0
+            self.atencao_desproporcional.definir(
+                _reais(r["total_desproporcional"]),
+                f"{formatar_valor_br(pct, 1)}% do distribuído saiu fora da proporção do capital, em "
+                f"{len(empresas_fora)} empresa(s).",
+                nomes_unicos(e["empresa_nome"] for e in empresas_fora), "alerta",
+            )
+        else:
+            self.atencao_desproporcional.definir("Tudo certo", "Toda a distribuição seguiu a proporção do capital.", [], "ok")
+
+        sem = sem_pro_labore(r["linhas"])
+        if sem:
+            pessoas = len({i.socio_id for i in sem})
+            self.atencao_pro_labore.definir(
+                f"{pessoas} sócio(s)",
+                f"receberam {_reais(sum(i.valor_sem_pro_labore for i in sem))} de lucro nos anos em que "
+                "não tiveram pró-labore.",
+                nomes_unicos(i.socio_nome for i in sem), "aviso",
+            )
+        else:
+            self.atencao_pro_labore.definir("Nenhum", "Todo sócio que recebeu lucro teve pró-labore.", [], "ok")
 
         sem_dist = r["empresas_sem_distribuicao"]
-        self.cartao_sem_distribuicao.definir(
-            str(len(sem_dist)),
-            _lista_curta(sem_dist),
-            # Empresa sem distribuição no período é o que se vai procurar, não
-            # um número neutro: em vermelho ela se acha de longe.
-            cor=theme.SEAL_RED() if sem_dist else None,
+        self.atencao_sem_distribuicao.definir(
+            str(len(sem_dist)) if sem_dist else "Nenhuma",
+            "empresa(s) cadastradas sem nenhum lucro distribuído no período." if sem_dist
+            else "Todas as empresas distribuíram no período.",
+            sem_dist, "info" if sem_dist else "ok",
         )
 
-        self.cartao_total.definir(f"R$ {formatar_valor_br(total)}")
-
-        # Proporcional e desproporcional são o julgamento que esta tela existe
-        # para dar. Em preto os dois são só dois números; com a cor do selo,
-        # verde e vermelho, o olho separa antes de ler.
-        pct_proporcional = (100 * r["total_proporcional"] / total) if total else 0
-        self.cartao_proporcional.definir(
-            f"R$ {formatar_valor_br(r['total_proporcional'])}",
-            f"{formatar_valor_br(pct_proporcional, 1)}% do total",
-            cor=theme.SEAL_GREEN() if r["total_proporcional"] else None,
-        )
-
-        pct_desproporcional = (100 * r["total_desproporcional"] / total) if total else 0
-        self.cartao_desproporcional.definir(
-            f"R$ {formatar_valor_br(r['total_desproporcional'])}",
-            f"{formatar_valor_br(pct_desproporcional, 1)}% do total",
-            cor=theme.SEAL_RED() if r["total_desproporcional"] else None,
-        )
-
-        pct_emprestimo = (100 * r["total_emprestimos"] / total) if total else 0
-        contexto_emprestimo = f"{formatar_valor_br(pct_emprestimo, 1)}% do total distribuído"
-        self.cartao_emprestimos.definir(f"R$ {formatar_valor_br(r['total_emprestimos'])}", contexto_emprestimo)
-
-    def _atualizar_graficos(self) -> None:
-        r = self._resultado
-        # Quem recebeu lucro sem pró-labore, em vez da pizza proporcional x
-        # desproporcional — que só repetia em desenho os dois cartões acima.
-        self._sem_pro_labore = sem_pro_labore(r["linhas"])
-        grafico_sem_pro_labore(self.grafico_pizza, self._sem_pro_labore)
-        self.aviso_pro_labore.setText(resumo_sem_pro_labore(self._sem_pro_labore))
-        self.aviso_pro_labore.setStyleSheet(
-            f"color: {theme.SAIU_FG() if self._sem_pro_labore else theme.INK_MUTED()};"
-            " font-size: 12px; font-weight: 600;"
-        )
-        grafico_barras_por_empresa(self.grafico_barras, r["resumo_empresas"])
-        grafico_barras_emprestimos_por_empresa(self.grafico_emprestimos, r["resumo_empresas"])
+        com_emprestimo = sorted((e for e in r["resumo_empresas"] if e["total_emprestimos"]),
+                                key=lambda e: -e["total_emprestimos"])
+        if r["total_emprestimos"]:
+            pct = 100 * r["total_emprestimos"] / total if total else 0
+            self.atencao_emprestimos.definir(
+                _reais(r["total_emprestimos"]),
+                f"emprestados pela empresa aos sócios — {formatar_valor_br(pct, 1)}% do lucro distribuído.",
+                [e["empresa_nome"] for e in com_emprestimo], "info",
+            )
+        else:
+            self.atencao_emprestimos.definir("Nenhum", "Nenhuma empresa emprestou a sócios no período.", [], "ok")
 
     def _atualizar_disponibilidade_botoes(self) -> None:
         tem_dados = bool(self._resultado and self._resultado["linhas"])

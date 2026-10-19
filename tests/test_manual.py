@@ -116,7 +116,7 @@ def test_busca_filtra_a_lista_e_mantem_o_topico_aberto_quando_possivel():
     dialogo = DialogoManual("informe")
     dialogo.busca.setText("empréstimo")
     ids = [t.id for t in dialogo._visiveis]
-    assert ids == ["distribuicao", "informe"]
+    assert ids == ["distribuicao", "informe", "dashboard"]
     assert dialogo._visiveis[dialogo.lista.currentRow()].id == "informe"
 
 

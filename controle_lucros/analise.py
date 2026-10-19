@@ -35,6 +35,10 @@ class SocioSemProLabore:
     valor_distribuido: float
     pro_labore: float
     anos: tuple[int, ...] = ()
+    # Só o que foi distribuído nos anos SEM pró-labore: o valor_distribuido
+    # soma também os anos em que houve pró-labore, e dizer "recebeu R$ X sem
+    # pró-labore" com ele exageraria o caso.
+    valor_sem_pro_labore: float = 0.0
 
     @property
     def anos_sem_pro_labore(self) -> int:
@@ -117,6 +121,7 @@ def sem_pro_labore(linhas: list[dict], limite: int | None = None) -> list[SocioS
         item.pro_labore += float(linha.get("pro_labore") or 0)
         if float(linha.get("pro_labore") or 0) <= 0 and linha.get("ano_base") is not None:
             item.anos = tuple(sorted({*item.anos, linha["ano_base"]}))
+            item.valor_sem_pro_labore += distribuido
 
     # Só entra quem tem pelo menos um ano sem pró-labore. Quem recebeu
     # pró-labore em todos os anos não é o caso deste painel, por menor que ele

@@ -2145,6 +2145,136 @@ def _visao_geral(conn: Conexao, ano_de: int, ano_ate: int, tolerancia: float) ->
     }
 
 
+
+def painel_geral(conn: Conexao, ano_de: int, ano_ate: int, limite: int = 10) -> dict:
+    """Os números do dashboard geral, em poucas consultas agregadas — com
+    centenas de empresas, perguntar empresa por empresa deixava a tela lenta.
+
+    - por_ano: total distribuído, pró-labore, IRRF, empresas e sócios de
+      CADA ano com lançamento (a evolução mostra todos, o período escolhido
+      fica realçado);
+    - do período: totais, os que mais distribuíram/receberam, as
+      movimentações por tipo e quantas empresas e sócios estavam ativos no
+      fim dele;
+    - anterior: o total do período de mesmo tamanho logo antes, pra dizer se
+      cresceu ou caiu."""
+    por_ano = [
+        {"ano": r["ano_base"], "total": r["total"] or 0.0, "pro_labore": r["pro"] or 0.0, "irrf": r["irrf"] or 0.0,
+         "empresas": r["empresas"], "socios": r["socios"]}
+        for r in conn.execute(
+            """SELECT ano_base, SUM(valor_distribuido) AS total, SUM(pro_labore) AS pro, SUM(irrf) AS irrf,
+                      COUNT(DISTINCT empresa_id) FILTER (WHERE valor_distribuido > 0) AS empresas,
+                      COUNT(DISTINCT socio_id) FILTER (WHERE valor_distribuido > 0) AS socios
+               FROM distribuicao_lucro GROUP BY ano_base ORDER BY ano_base"""
+        ).fetchall()
+    ]
+    no_periodo = [a for a in por_ano if ano_de <= a["ano"] <= ano_ate]
+    total = sum(a["total"] for a in no_periodo)
+    tamanho = ano_ate - ano_de + 1
+    anterior = sum(a["total"] for a in por_ano if ano_de - tamanho <= a["ano"] < ano_de)
+    # Só compara com o período anterior se os lançamentos cobrem a janela
+    # inteira dele: comparar com uma janela pela metade inventaria um salto
+    # que é só história que falta.
+    tem_anterior = bool(por_ano) and por_ano[0]["ano"] <= ano_de - tamanho
+
+    top_empresas = [
+        {"empresa_id": r["id"], "nome": r["nome"], "numero": r["numero_chamada"], "total": r["total"],
+         "socios": r["socios"]}
+        for r in conn.execute(
+            """SELECT e.id, e.nome, e.numero_chamada, SUM(d.valor_distribuido) AS total,
+                      COUNT(DISTINCT d.socio_id) FILTER (WHERE d.valor_distribuido > 0) AS socios
+               FROM distribuicao_lucro d JOIN empresa e ON e.id = d.empresa_id
+               WHERE d.ano_base BETWEEN %s AND %s
+               GROUP BY e.id, e.nome, e.numero_chamada HAVING SUM(d.valor_distribuido) > 0
+               ORDER BY total DESC LIMIT %s""",
+            (ano_de, ano_ate, limite),
+        ).fetchall()
+    ]
+    top_socios = [
+        {"socio_id": r["id"], "nome": r["nome"], "documento": r["cpf"] or "", "total": r["total"],
+         "empresas": r["empresas"]}
+        for r in conn.execute(
+            """SELECT s.id, s.nome, s.cpf, SUM(d.valor_distribuido) AS total,
+                      COUNT(DISTINCT d.empresa_id) FILTER (WHERE d.valor_distribuido > 0) AS empresas
+               FROM distribuicao_lucro d JOIN socio s ON s.id = d.socio_id
+               WHERE d.ano_base BETWEEN %s AND %s
+               GROUP BY s.id, s.nome, s.cpf HAVING SUM(d.valor_distribuido) > 0
+               ORDER BY total DESC LIMIT %s""",
+            (ano_de, ano_ate, limite),
+        ).fetchall()
+    ]
+    movimentos = {
+        r["tipo"]: r["total"] or 0.0
+        for r in conn.execute(
+            """SELECT tipo, SUM(valor) AS total FROM movimentacao
+               WHERE left(data, 4) BETWEEN %s AND %s GROUP BY tipo""",
+            (str(ano_de), str(ano_ate)),
+        ).fetchall()
+    }
+    fim = f"{ano_ate}-12-31"
+    ativos = conn.execute(
+        """SELECT COUNT(DISTINCT empresa_id) AS empresas, COUNT(DISTINCT socio_id) AS socios
+           FROM vinculo_societario WHERE data_entrada <= %s AND (data_saida IS NULL OR data_saida > %s)""",
+        (fim, fim),
+    ).fetchone()
+    return {
+        "por_ano": por_ano,
+        "total": total,
+        "pro_labore": sum(a["pro_labore"] for a in no_periodo),
+        "irrf": sum(a["irrf"] for a in no_periodo),
+        "empresas_que_distribuiram": len(_empresas_com_distribuicao(conn, ano_de, ano_ate)),
+        "socios_que_receberam": conn.execute(
+            """SELECT COUNT(DISTINCT socio_id) AS n FROM distribuicao_lucro
+               WHERE ano_base BETWEEN %s AND %s AND valor_distribuido > 0""",
+            (ano_de, ano_ate),
+        ).fetchone()["n"],
+        "total_anterior": anterior if tem_anterior else None,
+        "top_empresas": top_empresas,
+        "top_socios": top_socios,
+        "movimentos": movimentos,
+        "empresas_ativas": ativos["empresas"],
+        "socios_ativos": ativos["socios"],
+    }
+
+
+def _empresas_com_distribuicao(conn: Conexao, ano_de: int, ano_ate: int) -> list[int]:
+    return [
+        r["empresa_id"]
+        for r in conn.execute(
+            """SELECT DISTINCT empresa_id FROM distribuicao_lucro
+               WHERE ano_base BETWEEN %s AND %s AND valor_distribuido > 0""",
+            (ano_de, ano_ate),
+        ).fetchall()
+    ]
+
+
+def painel_empresa(conn: Conexao, empresa_id: int) -> dict:
+    """O que o dashboard de uma empresa mostra além das linhas classificadas:
+    o total de cada ano com a parte de cada sócio (pra empilhar no gráfico) e
+    as movimentações por ano."""
+    por_ano: dict[int, dict] = {}
+    for r in conn.execute(
+        """SELECT d.ano_base, d.socio_id, s.nome, d.valor_distribuido, d.pro_labore, d.irrf
+           FROM distribuicao_lucro d JOIN socio s ON s.id = d.socio_id
+           WHERE d.empresa_id = %s ORDER BY d.ano_base""",
+        (empresa_id,),
+    ).fetchall():
+        ano = por_ano.setdefault(r["ano_base"], {"ano": r["ano_base"], "total": 0.0, "pro_labore": 0.0,
+                                                  "irrf": 0.0, "socios": {}})
+        ano["total"] += r["valor_distribuido"] or 0.0
+        ano["pro_labore"] += r["pro_labore"] or 0.0
+        ano["irrf"] += r["irrf"] or 0.0
+        if r["valor_distribuido"]:
+            ano["socios"][r["socio_id"]] = (r["nome"], r["valor_distribuido"])
+    movimentos: dict[int, dict[str, float]] = {}
+    for r in conn.execute(
+        """SELECT left(data, 4) AS ano, tipo, SUM(valor) AS total FROM movimentacao
+           WHERE empresa_id = %s GROUP BY left(data, 4), tipo""",
+        (empresa_id,),
+    ).fetchall():
+        movimentos.setdefault(int(r["ano"]), {})[r["tipo"]] = r["total"]
+    return {"por_ano": [por_ano[a] for a in sorted(por_ano)], "movimentos": movimentos}
+
 # --------------------------------------------------------------- Usuario --
 
 
