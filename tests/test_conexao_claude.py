@@ -103,7 +103,7 @@ def test_botao_na_tela_de_entrada(conn):
     from PySide6.QtWidgets import QPushButton
     from controle_lucros.ui.login import DialogoLogin, DialogoPrimeiroUsuario
     for dialogo in (DialogoLogin(conn), DialogoPrimeiroUsuario(conn)):
-        assert "Conectar ao Claude…" in [b.text() for b in dialogo.findChildren(QPushButton)]
+        assert "Conectar ao Claude" in [b.text() for b in dialogo.findChildren(QPushButton)]
 
 
 def test_escolha_inicial_so_o_programa_nao_conecta_e_nao_pergunta_de_novo(config):
@@ -126,14 +126,64 @@ def test_fechar_a_escolha_conta_como_so_o_programa(config):
     assert preferencias.obter("claude_escolha") == "sem" and not precisa_escolher()
 
 
-def test_escolher_com_o_claude_abre_a_janela_de_conexao(config, monkeypatch):
+def test_escolher_com_o_claude_so_vale_se_conectou(config, monkeypatch):
     from controle_lucros.ui import conectar_claude as tela
     from controle_lucros import preferencias
-    abertas = []
-    monkeypatch.setattr(tela.DialogoConectarClaude, "exec", lambda self: abertas.append(self) or 0)
+    preferencias.salvar_chave("claude_escolha", None)
+    # Fechou a janela de conexão sem conectar: continua na escolha.
+    monkeypatch.setattr(tela.DialogoConectarClaude, "exec", lambda self: 0)
     dialogo = tela.DialogoEscolhaClaude()
     dialogo.com.botao.click()
-    assert len(abertas) == 1 and preferencias.obter("claude_escolha") == "com"
+    assert dialogo.result() != QDialog.Accepted and tela.precisa_escolher()
+    # Conectou: aí sim.
+    monkeypatch.setattr(tela.DialogoConectarClaude, "exec", lambda self: claude.conectar_claude_desktop())
+    dialogo.com.botao.click()
+    assert dialogo.result() == QDialog.Accepted and preferencias.obter("claude_escolha") == "com"
+
+
+def test_so_o_programa_desliga_o_que_estava_ligado(config, monkeypatch):
+    from controle_lucros.ui import conectar_claude as tela
+    removidos = []
+    monkeypatch.setattr(claude, "desconectar_claude_code", lambda: removidos.append("code"))
+    monkeypatch.setattr(claude, "claude_code_registrado", lambda: True)
+    claude.conectar_claude_desktop()
+    tela.DialogoEscolhaClaude().sem.botao.click()
+    assert claude.situacao_claude_desktop() == "desconectado"
+    assert removidos == ["code"]
+
+
+def test_arrastar_para_fora_do_cartao_nao_escolhe(config):
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+    from controle_lucros.ui import conectar_claude as tela
+    escolhas = []
+    opcao = tela._Opcao("Teste", "texto", lambda: escolhas.append(1), ("#000",))
+    opcao.resize(200, 100)
+    for ponto, esperado in ((QPoint(500, 500), []), (QPoint(20, 20), [1])):
+        evento = QMouseEvent(QMouseEvent.MouseButtonRelease, QPointF(ponto), QPointF(ponto),
+                             Qt.LeftButton, Qt.NoButton, Qt.NoModifier)
+        opcao.mouseReleaseEvent(evento)
+        assert escolhas == esperado
+
+
+def test_menu_nao_derruba_a_janela_se_nao_ler_a_configuracao(monkeypatch):
+    from controle_lucros.ui import conectar_claude as tela
+
+    def falha():
+        raise PermissionError("sem acesso")
+    monkeypatch.setattr(claude, "situacao_claude_desktop", falha)
+    assert tela.texto_do_menu() == "Conectar ao Claude"
+
+
+def test_menu_mostra_conectado_so_pelo_claude_code(config, monkeypatch):
+    from controle_lucros.ui import conectar_claude as tela
+    monkeypatch.setattr(claude.shutil, "which", lambda _: "/bin/claude")
+    monkeypatch.setattr(claude.subprocess, "run",
+                        lambda args, **kw: claude.subprocess.CompletedProcess(args, 0, "", ""))
+    claude.conectar_claude_code()
+    assert tela.texto_do_menu() == "Claude: conectado ✓"
+    claude.desconectar_claude_code()
+    assert tela.texto_do_menu() == "Conectar ao Claude"
 
 
 def test_menu_do_programa_tem_o_claude_e_mostra_a_situacao(conn, config, monkeypatch):

@@ -58,6 +58,10 @@ PALETA_CLARA = {
     # cheio, com texto branco por cima.
     "HERO_BG": "#203461",
     "HERO_BG_2": "#2B4580",
+    # Botão principal das telas de entrada: marinho no claro, laranja no
+    # escuro (o marinho sumiria no fundo marinho).
+    "ENTRADA_BOTAO": "#203461",
+    "ENTRADA_BOTAO_TEXTO": "#FFFFFF",
     "HERO_FG": "#FFFFFF",
     "HERO_MUTED": "#B9C6E4",
 }
@@ -81,6 +85,8 @@ PALETA_ESCURA = {
     "SAIU_FG": "#EBA39C",
     "HERO_BG": "#26365C",
     "HERO_BG_2": "#30467A",
+    "ENTRADA_BOTAO": "#F9B259",
+    "ENTRADA_BOTAO_TEXTO": "#1A2A50",
     "HERO_FG": "#FFFFFF",
     "HERO_MUTED": "#AEBBD8",
 }
@@ -709,6 +715,10 @@ def build_stylesheet() -> str:
         border: none;
         border-right: 1px solid {p["HAIRLINE"]};
     }}
+    QScrollArea#sidebarRolagem, QWidget#sidebarNavegacao {{
+        background: {p["PAPER_RAISED"]};
+        border: none;
+    }}
 
     QLabel[role="navSecao"] {{
         color: {p["INK_MUTED"]};
@@ -984,5 +994,110 @@ def build_stylesheet() -> str:
 
     QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
         height: 0px;
+    }}
+
+    /* Telas de entrada (marca.TelaDeEntrada): o lado do formulário. */
+    QFrame[role="entradaFormulario"] {{
+        background: {p["PAPER_RAISED"]};
+    }}
+    QLabel[role="entradaTitulo"] {{
+        font-family: {FONT_DISPLAY};
+        font-size: 24px;
+        font-weight: 600;
+        color: {p["INK"]};
+    }}
+    QLabel[role="entradaSubtitulo"] {{
+        font-size: 13px;
+        color: {p["INK_MUTED"]};
+    }}
+    QLabel[role="entradaRotulo"] {{
+        font-size: 12px;
+        font-weight: 600;
+        color: {p["INK"]};
+        padding-bottom: 5px;
+    }}
+    QLineEdit[role="entrada"], QSpinBox[role="entrada"] {{
+        min-height: 26px;
+        padding: 8px 12px;
+        border-radius: 8px;
+        border: 1px solid {p["HAIRLINE"]};
+        background: {p["PAPER"]};
+        font-size: 14px;
+    }}
+    QLineEdit[role="entrada"]:focus, QSpinBox[role="entrada"]:focus {{
+        border: 2px solid {p["BRASS"]};
+        padding: 7px 11px;
+        background: {p["PAPER_RAISED"]};
+    }}
+    QPushButton[role="entradaPrincipal"] {{
+        min-height: 44px;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 600;
+        background: {p["ENTRADA_BOTAO"]};
+        color: {p["ENTRADA_BOTAO_TEXTO"]};
+        border: none;
+    }}
+    QPushButton[role="entradaPrincipal"]:hover {{
+        background: {p["BRASS_DARK"]};
+        color: #FFFFFF;
+    }}
+    QPushButton[role="entradaPrincipal"]:pressed {{
+        background: {p["BRASS"]};
+        color: #203461;
+    }}
+    QPushButton[role="entradaPrincipal"]:disabled {{
+        background: {p["HAIRLINE"]};
+        color: {p["INK_MUTED"]};
+    }}
+    QPushButton[role="entradaSecundario"] {{
+        min-height: 44px;
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 600;
+        background: transparent;
+        color: {p["INK"]};
+        border: 1px solid {p["HAIRLINE"]};
+        padding: 0 18px;
+    }}
+    QPushButton[role="entradaSecundario"]:hover {{
+        border-color: {p["BRASS"]};
+    }}
+    QPushButton[role="entradaLink"] {{
+        border: none;
+        background: transparent;
+        color: {p["INK_MUTED"]};
+        font-size: 12px;
+        padding: 4px 2px;
+    }}
+    QPushButton[role="entradaLink"]:hover {{
+        color: {p["BRASS_DARK"]};
+        text-decoration: underline;
+    }}
+    QLabel[role="entradaAviso"] {{
+        border-radius: 8px;
+        padding: 9px 12px;
+        font-size: 12px;
+    }}
+    QLabel[role="entradaAviso"][tom="erro"] {{
+        background: {p["SAIU_BG"]};
+        color: {p["SAIU_FG"]};
+    }}
+    QLabel[role="entradaAviso"][tom="ok"] {{
+        background: rgba(75, 189, 205, 0.16);
+        color: {p["SEAL_GREEN"]};
+    }}
+    QLabel[role="entradaAviso"][tom="info"] {{
+        background: {p["ALT_ROW"]};
+        color: {p["INK_MUTED"]};
+        border: 1px solid {p["HAIRLINE"]};
+    }}
+    QFrame[role="entradaOpcao"] {{
+        background: {p["PAPER_RAISED"]};
+        border: 1px solid {p["HAIRLINE"]};
+        border-radius: 12px;
+    }}
+    QFrame[role="entradaOpcao"]:hover {{
+        border: 2px solid {p["BRASS"]};
     }}
     """

@@ -4,9 +4,10 @@ O rodapé mostra quem está logado e dá acesso a trocar senha / sair."""
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QButtonGroup, QFrame, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QButtonGroup, QFrame, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
 from . import theme
+from .marca import MarcaMenu
 
 
 class Sidebar(QFrame):
@@ -22,7 +23,24 @@ class Sidebar(QFrame):
         self.setFixedWidth(230)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 18, 0, 12)
+        layout.setContentsMargins(0, 8, 0, 12)
+        layout.setSpacing(2)
+
+        # O ícone e o nome no alto: é o que diz, de relance, em que programa
+        # se está — e onde a marca mora dentro do sistema.
+        self.marca = MarcaMenu()
+        layout.addWidget(self.marca)
+        layout.addWidget(self._hairline())
+
+        # Os itens de navegação rolam quando a tela é baixa (notebook de 768
+        # de altura): sem isso a janela não cabia na tela, porque o menu
+        # inteiro virava a altura mínima dela. A marca e o rodapé ficam
+        # fixos.
+        externo = layout
+        self._navegacao = QWidget()
+        self._navegacao.setObjectName("sidebarNavegacao")
+        layout = QVBoxLayout(self._navegacao)
+        layout.setContentsMargins(0, 8, 0, 4)
         layout.setSpacing(2)
 
         self._grupo = QButtonGroup(self)
@@ -55,8 +73,16 @@ class Sidebar(QFrame):
         layout.addWidget(self._botao_usuarios)
         self._botao_backup = self._item("Backup", "sistema.backup", sub=True)
         layout.addWidget(self._botao_backup)
-
         layout.addStretch()
+
+        rolagem = QScrollArea()
+        rolagem.setObjectName("sidebarRolagem")
+        rolagem.setWidget(self._navegacao)
+        rolagem.setWidgetResizable(True)
+        rolagem.setFrameShape(QFrame.NoFrame)
+        rolagem.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        layout = externo
+        layout.addWidget(rolagem, 1)
 
         layout.addWidget(self._hairline())
         self._rotulo_usuario = QLabel("")

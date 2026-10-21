@@ -12,18 +12,18 @@ import psycopg
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
-    QFormLayout,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QMessageBox,
     QPushButton,
     QSpinBox,
     QVBoxLayout,
+    QWidget,
 )
 
 from .. import db
 from . import theme
+from .marca import TelaDeEntrada, aviso_de_entrada, botao_link, campo_de_entrada, mostrar_aviso
 from .ocupado import ocupado
 
 
@@ -52,7 +52,15 @@ def botao_tutorial(parent=None) -> QPushButton:
     return botao
 
 
-class DialogoConexao(QDialog):
+def _coluna(rotulo: QLabel, campo: QWidget) -> QVBoxLayout:
+    coluna = QVBoxLayout()
+    coluna.setSpacing(0)
+    coluna.addWidget(rotulo)
+    coluna.addWidget(campo)
+    return coluna
+
+
+class DialogoConexao(TelaDeEntrada):
     """Os dados de acesso ao PostgreSQL do escritório. Aparece na primeira
     abertura do programa neste PC, e depois sempre que alguém quiser trocar
     (servidor novo, senha trocada).
@@ -61,66 +69,83 @@ class DialogoConexao(QDialog):
     a configuração não fica no instalador."""
 
     def __init__(self, parent=None, primeira_vez: bool = False):
-        super().__init__(parent)
-        self.setWindowTitle("Conexão com o banco de dados")
-        self.setMinimumWidth(480)
-
-        atual = db.conexao_configurada() or db.ParametrosConexao(servidor="")
-
-        titulo = QLabel("Em que servidor está o banco de dados?")
-        titulo.setProperty("role", "secao")
-
-        explicacao = QLabel(
-            "O banco do escritório fica num servidor PostgreSQL, e todos os computadores se "
-            "conectam nele. Peça estes dados a quem instalou o PostgreSQL."
-            + (" Isto só é perguntado uma vez neste computador." if primeira_vez else "")
+        super().__init__(
+            "Conexão com o banco de dados",
+            "Vamos conectar ao banco do escritório." if primeira_vez else "Onde está o banco de dados.",
+            "Todos os computadores usam o mesmo banco, num servidor PostgreSQL — é assim que o "
+            "escritório inteiro vê o mesmo cadastro."
+            + (" Isto só é perguntado uma vez neste computador." if primeira_vez else ""),
+            parent,
+            altura=640,
         )
-        explicacao.setWordWrap(True)
-        explicacao.setProperty("role", "subtitulo")
+        atual = db.conexao_configurada() or db.ParametrosConexao(servidor="")
+        self.cabecalho("Conexão com o banco",
+                       "Peça estes dados a quem instalou o PostgreSQL no servidor.")
 
-        self.servidor = QLineEdit(atual.servidor)
-        self.servidor.setPlaceholderText("nome ou IP, ex.: 192.168.0.10")
+        rotulo_servidor, self.servidor = campo_de_entrada("Servidor", "nome ou IP, ex.: 192.168.0.10")
+        self.servidor.setText(atual.servidor)
+        rotulo_porta = QLabel("Porta")
+        rotulo_porta.setProperty("role", "entradaRotulo")
         self.porta = QSpinBox()
+        self.porta.setProperty("role", "entrada")
         self.porta.setRange(1, 65535)
         self.porta.setValue(atual.porta)
-        self.banco = QLineEdit(atual.banco)
-        self.usuario = QLineEdit(atual.usuario)
-        self.senha = QLineEdit(atual.senha)
-        self.senha.setEchoMode(QLineEdit.Password)
+        self.porta.setButtonSymbols(QSpinBox.NoButtons)
+        self.porta.setFixedWidth(96)
+        rotulo_banco, self.banco = campo_de_entrada("Banco", "nome do banco")
+        self.banco.setText(atual.banco)
+        rotulo_usuario, self.usuario = campo_de_entrada("Usuário", "usuário do PostgreSQL")
+        self.usuario.setText(atual.usuario)
+        rotulo_senha, self.senha = campo_de_entrada("Senha", "senha do PostgreSQL", senha=True)
+        self.senha.setText(atual.senha)
+        self.senha.returnPressed.connect(self._salvar)
+        self.resultado = aviso_de_entrada()
 
-        formulario = QFormLayout()
-        formulario.addRow("Servidor:", self.servidor)
-        formulario.addRow("Porta:", self.porta)
-        formulario.addRow("Banco:", self.banco)
-        formulario.addRow("Usuário:", self.usuario)
-        formulario.addRow("Senha:", self.senha)
+        linha = QHBoxLayout()
+        linha.setSpacing(12)
+        linha.addLayout(_coluna(rotulo_servidor, self.servidor), 1)
+        linha.addLayout(_coluna(rotulo_porta, self.porta))
+        self.corpo.addLayout(linha)
+        self.corpo.addSpacing(14)
+        self.corpo.addLayout(_coluna(rotulo_banco, self.banco))
+        self.corpo.addSpacing(14)
+        linha = QHBoxLayout()
+        linha.setSpacing(12)
+        linha.addLayout(_coluna(rotulo_usuario, self.usuario), 1)
+        linha.addLayout(_coluna(rotulo_senha, self.senha), 1)
+        self.corpo.addLayout(linha)
+        self.corpo.addSpacing(16)
+        self.corpo.addWidget(self.resultado)
+        self.corpo.addSpacing(10)
 
         testar = QPushButton("Testar conexão")
+        testar.setProperty("role", "entradaSecundario")
+        testar.setCursor(Qt.PointingHandCursor)
         testar.clicked.connect(self._testar)
-
-        salvar = QPushButton("Salvar")
-        salvar.setProperty("role", "primario")
+        salvar = QPushButton("Salvar e continuar" if primeira_vez else "Salvar")
+        salvar.setProperty("role", "entradaPrincipal")
+        salvar.setCursor(Qt.PointingHandCursor)
         salvar.setDefault(True)
         salvar.clicked.connect(self._salvar)
-
-        cancelar = QPushButton("Sair" if primeira_vez else "Cancelar")
-        cancelar.clicked.connect(self.reject)
-
         botoes = QHBoxLayout()
+        botoes.setSpacing(10)
         botoes.addWidget(testar)
-        botoes.addStretch()
-        botoes.addWidget(cancelar)
-        botoes.addWidget(salvar)
+        botoes.addWidget(salvar, 1)
+        self.corpo.addLayout(botoes)
+        self.corpo.addStretch()
 
-        layout = QVBoxLayout(self)
-        layout.setSpacing(10)
-        layout.addWidget(titulo)
-        layout.addWidget(explicacao)
-        layout.addLayout(formulario)
-        layout.addWidget(botao_tutorial(self))
-        layout.addSpacing(6)
-        layout.addLayout(botoes)
+        tutorial = botao_link("Como preparar o servidor PostgreSQL?")
+        tutorial.clicked.connect(lambda: abrir_tutorial_do_servidor(self))
+        cancelar = botao_link("Sair" if primeira_vez else "Cancelar")
+        cancelar.clicked.connect(self.reject)
+        rodape = QHBoxLayout()
+        rodape.addWidget(tutorial)
+        rodape.addStretch()
+        rodape.addWidget(cancelar)
+        self.corpo.addLayout(rodape)
 
+        for campo in (self.servidor, self.banco, self.usuario, self.senha):
+            campo.textEdited.connect(lambda _texto: self.resultado.hide())
         (self.servidor if not atual.servidor else self.senha).setFocus()
 
     def parametros(self) -> db.ParametrosConexao:
@@ -153,13 +178,13 @@ class DialogoConexao(QDialog):
         return None
 
     def _testar(self) -> None:
+        """O resultado do teste fica escrito no próprio formulário, em vez de
+        numa janela que some: dá para corrigir o campo olhando o erro."""
         erro = self._tentar()
         if erro:
-            QMessageBox.warning(self, "Não conectou", erro)
+            mostrar_aviso(self.resultado, erro, "erro")
         else:
-            QMessageBox.information(
-                self, "Conectou", f"Conexão funcionando. PostgreSQL {self._versao} no servidor."
-            )
+            mostrar_aviso(self.resultado, f"✓  Conexão funcionando — PostgreSQL {self._versao} no servidor.", "ok")
 
     def _salvar(self) -> None:
         erro = self._tentar()
@@ -167,6 +192,7 @@ class DialogoConexao(QDialog):
             if self._faltando():
                 QMessageBox.warning(self, "Faltam dados", erro)
                 return
+            mostrar_aviso(self.resultado, erro, "erro")
             resposta = QMessageBox.question(
                 self,
                 "Não conectou",
@@ -180,7 +206,7 @@ class DialogoConexao(QDialog):
         self.accept()
 
 
-class DialogoBancoInacessivel(QDialog):
+class DialogoBancoInacessivel(TelaDeEntrada):
     """Aparece antes do login quando o banco não abre — no dia a dia, é o
     servidor fora do ar ou este PC fora da rede. Sem isto o programa fecharia
     com um erro técnico, e a única saída seria chamar alguém."""
@@ -189,47 +215,59 @@ class DialogoBancoInacessivel(QDialog):
     OUTRA_CONEXAO = 2
 
     def __init__(self, erro: BaseException, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Banco de dados indisponível")
-        self.setMinimumWidth(460)
+        super().__init__(
+            "Banco de dados indisponível",
+            "O servidor não respondeu.",
+            "Quase sempre é o servidor reiniciando ou este computador fora da rede. Os dados "
+            "estão seguros no servidor — é só a conexão que não abriu agora.",
+            parent,
+        )
+        self.cabecalho("Não consegui conectar", "O que o servidor respondeu:")
 
-        titulo = QLabel("Não consegui conectar no banco de dados")
-        titulo.setProperty("role", "secao")
-
-        explicacao = QLabel(db.explicar_erro(erro))
-        explicacao.setWordWrap(True)
+        explicacao = aviso_de_entrada()
+        mostrar_aviso(explicacao, db.explicar_erro(erro), "erro")
         explicacao.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
+        rotulo = QLabel("Conexão deste computador")
+        rotulo.setProperty("role", "entradaRotulo")
         conexao = QLabel(descrever_conexao())
-        conexao.setProperty("role", "mono")
+        conexao.setProperty("role", "entradaAviso")
+        conexao.setProperty("tom", "info")
         conexao.setWordWrap(True)
         conexao.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
-        tentar = QPushButton("Tentar de novo")
-        tentar.setProperty("role", "primario")
-        tentar.setDefault(True)
-        tentar.clicked.connect(lambda: self.done(self.TENTAR_DE_NOVO))
+        self.corpo.addWidget(explicacao)
+        self.corpo.addSpacing(18)
+        self.corpo.addWidget(rotulo)
+        self.corpo.addWidget(conexao)
+        self.corpo.addSpacing(22)
 
         outra = QPushButton("Alterar a conexão…")
+        outra.setProperty("role", "entradaSecundario")
+        outra.setCursor(Qt.PointingHandCursor)
         outra.clicked.connect(self._alterar_conexao)
-
-        sair = QPushButton("Sair")
-        sair.clicked.connect(self.reject)
-
+        tentar = QPushButton("Tentar de novo")
+        tentar.setProperty("role", "entradaPrincipal")
+        tentar.setCursor(Qt.PointingHandCursor)
+        tentar.setDefault(True)
+        tentar.clicked.connect(lambda: self.done(self.TENTAR_DE_NOVO))
         botoes = QHBoxLayout()
+        botoes.setSpacing(10)
         botoes.addWidget(outra)
-        botoes.addStretch()
-        botoes.addWidget(sair)
-        botoes.addWidget(tentar)
+        botoes.addWidget(tentar, 1)
+        self.corpo.addLayout(botoes)
+        self.corpo.addStretch()
 
-        layout = QVBoxLayout(self)
-        layout.setSpacing(10)
-        layout.addWidget(titulo)
-        layout.addWidget(explicacao)
-        layout.addWidget(conexao)
-        layout.addWidget(botao_tutorial(self))
-        layout.addSpacing(6)
-        layout.addLayout(botoes)
+        tutorial = botao_link("Como preparar o servidor PostgreSQL?")
+        tutorial.clicked.connect(lambda: abrir_tutorial_do_servidor(self))
+        sair = botao_link("Sair")
+        sair.clicked.connect(self.reject)
+        rodape = QHBoxLayout()
+        rodape.addWidget(tutorial)
+        rodape.addStretch()
+        rodape.addWidget(sair)
+        self.corpo.addLayout(rodape)
+        tentar.setFocus()
 
     def _alterar_conexao(self) -> None:
         if DialogoConexao(self).exec() == QDialog.Accepted:

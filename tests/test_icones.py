@@ -1,8 +1,7 @@
 """Ícone do programa.
 
-Estes testes existem porque o problema anterior era silencioso: o Qt não
-aplica o clipPath do SVG, então a "sombra longa" do desenho vazava pra fora
-do círculo e virava um retângulo cinza — sem erro nenhum, só feio.
+Estes testes existem porque problema de ícone é silencioso: o Qt não aplica
+o clipPath do SVG, por exemplo, e o desenho sai errado sem erro nenhum.
 """
 import os
 
@@ -40,27 +39,20 @@ def _render_svg(tamanho: int) -> QImage:
 # ------------------------------------------------------------------ SVG --
 
 
-def test_nada_e_desenhado_fora_do_circulo():
-    """O desenho todo cabe no círculo. A sombra antiga vazava num quadrante,
-    parando antes dos cantos da imagem — por isso o teste varre o entorno
-    inteiro em vez de conferir só os quatro cantos."""
+def test_cantos_arredondados_ficam_transparentes():
+    """O ícone é um quadrado de cantos arredondados (raio 116 no quadro de
+    512): os cantos têm que sair transparentes, senão o Windows mostra um
+    quadrado com cantos de outra cor na área de trabalho."""
     imagem = _render_svg(256)
-    centro = 256 * 340 / 680  # centro do círculo no viewBox, em pixels
-    raio = 256 * 300 / 680  # raio externo; +3px de folga pro antialiasing
-    fora = [
-        (x, y)
-        for y in range(imagem.height())
-        for x in range(imagem.width())
-        if ((x - centro) ** 2 + (y - centro) ** 2) ** 0.5 > raio + 3
-        and imagem.pixelColor(x, y).alpha() > 0
-    ]
-    assert fora == [], f"{len(fora)} pixels pintados fora do círculo, a partir de {fora[0]}"
+    for x, y in ((1, 1), (254, 1), (1, 254), (254, 254), (8, 8), (247, 247)):
+        assert imagem.pixelColor(x, y).alpha() == 0, (x, y)
+    assert imagem.pixelColor(128, 2).alpha() == 255
+    assert imagem.pixelColor(2, 128).alpha() == 255
 
 
 def test_o_desenho_e_simetrico_entre_a_metade_de_cima_e_a_de_baixo():
-    """A sombra longa descia na diagonal e engordava só a metade de baixo: no
-    desenho antigo a diferença era de 322 pixels amostrados, contra 44 do
-    atual (que vêm do relevo do cifrão e do antialiasing)."""
+    """O fundo do ícone é o quadrado inteiro: um desenho que vazasse ou
+    faltasse numa das metades desequilibraria a contagem."""
     imagem = _render_svg(256)
     metade = imagem.height() // 2
     opacos = lambda inicio, fim: sum(  # noqa: E731

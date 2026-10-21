@@ -1,17 +1,1 @@
-<svg width="100%" viewBox="0 0 680 680" xmlns="http://www.w3.org/2000/svg" role="img"><title>Cifrão branco sobre círculo azul</title><desc>Círculo azul com anel externo mais claro e cifrão branco centralizado, em estilo flat</desc>
-
-<circle cx="340" cy="340" r="300" fill="#4fa3e3"/>
-
-<circle cx="340" cy="340" r="255" fill="#2f7fd6"/>
-
-<g transform="translate(348,348)" opacity="0.25">
-<path d="M91 -87 C91 -114 55 -129 8 -129 C-47 -129 -79 -107 -79 -70 C-79 -34 -40 -23 8 -13 C62 -1 99 17 99 60 C99 104 59 130 8 130 C-47 130 -79 108 -79 75" fill="none" stroke="#1a3a66" stroke-width="60" stroke-linecap="round"/>
-<line x1="8" y1="-165" x2="8" y2="165" stroke="#1a3a66" stroke-width="39" stroke-linecap="round"/>
-</g>
-
-<g transform="translate(340,340)">
-<path d="M91 -87 C91 -114 55 -129 8 -129 C-47 -129 -79 -107 -79 -70 C-79 -34 -40 -23 8 -13 C62 -1 99 17 99 60 C99 104 59 130 8 130 C-47 130 -79 108 -79 75" fill="none" stroke="#ffffff" stroke-width="60" stroke-linecap="round"/>
-<line x1="8" y1="-165" x2="8" y2="165" stroke="#ffffff" stroke-width="39" stroke-linecap="round"/>
-</g>
-
-</svg>
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2C4680"/><stop offset="1" stop-color="#1A2A50"/></linearGradient></defs><rect width="512" height="512" rx="116" fill="url(#g)"/><path d="M106 279.25 A150 150 0 0 1 224 132.70 L224 425.80 A150 150 0 0 1 106 279.25 Z" fill="#FFFFFF"/><path d="M242 97.90 A150 150 0 0 1 328 115.66 L328 378.84 A150 150 0 0 1 242 396.60 Z" fill="#4BBDCD"/><path d="M346 87.25 A150 150 0 0 1 406 207.25 L406 207.25 A150 150 0 0 1 346 327.25 Z" fill="#F9B259"/></svg>

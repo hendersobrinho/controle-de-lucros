@@ -3,13 +3,11 @@ banco está vazio) e o login normal do dia a dia."""
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -20,11 +18,9 @@ from PySide6.QtWidgets import (
 from .. import preferencias, repositories as repo
 from ..models import Usuario
 from . import theme
-from .icones import pasta_assets
 from .conectar_claude import DialogoConectarClaude
 from .local_banco import DialogoConexao
-
-LARGURA_ENTRADA = 420
+from .marca import TelaDeEntrada, aviso_de_entrada, botao_link, campo_de_entrada, mostrar_aviso
 
 # Login (só o nome de usuário) guardado nas preferências deste PC. A senha
 # nunca é guardada.
@@ -54,81 +50,29 @@ def esquecer_acesso(conn) -> None:
         pass
 
 
-def _marca(tamanho: int = 72) -> QLabel:
-    """A marca do programa no topo da tela de entrada. Se o arquivo não estiver
-    lá (execução a partir do código sem os ícones gerados), o rótulo fica vazio
-    e o resto da tela continua de pé."""
-    rotulo = QLabel()
-    rotulo.setAlignment(Qt.AlignCenter)
-    caminho = pasta_assets() / "logo.png"
-    if caminho.exists():
-        imagem = QPixmap(str(caminho)).scaled(
-            tamanho, tamanho, Qt.KeepAspectRatio, Qt.SmoothTransformation
-        )
-        rotulo.setPixmap(imagem)
-    return rotulo
-
-
-def _centralizado(texto: str, papel: str) -> QLabel:
-    rotulo = QLabel(texto)
-    rotulo.setProperty("role", papel)
-    rotulo.setAlignment(Qt.AlignCenter)
-    rotulo.setWordWrap(True)
-    return rotulo
-
-
-def _campo(texto_de_apoio: str, senha: bool = False) -> QLineEdit:
-    campo = QLineEdit()
-    campo.setPlaceholderText(texto_de_apoio)
-    campo.setMinimumHeight(38)
-    campo.setAlignment(Qt.AlignCenter)
-    if senha:
-        campo.setEchoMode(QLineEdit.Password)
-    return campo
-
-
-def _botao_discreto(texto: str) -> QPushButton:
-    """Ação secundária da tela de entrada. Sem moldura, porque ela compete com
-    o "Entrar" — que é o que a pessoa vem fazer aqui todo dia."""
-    botao = QPushButton(texto)
-    botao.setFlat(True)
-    botao.setCursor(Qt.PointingHandCursor)
-    botao.setStyleSheet(
-        f"QPushButton {{ border: none; background: transparent; color: {theme.INK_MUTED()};"
-        f" font-size: 13px; padding: 6px 10px; }}"
-        f"QPushButton:hover {{ color: {theme.INK()}; text-decoration: underline; }}"
-    )
-    return botao
-
-
 def _botao_claude(parent) -> QPushButton:
     """Logo na entrada, para dar para ligar o Claude antes mesmo de entrar —
     ele usa a conexão deste PC com o banco, não a conta de quem está aqui."""
-    botao = _botao_discreto("Conectar ao Claude…")
+    botao = botao_link("Conectar ao Claude")
     botao.setToolTip("Deixa o Claude consultar o sistema (só leitura).")
     botao.clicked.connect(lambda: DialogoConectarClaude(parent).exec())
     return botao
 
 
-def _cartao(layout_interno: QVBoxLayout) -> QFrame:
-    """O mesmo cartão das outras telas, aqui segurando a coluna de entrada —
-    a tela fica com um centro, em vez de campos soltos sobre o fundo."""
-    cartao = QFrame()
-    cartao.setProperty("role", "card")
-    cartao.setLayout(layout_interno)
-    return cartao
+def _rodape(*botoes: QPushButton) -> QHBoxLayout:
+    rodape = QHBoxLayout()
+    rodape.setSpacing(4)
+    for i, botao in enumerate(botoes):
+        if i:
+            ponto = QLabel("·")
+            ponto.setProperty("role", "entradaSubtitulo")
+            rodape.addWidget(ponto)
+        rodape.addWidget(botao)
+    rodape.addStretch()
+    return rodape
 
 
-def _rotulo_de_erro() -> QLabel:
-    erro = QLabel("")
-    erro.setAlignment(Qt.AlignCenter)
-    erro.setWordWrap(True)
-    erro.setStyleSheet(f"color: {theme.SEAL_RED()}; font-size: 12px;")
-    erro.hide()
-    return erro
-
-
-class DialogoPrimeiroUsuario(QDialog):
+class DialogoPrimeiroUsuario(TelaDeEntrada):
     """Só aparece quando ainda não existe nenhum usuário cadastrado — cria a
     primeira conta, que já nasce administradora.
 
@@ -138,62 +82,55 @@ class DialogoPrimeiroUsuario(QDialog):
     com trocou_banco e quem chamou reconecta."""
 
     def __init__(self, conn, parent=None):
-        super().__init__(parent)
+        super().__init__(
+            "Primeiro acesso",
+            "Tudo pronto para começar.",
+            "O banco de dados está conectado e vazio. Crie a primeira conta — ela será a "
+            "administradora e poderá cadastrar as outras pessoas do escritório.",
+            parent,
+            altura=640,
+        )
         self.conn = conn
         self.trocou_banco = False
-        self.setWindowTitle("Bem-vindo")
-        self.setFixedWidth(LARGURA_ENTRADA)
-        self.setModal(True)
 
-        self.nome = _campo("seu nome completo")
-        self.login = _campo("um login para entrar")
-        self.senha = _campo("uma senha", senha=True)
-        self.confirmar = _campo("repita a senha", senha=True)
+        self.cabecalho("Seja bem-vindo", "Crie sua conta para entrar no Controle de Lucros.")
+        rotulo_nome, self.nome = campo_de_entrada("Seu nome", "nome completo")
+        rotulo_login, self.login = campo_de_entrada("Login", "como você vai entrar")
+        rotulo_senha, self.senha = campo_de_entrada("Senha", "pelo menos 4 caracteres", senha=True)
+        rotulo_conf, self.confirmar = campo_de_entrada("Confirme a senha", "repita a senha", senha=True)
         self.confirmar.returnPressed.connect(self._criar)
-        self.erro = _rotulo_de_erro()
+        self.erro = aviso_de_entrada()
+
+        for rotulo, campo in ((rotulo_nome, self.nome), (rotulo_login, self.login)):
+            self.corpo.addWidget(rotulo)
+            self.corpo.addWidget(campo)
+            self.corpo.addSpacing(14)
+        senhas = QHBoxLayout()
+        senhas.setSpacing(12)
+        for rotulo, campo in ((rotulo_senha, self.senha), (rotulo_conf, self.confirmar)):
+            coluna = QVBoxLayout()
+            coluna.setSpacing(0)
+            coluna.addWidget(rotulo)
+            coluna.addWidget(campo)
+            senhas.addLayout(coluna)
+        self.corpo.addLayout(senhas)
+        self.corpo.addSpacing(16)
+        self.corpo.addWidget(self.erro)
+        self.corpo.addSpacing(10)
 
         criar = QPushButton("Criar conta e entrar")
-        criar.setProperty("role", "primario")
-        criar.setMinimumHeight(40)
+        criar.setProperty("role", "entradaPrincipal")
+        criar.setCursor(Qt.PointingHandCursor)
         criar.clicked.connect(self._criar)
+        self.corpo.addWidget(criar)
+        self.corpo.addStretch()
 
-        sair = _botao_discreto("Sair")
-        sair.clicked.connect(self.reject)
-
-        usar_servidor = _botao_discreto("Alterar a conexão…")
+        usar_servidor = botao_link("Usar outro banco de dados")
+        usar_servidor.setToolTip("Este PC deveria estar no banco do escritório, onde as contas já existem?")
         usar_servidor.clicked.connect(self._usar_banco_do_servidor)
-
-        miolo = QVBoxLayout()
-        miolo.setContentsMargins(38, 32, 38, 30)
-        miolo.setSpacing(0)
-        miolo.addWidget(_marca())
-        miolo.addSpacing(16)
-        miolo.addWidget(_centralizado("Seja bem-vindo", "titulo"))
-        miolo.addSpacing(4)
-        miolo.addWidget(_centralizado(
-            "Este é o primeiro acesso ao <b>Controle de Distribuição de Lucros</b>. "
-            "Crie sua conta — ela será a administradora do sistema.", "subtitulo"))
-        miolo.addSpacing(22)
-        for campo in (self.nome, self.login, self.senha, self.confirmar):
-            miolo.addWidget(campo)
-            miolo.addSpacing(10)
-        miolo.addWidget(self.erro)
-        miolo.addSpacing(6)
-        miolo.addWidget(criar)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(26, 26, 26, 18)
-        layout.setSpacing(0)
-        layout.addWidget(_cartao(miolo))
-        layout.addSpacing(6)
-
-        rodape = QHBoxLayout()
-        rodape.addStretch()
-        rodape.addWidget(usar_servidor)
-        rodape.addWidget(_botao_claude(self))
-        rodape.addWidget(sair)
-        rodape.addStretch()
-        layout.addLayout(rodape)
+        sair = botao_link("Sair")
+        sair.clicked.connect(self.reject)
+        self.corpo.addLayout(_rodape(usar_servidor, _botao_claude(self), sair))
 
         self.nome.setFocus()
 
@@ -222,28 +159,34 @@ class DialogoPrimeiroUsuario(QDialog):
         self.accept()
 
     def _mostrar_erro(self, texto: str) -> None:
-        self.erro.setText(texto)
-        self.erro.show()
+        mostrar_aviso(self.erro, texto)
 
 
-class DialogoLogin(QDialog):
+class DialogoLogin(TelaDeEntrada):
     def __init__(self, conn, parent=None):
-        super().__init__(parent)
+        super().__init__(
+            "Entrar",
+            "Os lucros do escritório, em ordem.",
+            "Quem é sócio de quê, quanto cada um recebeu e o que vai no informe — num lugar só, "
+            "o mesmo para todos os computadores do escritório.",
+            parent,
+        )
         self.conn = conn
         self.usuario_autenticado: Usuario | None = None
-        self.setWindowTitle("Entrar")
-        self.setFixedWidth(LARGURA_ENTRADA)
-        self.setModal(True)
 
-        self.login = _campo("login")
+        lembrado = str(preferencias.obter(CHAVE_LOGIN_LEMBRADO) or "")
+        self.cabecalho("Seja bem-vindo",
+                       "Bom te ver de novo. Digite sua senha para continuar." if lembrado
+                       else "Entre com seu login e senha.")
+
+        rotulo_login, self.login = campo_de_entrada("Login", "seu login")
+        rotulo_senha, self.senha = campo_de_entrada("Senha", "sua senha", senha=True)
         self.login.returnPressed.connect(lambda: self.senha.setFocus())
-        self.senha = _campo("senha", senha=True)
         self.senha.returnPressed.connect(self._entrar)
-        self.erro = _rotulo_de_erro()
+        self.erro = aviso_de_entrada()
 
         self.lembrar = QCheckBox("Lembrar meu login neste computador")
         self.lembrar.setToolTip("Guarda só o login; a senha continua sendo pedida.")
-        lembrado = str(preferencias.obter(CHAVE_LOGIN_LEMBRADO) or "")
         if lembrado:
             self.login.setText(lembrado)
             self.lembrar.setChecked(True)
@@ -258,51 +201,28 @@ class DialogoLogin(QDialog):
         self.lembrar.toggled.connect(lambda marcado: marcado or self.entrar_direto.setChecked(False))
 
         entrar = QPushButton("Entrar")
-        entrar.setProperty("role", "primario")
-        entrar.setMinimumHeight(40)
+        entrar.setProperty("role", "entradaPrincipal")
+        entrar.setCursor(Qt.PointingHandCursor)
         entrar.clicked.connect(self._entrar)
 
-        sair = _botao_discreto("Sair")
+        self.corpo.addWidget(rotulo_login)
+        self.corpo.addWidget(self.login)
+        self.corpo.addSpacing(16)
+        self.corpo.addWidget(rotulo_senha)
+        self.corpo.addWidget(self.senha)
+        self.corpo.addSpacing(14)
+        self.corpo.addWidget(self.lembrar)
+        self.corpo.addSpacing(6)
+        self.corpo.addWidget(self.entrar_direto)
+        self.corpo.addSpacing(16)
+        self.corpo.addWidget(self.erro)
+        self.corpo.addSpacing(10)
+        self.corpo.addWidget(entrar)
+        self.corpo.addStretch()
+
+        sair = botao_link("Sair")
         sair.clicked.connect(self.reject)
-
-        # Tudo numa coluna centrada, em vez do formulário com rótulo à
-        # esquerda: são dois campos, e a tela de entrada é a primeira coisa
-        # que se vê do programa todo dia.
-        miolo = QVBoxLayout()
-        miolo.setContentsMargins(38, 34, 38, 30)
-        miolo.setSpacing(0)
-        miolo.addWidget(_marca())
-        miolo.addSpacing(16)
-        miolo.addWidget(_centralizado("Seja bem-vindo", "titulo"))
-        miolo.addSpacing(4)
-        miolo.addWidget(_centralizado("Controle de Distribuição de Lucros", "subtitulo"))
-        miolo.addSpacing(26)
-        miolo.addWidget(self.login)
-        miolo.addSpacing(10)
-        miolo.addWidget(self.senha)
-        miolo.addSpacing(10)
-        opcoes = QVBoxLayout()
-        opcoes.setSpacing(6)
-        opcoes.addWidget(self.lembrar)
-        opcoes.addWidget(self.entrar_direto)
-        miolo.addLayout(opcoes)
-        miolo.addSpacing(10)
-        miolo.addWidget(self.erro)
-        miolo.addSpacing(6)
-        miolo.addWidget(entrar)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(26, 26, 26, 18)
-        layout.setSpacing(0)
-        layout.addWidget(_cartao(miolo))
-        layout.addSpacing(6)
-
-        rodape = QHBoxLayout()
-        rodape.addStretch()
-        rodape.addWidget(_botao_claude(self))
-        rodape.addWidget(sair)
-        rodape.addStretch()
-        layout.addLayout(rodape)
+        self.corpo.addLayout(_rodape(_botao_claude(self), sair))
 
         # Com o login lembrado, quem abre o programa só digita a senha.
         (self.senha if lembrado else self.login).setFocus()
@@ -310,8 +230,7 @@ class DialogoLogin(QDialog):
     def _entrar(self) -> None:
         usuario = repo.autenticar(self.conn, self.login.text(), self.senha.text())
         if usuario is None:
-            self.erro.setText(repo.motivo_login_recusado(self.conn, self.login.text()))
-            self.erro.show()
+            mostrar_aviso(self.erro, repo.motivo_login_recusado(self.conn, self.login.text()))
             self.senha.clear()
             self.senha.setFocus()
             return

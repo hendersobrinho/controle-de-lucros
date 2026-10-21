@@ -394,8 +394,22 @@ e reinicie o Claude Desktop.
 
 ## Ícone do programa
 
-`controle_lucros/ui/assets/logo.svg` é a fonte; `logo.png` e `logo.ico` são
-gerados a partir dele. Depois de mexer no SVG:
+O símbolo são três barras subindo, recortadas de círculos — branco, turquesa e
+laranja. Há duas versões em `controle_lucros/ui/assets/`:
+
+- `logo.svg` — a **escura** (fundo marinho). É a do ícone do programa: o
+  `.exe`, o atalho da área de trabalho, a barra de tarefas e o instalador.
+- `logo_claro.svg` — a clara (fundo branco), para materiais em fundo claro.
+
+Dentro do programa o símbolo é desenhado em código, com a mesma geometria
+([marca.py](controle_lucros/ui/marca.py)) — é o que deixa a tela de
+carregamento animar cada barra. Ele aparece na tela de carregamento, nas telas
+de entrada (login, primeiro acesso, conexão com o banco, banco indisponível,
+escolha do Claude), que têm o painel marinho da marca à esquerda, e no alto do
+menu lateral. Um teste confere que o desenho em código continua igual ao SVG.
+
+`logo.png` e `logo.ico` são gerados a partir do `logo.svg`. Depois de mexer
+nele:
 
 ```bash
 python tools/gerar_icones.py

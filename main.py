@@ -12,6 +12,7 @@ from controle_lucros.ui.conectar_claude import DialogoEscolhaClaude, precisa_esc
 from controle_lucros.ui.local_banco import DialogoBancoInacessivel, DialogoConexao
 from controle_lucros.ui.login import DialogoLogin, DialogoPrimeiroUsuario, entrar_sem_senha, esquecer_acesso
 from controle_lucros.ui.main_window import MainWindow
+from controle_lucros.ui.marca import TelaCarregando
 from controle_lucros.ui.reportar_erro import CapturaDeErros, abrir_para_fechamento
 from controle_lucros.ui.theme import build_stylesheet
 
@@ -45,23 +46,43 @@ def _preparar_registro_de_falhas(pasta) -> str:
     return detalhes
 
 
-def _abrir_banco() -> db.Conexao:
+def _abrir_banco(carregando: TelaCarregando) -> db.Conexao:
     """Conecta e prepara o banco, insistindo enquanto a pessoa quiser.
 
     Com o banco no servidor, não abrir é coisa do dia a dia — servidor
     reiniciando, PC que ainda não entrou na rede. Em vez de o programa cair
-    com erro técnico, a pessoa tenta de novo ou corrige a conexão."""
+    com erro técnico, a pessoa tenta de novo ou corrige a conexão.
+
+    Conectar fica fora da thread da tela (carregando.executar): com o
+    servidor demorando, a animação continua viva em vez de congelar."""
     while True:
         conn = None
         try:
-            conn = db.connect()
-            db.init_schema(conn)
+            conn = carregando.executar("Conectando ao servidor…", db.connect)
+            carregando.executar("Conferindo o banco de dados…", lambda: db.init_schema(conn))
             return conn
         except psycopg.Error as erro:
             if conn is not None:
                 conn.close()
+            carregando.esconder()
             if DialogoBancoInacessivel(erro).exec() == QDialog.Rejected:
                 sys.exit(0)
+            carregando.mostrar()
+
+
+def _abrir_janela(conn, usuario, carregando: TelaCarregando) -> MainWindow:
+    try:
+        carregando.executar("Conferindo o backup do dia…", lambda: backup.backup_automatico_se_necessario(conn))
+    except (OSError, psycopg.Error):
+        pass
+    # Montar a janela é trabalho da thread da tela: a mensagem troca antes.
+    carregando.mensagem(f"Abrindo o sistema para {usuario.nome.split()[0].title()}…")
+    janela = MainWindow(conn, usuario)
+    carregando.esperar_entrada()
+    janela.show()
+    carregando.raise_()
+    carregando.sumir()
+    return janela
 
 
 def main() -> None:
@@ -80,17 +101,24 @@ def main() -> None:
     if db.precisa_configurar() and DialogoConexao(primeira_vez=True).exec() != QDialog.Accepted:
         sys.exit(0)
 
-    conn = _abrir_banco()
+    carregando = TelaCarregando()
+    carregando.mostrar()
+    conn = _abrir_banco(carregando)
 
     # Primeira abertura neste PC: usar só o programa ou ligar o Claude
     # também. Uma vez só; depois, pelo item Conectar ao Claude do menu.
     if precisa_escolher():
+        carregando.esperar_entrada()
+        carregando.esconder()
         DialogoEscolhaClaude().exec()
 
     while True:
-        # Quem marcou "entrar direto" neste PC não vê a tela de login.
+        # Quem marcou "entrar direto" neste PC não vê a tela de login — vai
+        # da tela de carregamento direto para o programa.
         usuario = entrar_sem_senha(conn) if repo.existe_algum_usuario(conn) else None
         if usuario is None:
+            carregando.esperar_entrada()
+            carregando.esconder()
             if not repo.existe_algum_usuario(conn):
                 dialogo = DialogoPrimeiroUsuario(conn)
             else:
@@ -101,21 +129,17 @@ def main() -> None:
                     # PC que estava no banco errado, apontado pro do escritório:
                     # os usuários estão lá, então volta pro começo já com o login.
                     conn.close()
-                    conn = _abrir_banco()
+                    carregando.mostrar()
+                    conn = _abrir_banco(carregando)
                     continue
                 sys.exit(0)
 
             usuario = dialogo.usuario_autenticado
+            carregando.mostrar()
         sessao.definir_usuario_atual(usuario)
 
-        try:
-            backup.backup_automatico_se_necessario(conn)
-        except (OSError, psycopg.Error):
-            pass
-
-        janela = MainWindow(conn, usuario)
+        janela = _abrir_janela(conn, usuario, carregando)
         captura.janela_principal = janela
-        janela.show()
 
         # Depois da janela aberta, não antes: perguntar sobre o tombo da vez
         # passada por cima da tela de login seria pedir explicação a quem

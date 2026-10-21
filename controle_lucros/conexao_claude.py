@@ -19,6 +19,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from . import preferencias
+
 NOME = "controle-de-lucros"
 VARIAVEL_DOCUMENTOS = "CONTROLE_LUCROS_MCP_DOCUMENTOS"
 
@@ -48,10 +50,13 @@ def arquivos_claude_desktop() -> list[Path]:
         base = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
         caminhos = [base / "Claude" / "claude_desktop_config.json"]
         locais = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
-        caminhos += sorted(
-            p / "LocalCache" / "Roaming" / "Claude" / "claude_desktop_config.json"
-            for p in (locais / "Packages").glob("Claude_*") if p.is_dir()
-        )
+        try:
+            caminhos += sorted(
+                p / "LocalCache" / "Roaming" / "Claude" / "claude_desktop_config.json"
+                for p in (locais / "Packages").glob("Claude_*") if p.is_dir()
+            )
+        except OSError:
+            pass  # pasta sem permissão de leitura: fica só a configuração comum
         return caminhos
     if sys.platform == "darwin":
         return [Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"]
@@ -99,7 +104,7 @@ def situacao_claude_desktop() -> str:
     for arquivo in arquivos_claude_desktop():
         try:
             entrada = _ler(arquivo).get("mcpServers", {}).get(NOME)
-        except ValueError:
+        except (OSError, ValueError):
             continue
         if entrada:
             if (entrada.get("command"), entrada.get("args", [])) == (esperado[0], esperado[1]):
@@ -138,6 +143,24 @@ def desconectar_claude_desktop() -> list[Path]:
 # --------------------------------------------------------------- Claude Code --
 
 
+# O Claude Code só diz se o servidor está registrado rodando "claude mcp",
+# lento demais para cada abertura do programa: o registro feito por aqui fica
+# anotado nas preferências deste PC.
+CHAVE_CLAUDE_CODE = "claude_code_registrado"
+
+
+def claude_code_registrado() -> bool:
+    return bool(preferencias.obter(CHAVE_CLAUDE_CODE))
+
+
+def _anotar_claude_code(registrado: bool) -> None:
+    preferencias.salvar_chave(CHAVE_CLAUDE_CODE, registrado)
+
+
+def algum_conectado() -> bool:
+    return situacao_claude_desktop() == "conectado" or claude_code_registrado()
+
+
 def comando_claude_code() -> str | None:
     return shutil.which("claude")
 
@@ -159,8 +182,10 @@ def conectar_claude_code(cpf_completo: bool = False) -> None:
     resultado = _rodar_claude("mcp", "add", "--scope", "user", *ambiente, NOME, "--", comando, *argumentos)
     if resultado.returncode != 0:
         raise ValueError((resultado.stderr or resultado.stdout or "o comando falhou").strip())
+    _anotar_claude_code(True)
 
 
 def desconectar_claude_code() -> None:
     if comando_claude_code() is not None:
         _rodar_claude("mcp", "remove", "--scope", "user", NOME)
+    _anotar_claude_code(False)
