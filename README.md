@@ -343,8 +343,12 @@ lê a coluna — nem por `*`, apelido ou cálculo; para mandar completo, defina
 `CONTROLE_LUCROS_MCP_DOCUMENTOS=completos`. Nomes e valores saem como estão.
 
 **Pelo programa (o jeito normal).** O pacote do Windows traz o servidor
-pronto, `ControleDeLucrosMCP.exe`, ao lado do `ControleDeLucros.exe`. Na tela
-de entrada (ou em Backup) há o botão **Conectar ao Claude…**: ele grava o
+pronto, `ControleDeLucrosMCP.exe`, ao lado do `ControleDeLucros.exe`. Na
+primeira abertura em cada PC, o programa pergunta se é para **usar só o
+programa** ou **usar com o Claude** (a resposta fica nas preferências do PC;
+fechar a pergunta conta como "só o programa"). Para mudar depois, há o item
+**Conectar ao Claude** no rodapé do menu — que mostra "Claude: conectado ✓"
+quando está ligado — e o link na tela de entrada. A janela de conexão grava o
 servidor na configuração do Claude Desktop — preservando o que já houver lá e
 guardando uma cópia `.bak` — e, se o Claude Code estiver instalado, registra
 nele com `claude mcp add --scope user`. Depois é fechar e abrir o Claude.

@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QMainWindow, QMessag
 from ..models import Usuario
 from .alteracoes_view import AlteracoesView
 from .backup_view import BackupView
+from .conectar_claude import DialogoConectarClaude, texto_do_menu
 from .dashboard_empresa import DashboardEmpresaView
 from .dashboard_visao_geral import DashboardVisaoGeralView
 from .distribuicao_anual_view import DistribuicaoAnualView
@@ -100,6 +101,8 @@ class MainWindow(QMainWindow):
         self.sidebar.navegar.connect(self._ir_para)
         self.sidebar.trocar_senha.connect(self._trocar_senha)
         self.sidebar.reportar_problema.connect(self._reportar_problema)
+        self.sidebar.claude.connect(self._conectar_claude)
+        self.sidebar.btn_claude.setText(texto_do_menu())
         self.sidebar.sair.connect(self._sair)
         tema_estado().mudou.connect(self._retemar_pagina_atual)
 
@@ -160,6 +163,10 @@ class MainWindow(QMainWindow):
         Vai junto a tela em que ela estava, que costuma ser a primeira
         pergunta de quem recebe."""
         abrir_para_relato(self.titulo_pagina.text(), self)
+
+    def _conectar_claude(self) -> None:
+        DialogoConectarClaude(self).exec()
+        self.sidebar.btn_claude.setText(texto_do_menu())
 
     def _trocar_senha(self) -> None:
         dialogo = DialogoTrocarMinhaSenha(self.conn, self.usuario, self)

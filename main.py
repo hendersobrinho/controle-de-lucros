@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QApplication, QDialog
 
 from controle_lucros import backup, db, relatorio_erro, repositories as repo, sessao, traducao
 from controle_lucros.ui.icones import icone_app
+from controle_lucros.ui.conectar_claude import DialogoEscolhaClaude, precisa_escolher
 from controle_lucros.ui.local_banco import DialogoBancoInacessivel, DialogoConexao
 from controle_lucros.ui.login import DialogoLogin, DialogoPrimeiroUsuario, entrar_sem_senha, esquecer_acesso
 from controle_lucros.ui.main_window import MainWindow
@@ -80,6 +81,11 @@ def main() -> None:
         sys.exit(0)
 
     conn = _abrir_banco()
+
+    # Primeira abertura neste PC: usar só o programa ou ligar o Claude
+    # também. Uma vez só; depois, pelo item Conectar ao Claude do menu.
+    if precisa_escolher():
+        DialogoEscolhaClaude().exec()
 
     while True:
         # Quem marcou "entrar direto" neste PC não vê a tela de login.

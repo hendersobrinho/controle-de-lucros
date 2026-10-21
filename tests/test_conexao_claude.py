@@ -5,7 +5,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QDialog
 
 from controle_lucros import conexao_claude as claude
 
@@ -104,3 +104,45 @@ def test_botao_na_tela_de_entrada(conn):
     from controle_lucros.ui.login import DialogoLogin, DialogoPrimeiroUsuario
     for dialogo in (DialogoLogin(conn), DialogoPrimeiroUsuario(conn)):
         assert "Conectar ao Claude…" in [b.text() for b in dialogo.findChildren(QPushButton)]
+
+
+def test_escolha_inicial_so_o_programa_nao_conecta_e_nao_pergunta_de_novo(config):
+    from controle_lucros.ui.conectar_claude import DialogoEscolhaClaude, precisa_escolher
+    from controle_lucros import preferencias
+    preferencias.salvar_chave("claude_escolha", None)
+    assert precisa_escolher()
+    dialogo = DialogoEscolhaClaude()
+    dialogo.sem.botao.click()
+    assert dialogo.result() == QDialog.Accepted
+    assert not precisa_escolher()
+    assert claude.situacao_claude_desktop() == "desconectado"
+
+
+def test_fechar_a_escolha_conta_como_so_o_programa(config):
+    from controle_lucros.ui.conectar_claude import DialogoEscolhaClaude, precisa_escolher
+    from controle_lucros import preferencias
+    preferencias.salvar_chave("claude_escolha", None)
+    DialogoEscolhaClaude().reject()
+    assert preferencias.obter("claude_escolha") == "sem" and not precisa_escolher()
+
+
+def test_escolher_com_o_claude_abre_a_janela_de_conexao(config, monkeypatch):
+    from controle_lucros.ui import conectar_claude as tela
+    from controle_lucros import preferencias
+    abertas = []
+    monkeypatch.setattr(tela.DialogoConectarClaude, "exec", lambda self: abertas.append(self) or 0)
+    dialogo = tela.DialogoEscolhaClaude()
+    dialogo.com.botao.click()
+    assert len(abertas) == 1 and preferencias.obter("claude_escolha") == "com"
+
+
+def test_menu_do_programa_tem_o_claude_e_mostra_a_situacao(conn, config, monkeypatch):
+    from controle_lucros import repositories as repo
+    from controle_lucros.ui import conectar_claude as tela
+    from controle_lucros.ui.main_window import MainWindow
+    repo.criar_usuario(conn, "Comum", "comum", "senha123", False)
+    janela = MainWindow(conn, repo.listar_usuarios(conn)[0])
+    assert janela.sidebar.btn_claude.text() == "Conectar ao Claude"
+    monkeypatch.setattr(tela.DialogoConectarClaude, "exec", lambda self: claude.conectar_claude_desktop())
+    janela.sidebar.btn_claude.click()
+    assert janela.sidebar.btn_claude.text() == "Claude: conectado ✓"

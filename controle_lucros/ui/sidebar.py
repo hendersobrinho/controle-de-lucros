@@ -13,6 +13,7 @@ class Sidebar(QFrame):
     navegar = Signal(str)
     trocar_senha = Signal()
     reportar_problema = Signal()
+    claude = Signal()
     sair = Signal()
 
     def __init__(self, parent=None):
@@ -98,7 +99,16 @@ class Sidebar(QFrame):
         )
         self.btn_reportar.clicked.connect(self.reportar_problema.emit)
 
+        # Ligar ou desligar o Claude, para quem escolheu "só o programa" na
+        # entrada e mudou de ideia (ou o contrário). O texto diz a situação.
+        self.btn_claude = QPushButton("Conectar ao Claude")
+        self.btn_claude.setProperty("role", "navSub")
+        self.btn_claude.setCursor(Qt.PointingHandCursor)
+        self.btn_claude.setToolTip("Deixa o Claude consultar o sistema (só leitura).")
+        self.btn_claude.clicked.connect(self.claude.emit)
+
         layout.addWidget(self._rotulo_usuario)
+        layout.addWidget(self.btn_claude)
         layout.addWidget(self._botao_sobre)
         layout.addWidget(self.btn_reportar)
         layout.addWidget(self.btn_tema)

@@ -922,8 +922,11 @@ servidor ou a rede cair, o programa avisa em vez de fechar — espere voltar e
 tente de novo.</p>
 
 <h3>Consultar pelo Claude</h3>
-<p>O botão <b>Conectar ao Claude…</b>, na tela de entrada e em Backup, liga o
-Claude Desktop ou o Claude Code a este computador. Depois de fechar e abrir o
+<p>Na primeira vez que o programa abre num computador, ele pergunta se é
+para <b>usar só o programa</b> ou <b>usar com o Claude</b>. Só o programa
+funciona completo; o Claude é opcional. Para mudar depois, use o item
+<b>Conectar ao Claude</b> no rodapé do menu (ou o link na tela de entrada): ele
+liga o Claude Desktop ou o Claude Code a este computador. Depois de fechar e abrir o
 Claude, dá para perguntar em português — "quanto a 275 distribuiu em 2024 e
 para quem?", "quem recebeu lucro sem pró-labore no ano passado?". O Claude
 <b>só lê</b>: não grava, não altera e não apaga nada, e não vê usuários,
