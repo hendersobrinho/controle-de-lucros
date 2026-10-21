@@ -98,7 +98,6 @@ class DialogoConexao(TelaDeEntrada):
         self.usuario.setText(atual.usuario)
         rotulo_senha, self.senha = campo_de_entrada("Senha", "senha do PostgreSQL", senha=True)
         self.senha.setText(atual.senha)
-        self.senha.returnPressed.connect(self._salvar)
         self.resultado = aviso_de_entrada()
 
         linha = QHBoxLayout()
@@ -125,7 +124,6 @@ class DialogoConexao(TelaDeEntrada):
         salvar = QPushButton("Salvar e continuar" if primeira_vez else "Salvar")
         salvar.setProperty("role", "entradaPrincipal")
         salvar.setCursor(Qt.PointingHandCursor)
-        salvar.setDefault(True)
         salvar.clicked.connect(self._salvar)
         botoes = QHBoxLayout()
         botoes.setSpacing(10)
@@ -146,6 +144,9 @@ class DialogoConexao(TelaDeEntrada):
 
         for campo in (self.servidor, self.banco, self.usuario, self.senha):
             campo.textEdited.connect(lambda _texto: self.resultado.hide())
+            # Enter em qualquer campo salva (o teste vai junto).
+            campo.returnPressed.connect(self._salvar)
+        self.porta.valueChanged.connect(lambda _valor: self.resultado.hide())
         (self.servidor if not atual.servidor else self.senha).setFocus()
 
     def parametros(self) -> db.ParametrosConexao:

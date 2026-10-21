@@ -244,6 +244,16 @@ class TelaDeEntrada(QDialog):
         layout.addWidget(self.painel)
         layout.addWidget(self.lado, 1)
 
+    def showEvent(self, evento) -> None:
+        # Num QDialog todo botão vira "padrão automático": o Enter dado num
+        # campo, além do que o campo já faz, aperta o botão — e o login (ou o
+        # salvar) rodava duas vezes. Aqui o Enter é só o que cada tela liga
+        # nos seus campos; botão padrão, só o que a tela marcar.
+        for botao in self.findChildren(QPushButton):
+            if not botao.isDefault():
+                botao.setAutoDefault(False)
+        super().showEvent(evento)
+
     def cabecalho(self, titulo: str, subtitulo: str = "") -> None:
         rotulo = QLabel(titulo)
         rotulo.setProperty("role", "entradaTitulo")

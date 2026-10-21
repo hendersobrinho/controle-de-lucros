@@ -31,7 +31,6 @@ from ..mapa_vinculos import PAPEL_EMPRESA
 from ..models import Empresa
 from .cartao_participacao import FaixaParticipacao
 from .common import (
-    CampoValorCota,
     campo_cotas,
     cnpj_valido_ou_vazio,
     configurar_campo_cnpj,
@@ -102,10 +101,11 @@ def _limpar(layout) -> None:
 class DialogoEmpresa(QDialog):
     """Cadastrar uma empresa nova ou mudar os dados de uma existente.
 
-    Capital social, cotas e valor da cota andam juntos — capital = cotas ×
-    valor da cota: mudar as cotas ou o valor da cota refaz o capital, e
-    mudar o capital refaz o valor da cota. É o que o contrato social diz, e
-    poupa a conta de quem só tem dois dos três números."""
+    O capital social é digitado direto, como está no contrato. As cotas são
+    opcionais: informadas, o valor de cada cota sai da conta capital ÷ cotas
+    (R$ 1,00 na maioria, R$ 0,01 em algumas). Antes eram três campos que se
+    recalculavam uns aos outros — digitar o capital e depois as cotas
+    apagava o capital digitado, e quem usa não tinha como entender por quê."""
 
     EXCLUIDA = 2
 
@@ -114,8 +114,6 @@ class DialogoEmpresa(QDialog):
         self.conn = conn
         self.empresa = empresa
         self.empresa_id: int | None = empresa.id if empresa else None
-        self._sincronizando = False
-        self._valor_cota_mexido = False
         self.setWindowTitle("Editar empresa" if empresa else "Nova empresa")
         self.setMinimumWidth(520)
 
@@ -129,24 +127,15 @@ class DialogoEmpresa(QDialog):
         configurar_campo_cnpj(self.cnpj)
         self.cnpj.setText(empresa.cnpj or "" if empresa else "")
 
-        self.cotas = campo_cotas()
-        self.valor_cota = CampoValorCota()
         self.capital = configurar_campo_moeda(QDoubleSpinBox())
+        self.cotas = campo_cotas()
         if empresa is not None:
-            self.cotas.setValue(empresa.quantidade_cotas or 0)
             self.capital.setValue(empresa.capital_social or 0)
-            valor = empresa.valor_cota or (
-                empresa.capital_social / empresa.quantidade_cotas
-                if empresa.capital_social and empresa.quantidade_cotas else None
-            )
-            self.valor_cota.setValue(valor or 1.0)
-        else:
-            self.valor_cota.setValue(1.0)
+            self.cotas.setValue(empresa.quantidade_cotas or 0)
         self.conta = form_ui.dica()
         self._mostrar_conta()
-        self.cotas.valueChanged.connect(self._ao_mudar_cotas_ou_valor)
-        self.valor_cota.valueChanged.connect(self._ao_mudar_valor_cota)
-        self.capital.valueChanged.connect(self._ao_mudar_capital)
+        self.capital.valueChanged.connect(self._mostrar_conta)
+        self.cotas.valueChanged.connect(self._mostrar_conta)
 
         bloco_id, col = form_ui.secao("Identificação", "1")
         col.addLayout(form_ui.linha(
@@ -161,13 +150,11 @@ class DialogoEmpresa(QDialog):
             info="Como está no contrato de constituição. Mudanças depois — aumento de capital, novas "
                  "cotas — entram como alteração contratual, e a ficha mostra o valor vigente.",
         )
-        col.addWidget(form_ui.equacao(
-            form_ui.campo("Quantidade de cotas", self.cotas),
-            "×",
-            form_ui.campo("Valor da cota", self.valor_cota),
-            "=",
-            form_ui.campo("Capital social", self.capital,
-                          info="Preencha dois dos três números: o terceiro é calculado."),
+        col.addLayout(form_ui.linha(
+            form_ui.campo("Capital social", self.capital),
+            form_ui.campo("Quantidade de cotas (opcional)", self.cotas,
+                          info="Se souber, informe: o valor de cada cota é calculado sozinho."),
+            esticar=(1, 1),
         ))
         col.addWidget(self.conta)
 
@@ -194,50 +181,27 @@ class DialogoEmpresa(QDialog):
         )
         self.numero_chamada.setFocus()
 
-    # ---- capital = cotas × valor da cota
-    def _mostrar_conta(self) -> None:
-        cotas, valor = self.cotas.value(), self.valor_cota.value()
-        if cotas and valor:
+    # ---- valor da cota = capital ÷ cotas
+    def valor_da_cota(self) -> float | None:
+        if self.capital.value() and self.cotas.value():
+            return self.capital.value() / self.cotas.value()
+        return None
+
+    def _mostrar_conta(self, *_args) -> None:
+        valor = self.valor_da_cota()
+        if valor is not None:
             self.conta.setText(
-                f"{formatar_valor_br(cotas, 0)} cotas × {formatar_valor_cota(valor)} "
-                f"= R$ {formatar_valor_br(cotas * valor)}"
+                f"Cada cota vale {formatar_valor_cota(valor)}  "
+                f"(R$ {formatar_valor_br(self.capital.value())} ÷ {formatar_valor_br(self.cotas.value(), 0)} cotas)"
             )
         else:
-            self.conta.setText("Informe dois dos três números — o terceiro é calculado.")
-
-    def _sincronizar(self, acao) -> None:
-        if self._sincronizando:
-            return
-        self._sincronizando = True
-        try:
-            acao()
-        finally:
-            self._sincronizando = False
-        self._mostrar_conta()
-
-    def _ao_mudar_cotas_ou_valor(self, *_args) -> None:
-        def refazer_capital():
-            if self.cotas.value() and self.valor_cota.value():
-                self.capital.setValue(round(self.cotas.value() * self.valor_cota.value(), 2))
-        self._sincronizar(refazer_capital)
-
-    def _ao_mudar_valor_cota(self, *_args) -> None:
-        if not self._sincronizando:
-            self._valor_cota_mexido = True
-        self._ao_mudar_cotas_ou_valor()
-
-    def _ao_mudar_capital(self, *_args) -> None:
-        def refazer_valor_cota():
-            if self.cotas.value() and self.capital.value():
-                self.valor_cota.setValue(self.capital.value() / self.cotas.value())
-        self._sincronizar(refazer_valor_cota)
+            self.conta.setText("Digite o capital do contrato. As cotas podem ficar em branco.")
 
     # ---- gravar
     def empresa_editada(self) -> Empresa:
-        # O valor da cota só é gravado se entrou em alguma conta (há cotas)
-        # ou se alguém o escolheu: o R$ 1,00 que o campo sugere numa empresa
-        # sem cotas não é informação, é só o padrão do campo.
-        guardar_valor = bool(self.cotas.value()) or self._valor_cota_mexido
+        # Sem cotas não há conta: fica o valor da cota que já estava gravado
+        # (ou nenhum), em vez de inventar um.
+        valor = self.valor_da_cota()
         return Empresa(
             id=self.empresa_id,
             numero_chamada=self.numero_chamada.text().strip(),
@@ -245,7 +209,7 @@ class DialogoEmpresa(QDialog):
             cnpj=cnpj_valido_ou_vazio(self.cnpj),
             capital_social=self.capital.value(),
             quantidade_cotas=self.cotas.value(),
-            valor_cota=self.valor_cota.value() if guardar_valor else (self.empresa.valor_cota if self.empresa else None),
+            valor_cota=valor if valor is not None else (self.empresa.valor_cota if self.empresa else None),
         )
 
     def _salvar(self) -> None:

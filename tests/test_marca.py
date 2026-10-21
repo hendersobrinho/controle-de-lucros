@@ -69,3 +69,59 @@ def test_tela_de_entrada_tem_painel_e_formulario():
     tela.cabecalho("Título", "Subtítulo")
     assert tela.painel.titulo == "Frase"
     assert "Teste — Controle de Lucros" == tela.windowTitle()
+
+
+# ------------------------------------------------ Enter nas telas de entrada --
+
+
+def test_enter_na_senha_da_conexao_salva_uma_vez_so(monkeypatch):
+    from controle_lucros.ui import local_banco
+
+    chamadas = []
+    monkeypatch.setattr(local_banco.DialogoConexao, "_salvar", lambda self: chamadas.append(1))
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    tela = local_banco.DialogoConexao(primeira_vez=True)
+    tela.show()
+    for campo in (tela.senha, tela.servidor, tela.banco, tela.usuario):
+        chamadas.clear()
+        campo.setFocus()
+        QTest.keyClick(campo, Qt.Key_Return)
+        assert chamadas == [1], campo.objectName()
+    tela.hide()
+
+
+def test_enter_no_login_e_no_primeiro_acesso_roda_uma_vez_so(conn, monkeypatch):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from controle_lucros.ui import login
+
+    for classe, metodo, campo in ((login.DialogoLogin, "_entrar", "senha"),
+                                  (login.DialogoPrimeiroUsuario, "_criar", "confirmar")):
+        chamadas = []
+        monkeypatch.setattr(classe, metodo, lambda self: chamadas.append(1))
+        tela = classe(conn)
+        tela.show()
+        getattr(tela, campo).setFocus()
+        QTest.keyClick(getattr(tela, campo), Qt.Key_Return)
+        assert chamadas == [1], classe.__name__
+        # Enter no campo de login só passa para a senha, não tenta entrar.
+        if classe is login.DialogoLogin:
+            chamadas.clear()
+            tela.login.setFocus()
+            QTest.keyClick(tela.login, Qt.Key_Return)
+            assert chamadas == [] and tela.focusWidget() is tela.senha
+        tela.hide()
+
+
+def test_banco_indisponivel_enter_tenta_de_novo(monkeypatch):
+    import psycopg
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from controle_lucros.ui import local_banco
+
+    tela = local_banco.DialogoBancoInacessivel(psycopg.OperationalError("connection timeout expired"))
+    tela.show()
+    QTest.keyClick(tela, Qt.Key_Return)
+    assert tela.result() == tela.TENTAR_DE_NOVO

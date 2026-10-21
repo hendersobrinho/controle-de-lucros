@@ -33,8 +33,9 @@ class DialogoConectarClaude(QDialog):
         explicacao = QLabel(
             "Liga o Claude a este programa: dá para perguntar, em português, coisas como "
             "<i>“quanto a 275 distribuiu em 2024 e para quem?”</i> ou <i>“quem recebeu lucro sem "
-            "pró-labore no ano passado?”</i>. O Claude só <b>lê</b> — não grava, não altera e não "
-            "apaga nada — e usa a mesma conexão com o banco deste computador."
+            "pró-labore no ano passado?”</i>, ou pedir <i>“importa esta planilha”</i> e "
+            "<i>“lança a distribuição de 2025 da 275”</i>. Ele grava pelas mesmas regras do "
+            "programa, fica registrado no Log de atividades e <b>nunca exclui nada</b>."
         )
         explicacao.setWordWrap(True)
         explicacao.setProperty("role", "subtitulo")
@@ -219,8 +220,9 @@ class DialogoEscolhaClaude(TelaDeEntrada):
         )
         self.com = _Opcao(
             "Usar com o Claude",
-            "Ligar o Claude Desktop ou o Claude Code a este computador. Ele só consulta — não "
-            "grava nada — e o que consulta vai para a Anthropic, empresa do Claude.",
+            "Ligar o Claude Desktop ou o Claude Code a este computador. Ele consulta, lança e "
+            "importa planilhas pelas regras do programa — nunca exclui nada — e o que consulta "
+            "vai para a Anthropic, empresa do Claude.",
             self._com_claude, ("#4BBDCD", "#F9B259"),
         )
         self.corpo.addWidget(self.sem)

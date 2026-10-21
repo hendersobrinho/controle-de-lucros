@@ -54,7 +54,7 @@ def _botao_claude(parent) -> QPushButton:
     """Logo na entrada, para dar para ligar o Claude antes mesmo de entrar —
     ele usa a conexão deste PC com o banco, não a conta de quem está aqui."""
     botao = botao_link("Conectar ao Claude")
-    botao.setToolTip("Deixa o Claude consultar o sistema (só leitura).")
+    botao.setToolTip("Deixa o Claude consultar e lançar no sistema (nunca exclui).")
     botao.clicked.connect(lambda: DialogoConectarClaude(parent).exec())
     return botao
 

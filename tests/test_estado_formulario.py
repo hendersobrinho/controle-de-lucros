@@ -130,8 +130,8 @@ def test_nova_empresa_pela_janela_de_cadastro(empresas, monkeypatch):
     def cadastrar(dialogo):
         dialogo.numero_chamada.setText("003")
         dialogo.nome.setText("GAMA LTDA")
-        dialogo.cotas.setValue(250_000)
-        dialogo.valor_cota.atalhos[1].click()  # R$ 0,01
+        dialogo.capital.setValue(2_500)
+        dialogo.cotas.setValue(250_000)  # cada cota: R$ 0,01
         dialogo._salvar()
         return dialogo.result()
 
@@ -143,14 +143,16 @@ def test_nova_empresa_pela_janela_de_cadastro(empresas, monkeypatch):
     assert empresas._empresa_atual_id == gama.id  # já fica selecionada
 
 
-def test_capital_cotas_e_valor_da_cota_andam_juntos(empresas):
+def test_capital_e_digitado_direto_e_as_cotas_nao_o_apagam(empresas):
+    """O capital digitado fica: informar as cotas depois só calcula o valor
+    de cada cota (antes, refazia o capital por cima)."""
     dialogo = DialogoEmpresa(empresas.conn)
-    dialogo.cotas.setValue(1000)
-    dialogo.valor_cota.setValue(2.5)
-    assert dialogo.capital.value() == 2500.0          # cotas × valor
     dialogo.capital.setValue(5000)
-    assert dialogo.valor_cota.value() == 5.0           # capital ÷ cotas
-    assert "1.000 cotas × R$ 5,00 = R$ 5.000,00" in dialogo.conta.text()
+    assert "cotas podem ficar em branco" in dialogo.conta.text()
+    dialogo.cotas.setValue(1000)
+    assert dialogo.capital.value() == 5000.0
+    assert dialogo.valor_da_cota() == 5.0
+    assert "Cada cota vale R$ 5,00" in dialogo.conta.text()
 
 
 def test_cadastro_sem_numero_ou_nome_avisa(empresas, avisos):
@@ -177,15 +179,15 @@ def test_editar_abre_com_os_dados_e_grava(empresas, monkeypatch):
     assert empresas.titulo_empresa.text() == "ACME COMERCIO LTDA"
 
 
-def test_empresa_sem_cotas_nao_grava_o_valor_sugerido(empresas):
-    """O R$ 1,00 que o campo sugere numa empresa sem cotas não é informação:
-    só vira valor da cota se alguém o escolher."""
+def test_empresa_so_com_capital_grava_sem_valor_da_cota(empresas):
+    """Sem cotas não há conta: o valor da cota fica em branco, em vez de um
+    número inventado."""
     dialogo = DialogoEmpresa(empresas.conn)
     dialogo.numero_chamada.setText("004")
     dialogo.nome.setText("DELTA LTDA")
-    assert dialogo.empresa_editada().valor_cota is None
-    dialogo.valor_cota.atalhos[1].click()
-    assert dialogo.empresa_editada().valor_cota == 0.01
+    dialogo.capital.setValue(80_000)
+    empresa = dialogo.empresa_editada()
+    assert (empresa.capital_social, empresa.quantidade_cotas, empresa.valor_cota) == (80_000, 0, None)
 
 
 def test_excluir_empresa_diz_o_que_vai_junto_e_ja_vem_em_nao(empresas, monkeypatch):

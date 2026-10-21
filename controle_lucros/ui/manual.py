@@ -928,9 +928,14 @@ funciona completo; o Claude é opcional. Para mudar depois, use o item
 <b>Conectar ao Claude</b> no rodapé do menu (ou o link na tela de entrada): ele
 liga o Claude Desktop ou o Claude Code a este computador. Depois de fechar e abrir o
 Claude, dá para perguntar em português — "quanto a 275 distribuiu em 2024 e
-para quem?", "quem recebeu lucro sem pró-labore no ano passado?". O Claude
-<b>só lê</b>: não grava, não altera e não apaga nada, e não vê usuários,
-senhas nem o log.</p>
+para quem?", "quem recebeu lucro sem pró-labore no ano passado?" — e também
+pedir que ele cadastre, lance ou importe uma planilha.</p>
+<p>O Claude grava pelas <b>mesmas regras do programa</b>: período trancado
+continua trancado, CPF repetido é recusado. Antes de gravar ele diz o que vai
+fazer e espera você confirmar; antes da primeira gravação de cada conversa ele
+faz um backup completo; e tudo o que ele grava aparece no <b>Log de
+atividades</b> com o nome "Claude (assistente)". Ele <b>nunca exclui</b> nada —
+excluir é só pelo programa — e não mexe em usuários nem senhas.</p>
 <p>O que ele consulta sai do escritório e vai para a Anthropic, empresa do
 Claude: nomes e valores. O CPF dos sócios vai mascarado, a menos que se marque
 "Enviar o CPF completo". Para desligar, use <b>Desconectar</b> na mesma

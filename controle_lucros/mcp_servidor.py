@@ -1,4 +1,4 @@
-"""Servidor MCP: deixa o Claude consultar o Controle de Lucros.
+"""Servidor MCP: deixa o Claude consultar e alimentar o Controle de Lucros.
 
     python servidor_mcp.py      (ou python -m controle_lucros.mcp_servidor)
 
@@ -6,9 +6,14 @@ Fala MCP pelo stdio — é assim que o Claude Desktop e o Claude Code abrem
 servidores locais (ver o README pra configurar). Usa a mesma conexão
 configurada neste PC pelo programa.
 
-Só lê. A conexão nasce com default_transaction_read_only, então nem uma
-consulta SQL livre consegue gravar; cadastro e lançamento continuam sendo
-feitos no programa, com login, log e período trancado.
+Lê e grava (sem excluir). As consultas usam uma conexão que nasce com
+default_transaction_read_only — a consulta SQL livre continua só de leitura.
+As gravações são ferramentas próprias (cadastrar, editar, lançar, importar
+planilha, trancar) que chamam as mesmas funções das telas, numa segunda
+conexão: valem as mesmas validações, período trancado continua trancado, e
+cada gravação entra no Log de atividades com o autor "Claude". Antes da
+primeira gravação de cada sessão sai um backup completo na pasta de backups
+do PC. Excluir, usuários, senhas e restauração de backup ficam no programa.
 
 O que sai daqui vai para o Claude, fora do escritório. Por isso o CPF dos
 sócios sai mascarado (***.456.789-**) e a consulta SQL livre não lê a coluna,
@@ -20,6 +25,7 @@ import datetime as dt
 import functools
 import os
 import threading
+from pathlib import Path
 from dataclasses import asdict
 from decimal import Decimal
 
@@ -31,8 +37,10 @@ from mcp.types import ToolAnnotations
 from pglast import ast
 from pglast.visitors import Visitor
 
-from controle_lucros import analise, db, repositories as repo
-from controle_lucros.models import TIPOS_MOVIMENTACAO_LABEL, Socio
+from controle_lucros import analise, backup, db, repositories as repo, sessao
+from controle_lucros.layout_importacao import importar_com_layout
+from controle_lucros.models import TIPOS_MOVIMENTACAO_LABEL, Empresa, Movimentacao, Socio, Usuario
+from controle_lucros.planilha import importar_cadastro
 
 LIMITE_SQL = 500
 TEMPO_MAXIMO_MS = 30_000
@@ -190,13 +198,18 @@ servidor = MCPServer(
     name="controle-de-lucros",
     title="Controle de Lucros",
     instructions=(
-        "Consulta (só leitura) ao sistema de controle de distribuição de lucros do escritório: "
+        "Sistema de controle de distribuição de lucros do escritório — consulta e gravação: "
         "empresas clientes, quadro societário, alterações contratuais, lucro distribuído por ano a "
         "cada sócio, pró-labore, IRRF e movimentações (empréstimos, adiantamentos, devolução de "
         "capital). Valores em reais. Empresas são chamadas pelo código (nº de chamada). "
         "Distribuição 'desproporcional' é quando a fatia recebida pelo sócio difere da fatia dele "
         "no capital além da tolerância, em pontos percentuais. Para perguntas que as outras "
-        "ferramentas não cobrem, veja esquema_do_banco e use consultar_sql."
+        "ferramentas não cobrem, veja esquema_do_banco e use consultar_sql (só leitura). "
+        "Para gravar há ferramentas próprias (cadastrar_*, editar_*, lancar_*, importar_planilha, "
+        "incluir_socio_na_empresa, registrar_saida_de_socio, alterar_participacao, trancar_*), que "
+        "seguem as regras do programa. Excluir só é feito no programa. Quem usa são pessoas leigas "
+        "em tecnologia: antes de gravar, diga em português simples o que vai gravar e espere a "
+        "pessoa confirmar. Datas AAAA-MM-DD."
     ),
 )
 _LEITURA = ToolAnnotations(read_only_hint=True, destructive_hint=False, open_world_hint=False)
@@ -205,13 +218,19 @@ _LEITURA = ToolAnnotations(read_only_hint=True, destructive_hint=False, open_wor
 _uma_por_vez = threading.Lock()
 
 
-def ferramenta(funcao):
-    @functools.wraps(funcao)
-    def serializada(*args, **kwargs):
-        with _uma_por_vez:
-            return funcao(*args, **kwargs)
+_GRAVA = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False)
 
-    return servidor.tool(annotations=_LEITURA)(serializada)
+
+def ferramenta(funcao=None, *, anotacoes: ToolAnnotations = _LEITURA):
+    def registrar(f):
+        @functools.wraps(f)
+        def serializada(*args, **kwargs):
+            with _uma_por_vez:
+                return f(*args, **kwargs)
+
+        return servidor.tool(annotations=anotacoes)(serializada)
+
+    return registrar(funcao) if funcao is not None else registrar
 
 
 @ferramenta
@@ -405,10 +424,10 @@ def ficha_socio(socio: str) -> dict:
         ).fetchall()
     ]
     movimentacoes = [
-        {"empresa": r["nome"], "tipo": TIPOS_MOVIMENTACAO_LABEL.get(r["tipo"], r["tipo"]), "data": r["data"],
-         "valor": r["valor"]}
+        {"id": r["id"], "empresa": r["nome"], "tipo": TIPOS_MOVIMENTACAO_LABEL.get(r["tipo"], r["tipo"]),
+         "data": r["data"], "valor": r["valor"]}
         for r in conn.execute(
-            """SELECT e.nome, m.tipo, m.data, m.valor FROM movimentacao m JOIN empresa e ON e.id = m.empresa_id
+            """SELECT m.id, e.nome, m.tipo, m.data, m.valor FROM movimentacao m JOIN empresa e ON e.id = m.empresa_id
                WHERE m.socio_id = %s ORDER BY m.data""",
             (s.id,),
         ).fetchall()
@@ -559,6 +578,339 @@ def consultar_sql(sql: str, limite: int = 200) -> dict:
         # Claude precisa para corrigir a consulta.
         raise ToolError(str(erro).strip()) from erro
     return _limpo({"colunas": colunas, "linhas": linhas, "cortado_no_limite": cortou}, casas=None)
+
+
+# ---------------------------------------------------------------- gravação --
+#
+# Cada ferramenta chama a mesma função do repositório que a tela chama: é o
+# que garante as mesmas regras (CPF repetido, período trancado, número de
+# alteração, alteração contratual automática) sem reescrevê-las aqui. Não há
+# ferramenta de excluir: isso fica no programa.
+
+CLAUDE = Usuario(id=None, nome="Claude (assistente)", login="claude", senha_hash="", senha_salt="")
+
+_conn_escrita: db.Conexao | None = None
+_backup_da_sessao: str | None = None
+
+
+def conexao_escrita() -> db.Conexao:
+    global _conn_escrita
+    if _conn_escrita is None or _conn_escrita.closed:
+        parametros = db.conexao_configurada()
+        if parametros is None:
+            raise ToolError("Este PC ainda não tem conexão configurada: abra o programa e configure o servidor.")
+        _conn_escrita = db.Conexao(parametros)
+    return _conn_escrita
+
+
+class _Gravando:
+    """Em volta de toda gravação: o autor no log é o Claude, sai um backup
+    antes da primeira gravação da sessão, e erro de regra do programa volta
+    para o Claude como explicação (desfazendo o que estava pela metade)."""
+
+    def __enter__(self) -> db.Conexao:
+        global _backup_da_sessao
+        conn = conexao_escrita()
+        sessao.definir_usuario_atual(CLAUDE)
+        if _backup_da_sessao is None:
+            try:
+                _backup_da_sessao = str(backup.criar_backup(conn))
+            except (OSError, psycopg.Error) as erro:
+                raise ToolError(f"Não gravei nada: o backup de segurança antes de gravar falhou ({erro}).") from erro
+        return conn
+
+    def __exit__(self, tipo, erro, _rastro) -> bool:
+        if erro is None:
+            return False
+        conexao_escrita().rollback()
+        if isinstance(erro, ToolError):
+            return False
+        if isinstance(erro, ValueError):
+            raise ToolError(str(erro)) from erro
+        if isinstance(erro, psycopg.Error):
+            raise ToolError(db.explicar_erro(erro)) from erro
+        return False
+
+
+def _feito(mensagem: str, **dados) -> dict:
+    resposta = {"ok": True, "mensagem": mensagem, **dados}
+    if _backup_da_sessao:
+        resposta["backup_antes_das_gravacoes"] = _backup_da_sessao
+    return _limpo(resposta)
+
+
+def _data(texto: str) -> str:
+    """Aceita AAAA-MM-DD ou DD/MM/AAAA; grava AAAA-MM-DD."""
+    texto = str(texto).strip()
+    for formato in ("%Y-%m-%d", "%d/%m/%Y"):
+        try:
+            return dt.datetime.strptime(texto, formato).date().isoformat()
+        except ValueError:
+            continue
+    raise ToolError(f'Data inválida: "{texto}". Use AAAA-MM-DD (ex.: 2025-03-31).')
+
+
+def _vinculo_ativo(empresa_id: int, socio_id: int):
+    ativos = [v for v in repo.listar_vinculos_empresa(conexao_escrita(), empresa_id)
+              if v.socio_id == socio_id and v.data_saida is None]
+    if not ativos:
+        raise ToolError("Este sócio não está no quadro atual desta empresa.")
+    return ativos[-1]
+
+
+def _alteracao(empresa_id: int, numero: int):
+    achadas = [a for a in repo.listar_alteracoes(conexao_escrita(), empresa_id) if a.numero == numero]
+    if not achadas:
+        raise ToolError(f"Esta empresa não tem a alteração contratual nº {numero}.")
+    return achadas[0]
+
+
+def _tipo_movimentacao(tipo: str) -> str:
+    texto = repo.chave_nome(tipo)
+    for chave, rotulo in TIPOS_MOVIMENTACAO_LABEL.items():
+        if texto in (repo.chave_nome(chave), repo.chave_nome(rotulo)):
+            return chave
+    raise ToolError("Tipo de movimentação inválido. Use um destes: " + "; ".join(TIPOS_MOVIMENTACAO_LABEL.values()))
+
+
+# -- empresas --
+
+
+@ferramenta(anotacoes=_GRAVA)
+def cadastrar_empresa(codigo: str, nome: str, cnpj: str = "", capital_social: float = 0.0,
+                      quantidade_cotas: float = 0.0, valor_cota: float | None = None) -> dict:
+    """Cadastra uma empresa nova. codigo é o nº de chamada do escritório."""
+    with _Gravando() as conn:
+        if conn.execute("SELECT 1 FROM empresa WHERE numero_chamada = %s", (codigo.strip(),)).fetchone():
+            raise ToolError(f"Já existe uma empresa com o código {codigo}.")
+        novo = repo.salvar_empresa(conn, Empresa(None, codigo, nome, cnpj, capital_social, quantidade_cotas,
+                                                 valor_cota))
+    return _feito(f"Empresa {codigo} cadastrada.", empresa_id=novo)
+
+
+@ferramenta(anotacoes=_GRAVA)
+def editar_empresa(empresa: str, codigo: str | None = None, nome: str | None = None, cnpj: str | None = None,
+                   capital_social: float | None = None, quantidade_cotas: float | None = None,
+                   valor_cota: float | None = None) -> dict:
+    """Muda os dados de cadastro de uma empresa (só os campos informados).
+    Capital e cotas aqui são os de fundação; mudança de capital ao longo do
+    tempo é por alteração contratual."""
+    e = _achar_empresa(empresa)
+    with _Gravando() as conn:
+        for campo, valor in (("numero_chamada", codigo), ("nome", nome), ("cnpj", cnpj),
+                             ("capital_social", capital_social), ("quantidade_cotas", quantidade_cotas),
+                             ("valor_cota", valor_cota)):
+            if valor is not None:
+                setattr(e, campo, valor)
+        repo.salvar_empresa(conn, e)
+    return _feito(f"Empresa {e.numero_chamada} atualizada.")
+
+
+# -- sócios --
+
+
+@ferramenta(anotacoes=_GRAVA)
+def cadastrar_socio(nome: str, documento: str = "", tipo_pessoa: str = "fisica") -> dict:
+    """Cadastra um sócio (pessoa física com CPF, ou jurídica com CNPJ —
+    tipo_pessoa "fisica" ou "juridica"). Depois use incluir_socio_na_empresa."""
+    if tipo_pessoa not in ("fisica", "juridica"):
+        raise ToolError('tipo_pessoa é "fisica" ou "juridica".')
+    with _Gravando() as conn:
+        novo = repo.salvar_socio(conn, Socio(None, nome, documento, tipo_pessoa))
+    return _feito(f"Sócio cadastrado (id {novo}).", socio_id=novo)
+
+
+@ferramenta(anotacoes=_GRAVA)
+def editar_socio(socio: str, nome: str | None = None, documento: str | None = None,
+                 tipo_pessoa: str | None = None) -> dict:
+    """Corrige nome, CPF/CNPJ ou tipo de pessoa de um sócio."""
+    s = _achar_socio(socio)
+    with _Gravando() as conn:
+        repo.salvar_socio(conn, Socio(s.id, nome if nome is not None else s.nome,
+                                      documento if documento is not None else s.cpf,
+                                      tipo_pessoa or s.tipo_pessoa))
+    return _feito(f"Sócio id {s.id} atualizado.")
+
+
+# -- quadro societário --
+
+
+@ferramenta(anotacoes=_GRAVA)
+def incluir_socio_na_empresa(empresa: str, socio: str, percentual: float, cotas: float, data_entrada: str,
+                             capital: float | None = None) -> dict:
+    """Põe um sócio (já cadastrado) no quadro da empresa a partir de
+    data_entrada, com a % do capital e as cotas. Entrada no ano corrente
+    abre a alteração contratual automaticamente, como na tela."""
+    e, s = _achar_empresa(empresa), _achar_socio(socio)
+    with _Gravando() as conn:
+        vinculo = repo.associar_socio_a_empresa(conn, e.id, s.id, percentual, cotas, _data(data_entrada),
+                                                descricao="Inclusão de sócio (registrada pelo Claude)",
+                                                valor_capital=capital)
+    return _feito(f"{s.nome} incluído no quadro da {e.nome}.", vinculo_id=vinculo)
+
+
+@ferramenta(anotacoes=_GRAVA)
+def registrar_saida_de_socio(empresa: str, socio: str, data_saida: str) -> dict:
+    """Tira o sócio do quadro da empresa na data informada (registra a
+    alteração contratual da saída). O histórico dele continua guardado."""
+    e, s = _achar_empresa(empresa), _achar_socio(socio)
+    with _Gravando() as conn:
+        repo.encerrar_vinculo_registrando_alteracao(conn, _vinculo_ativo(e.id, s.id), _data(data_saida),
+                                                    descricao="Saída de sócio (registrada pelo Claude)")
+    return _feito(f"Saída de {s.nome} da {e.nome} registrada.")
+
+
+@ferramenta(anotacoes=_GRAVA)
+def alterar_participacao(empresa: str, socio: str, percentual: float, cotas: float, data: str) -> dict:
+    """Muda a % e as cotas de um sócio que continua na empresa, a partir da
+    data (a participação antiga fica no histórico)."""
+    e, s = _achar_empresa(empresa), _achar_socio(socio)
+    with _Gravando() as conn:
+        repo.atualizar_cotas_vinculo(conn, _vinculo_ativo(e.id, s.id), percentual, cotas, _data(data),
+                                     descricao="Atualização de cotas (registrada pelo Claude)")
+    return _feito(f"Participação de {s.nome} na {e.nome} atualizada.")
+
+
+@ferramenta(anotacoes=_GRAVA)
+def definir_valor_da_cota(empresa: str, valor: float) -> dict:
+    """Valor nominal de UMA cota da empresa (R$ 1,00 na maioria)."""
+    e = _achar_empresa(empresa)
+    with _Gravando() as conn:
+        repo.definir_valor_da_cota(conn, e.id, valor)
+    return _feito(f"Valor da cota da {e.nome}: R$ {valor}.")
+
+
+@ferramenta(anotacoes=_GRAVA)
+def trancar_alteracao_contratual(empresa: str, numero: int, trancar: bool = True) -> dict:
+    """Tranca (ou destranca, com trancar=false) uma alteração contratual."""
+    e = _achar_empresa(empresa)
+    with _Gravando() as conn:
+        alteracao = _alteracao(e.id, numero)
+        (repo.fechar_alteracao if trancar else repo.reabrir_alteracao)(conn, alteracao.id)
+    return _feito(f"Alteração nº {numero} {'trancada' if trancar else 'destrancada'}.")
+
+
+# -- distribuição e movimentações --
+
+
+@ferramenta(anotacoes=_GRAVA)
+def lancar_distribuicao(empresa: str, ano: int, socio: str, valor: float, pro_labore: float = 0.0,
+                        irrf: float = 0.0) -> dict:
+    """Lança (ou substitui) o lucro distribuído no ano a um sócio, com
+    pró-labore e IRRF."""
+    e, s = _achar_empresa(empresa), _achar_socio(socio)
+    with _Gravando() as conn:
+        repo.salvar_distribuicao(conn, e.id, ano, s.id, valor, pro_labore, irrf)
+    return _feito(f"Distribuição de {ano} de {s.nome} na {e.nome} lançada.")
+
+
+@ferramenta(anotacoes=_GRAVA)
+def lancar_distribuicao_trimestral(empresa: str, ano: int, trimestre: int, socio: str, valor: float,
+                                   pro_labore: float = 0.0, irrf: float = 0.0) -> dict:
+    """Lança o valor de um trimestre (1 a 4); o anual passa a ser a soma dos
+    trimestres, como na tela."""
+    if trimestre not in (1, 2, 3, 4):
+        raise ToolError("trimestre vai de 1 a 4.")
+    e, s = _achar_empresa(empresa), _achar_socio(socio)
+    with _Gravando() as conn:
+        repo.salvar_distribuicao_trimestral(conn, e.id, ano, trimestre, s.id, valor, pro_labore, irrf)
+    return _feito(f"{trimestre}º trimestre de {ano} de {s.nome} na {e.nome} lançado.")
+
+
+@ferramenta(anotacoes=_GRAVA)
+def lancar_movimentacao(empresa: str, socio: str, tipo: str, valor: float, data: str) -> dict:
+    """Lança uma movimentação: "Empréstimo da empresa ao sócio",
+    "Empréstimo do sócio à empresa", "Adiantamento de lucro" ou
+    "Devolução de capital"."""
+    e, s = _achar_empresa(empresa), _achar_socio(socio)
+    chave = _tipo_movimentacao(tipo)
+    with _Gravando() as conn:
+        novo = repo.salvar_movimentacao(conn, Movimentacao(None, e.id, s.id, chave, valor, _data(data)))
+    return _feito(f"{TIPOS_MOVIMENTACAO_LABEL[chave]} de {s.nome} lançado.", movimentacao_id=novo)
+
+
+@ferramenta(anotacoes=_GRAVA)
+def trancar_periodo(empresa: str, ano: int, trancar: bool = True) -> dict:
+    """Tranca (ou destranca, com trancar=false) o ano da empresa: trancado,
+    ninguém altera distribuição, movimentação nem quadro daquele ano."""
+    e = _achar_empresa(empresa)
+    with _Gravando() as conn:
+        (repo.fechar_periodo if trancar else repo.reabrir_periodo)(conn, e.id, ano)
+    return _feito(f"{ano} da {e.nome} {'trancado' if trancar else 'destrancado'}.")
+
+
+# -- importação de planilha --
+
+
+def _ler_planilha(caminho: str, layout: str | None) -> list[dict]:
+    arquivo = Path(caminho).expanduser()
+    if not arquivo.is_file():
+        raise ToolError(f"Não achei o arquivo {arquivo}. Passe o caminho completo da planilha (.xlsx ou .csv).")
+    try:
+        if not layout:
+            return importar_cadastro(arquivo)
+        layouts = repo.listar_layouts_importacao(conexao())
+        escolhido = next((l for l in layouts if repo.chave_nome(l.nome) == repo.chave_nome(layout)), None)
+        if escolhido is None:
+            nomes = ", ".join(l.nome for l in layouts) or "nenhum cadastrado"
+            raise ToolError(f'Não há layout "{layout}". Layouts do escritório: {nomes}.')
+        return importar_com_layout(arquivo, escolhido)
+    except (ValueError, OSError) as erro:
+        raise ToolError(f"Não consegui ler a planilha: {erro}") from erro
+
+
+@ferramenta(anotacoes=_GRAVA)
+def importar_planilha(caminho: str, layout: str | None = None, gravar: bool = False) -> dict:
+    """Importa uma planilha de cadastro (empresas, sócios, participações e
+    distribuição) pelo mesmo caminho da tela de Importação. caminho é o
+    arquivo neste computador; layout é o nome de um layout do escritório
+    (vazio = o formato padrão do sistema, colunas pelo cabeçalho).
+
+    Primeiro chame com gravar=false: mostra o que vai entrar, sem gravar
+    nada. Mostre isso à pessoa e, com o ok dela, chame de novo com
+    gravar=true. Sócio que não existe é cadastrado; sócio com nome repetido
+    no cadastro (sem CPF que desempate) e linhas em conflito ficam de fora e
+    são listados."""
+    linhas = _ler_planilha(caminho, layout)
+    if not linhas:
+        raise ToolError("A planilha não tem linhas para importar (confira o formato ou o layout).")
+    for ordem, linha in enumerate(linhas):
+        linha["_ordem"] = ordem
+    preparado = repo.preparar_importacao_cadastro(conexao(), linhas)
+    novos = [p for p in preparado["pendencias"] if p["aviso"].startswith("Nenhum sócio")]
+    ambiguos = [p for p in preparado["pendencias"] if p not in novos]
+    empresas_novas = sorted({l["empresa_nome"] for l in preparado["prontas"] + preparado["pendencias"]
+                             if l.get("empresa_existente") is None})
+    resumo = {
+        "linhas_na_planilha": len(linhas),
+        "linhas_prontas": len(preparado["prontas"]),
+        "empresas_novas": empresas_novas,
+        "socios_novos": sorted({p["socio_nome"] for p in novos}),
+        "ficam_de_fora": [{"linha": p["_ordem"] + 2, "socio": p["socio_nome"], "motivo": p["aviso"]}
+                          for p in ambiguos]
+                         + [{"linha": c["_ordem"] + 2, "empresa": c["empresa_nome"], "motivo": c["aviso"]}
+                            for c in preparado["conflitos"]],
+    }
+    if not gravar:
+        return _limpo({"gravado": False, **resumo,
+                       "proximo_passo": "Confirme com a pessoa e chame de novo com gravar=true."})
+
+    with _Gravando() as conn:
+        criados: dict[str, int] = {}
+        resolvidas = list(preparado["prontas"])
+        for pendencia in novos:
+            chave = (repo.normalizar_documento(pendencia["socio_cpf"])
+                     or repo.normalizar_nome(pendencia["socio_nome"]))
+            if chave not in criados:
+                criados[chave] = repo.salvar_socio(conn, Socio(
+                    None, pendencia["socio_nome"], pendencia["socio_cpf"] or "",
+                    pendencia.get("tipo_pessoa") or "fisica",
+                ))
+            resolvidas.append({**pendencia, "socio_id": criados[chave]})
+        resolvidas.sort(key=lambda l: l["_ordem"])
+        aplicado = repo.aplicar_importacao_cadastro(conn, resolvidas)
+    return _feito("Planilha importada.", **resumo, socios_cadastrados=len(criados),
+                  resultado={k: v for k, v in aplicado.items() if isinstance(v, (int, float))})
 
 
 def main() -> None:

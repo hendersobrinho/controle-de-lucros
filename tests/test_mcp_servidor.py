@@ -32,10 +32,15 @@ def chamar(nome, **argumentos):
     return asyncio.run(mcp.servidor.call_tool(nome, argumentos))
 
 
-def test_todas_as_ferramentas_sao_marcadas_como_so_leitura():
-    ferramentas = asyncio.run(mcp.servidor.list_tools())
-    assert {f.name for f in ferramentas} >= {"resumo_geral", "ficha_empresa", "ficha_socio", "consultar_sql"}
-    assert all(f.annotations.read_only_hint for f in ferramentas)
+def test_consultas_sao_so_leitura_e_nao_ha_ferramenta_de_excluir():
+    ferramentas = {f.name: f for f in asyncio.run(mcp.servidor.list_tools())}
+    for nome in ("resumo_geral", "ficha_empresa", "ficha_socio", "consultar_sql", "pontos_de_atencao"):
+        assert ferramentas[nome].annotations.read_only_hint
+    for nome in ("cadastrar_empresa", "lancar_distribuicao", "importar_planilha"):
+        assert not ferramentas[nome].annotations.read_only_hint
+    # Excluir fica só no programa.
+    assert not [n for n in ferramentas if "exclu" in n or "apag" in n or "remov" in n]
+    assert not any(f.annotations.destructive_hint for f in ferramentas.values())
 
 
 def test_resumo_geral_abre_no_ultimo_ano(cenario):
@@ -166,3 +171,75 @@ def test_a_conexao_continua_so_de_leitura(cenario):
 def test_erro_esperado_chega_ao_claude_com_a_explicacao(cenario):
     with pytest.raises(ToolError, match="diga o código"):
         chamar("ficha_empresa", empresa="ACM")
+
+
+# ---------------------------------------------------------------- gravação --
+
+
+@pytest.fixture()
+def gravacao(monkeypatch):
+    """Cada teste começa sem o backup da sessão, para conferir que ele sai."""
+    monkeypatch.setattr(mcp, "_backup_da_sessao", None)
+    yield
+    from controle_lucros import sessao
+    sessao.definir_usuario_atual(None)
+
+
+def test_cadastrar_e_editar_empresa_com_backup_e_log_do_claude(cenario, conn, gravacao):
+    r = mcp.cadastrar_empresa("003", "gama ltda", capital_social=5000, quantidade_cotas=5000)
+    assert r["ok"] and r["backup_antes_das_gravacoes"].endswith(".json")
+    assert mcp.ficha_empresa("003")["nome"] == "GAMA LTDA"
+    mcp.editar_empresa("003", cnpj="12.345.678/0001-90")
+    assert mcp.ficha_empresa("003")["cnpj"] == "12.345.678/0001-90"
+    autores = {r[0] for r in conn.execute(
+        "SELECT usuario_nome FROM log_atividade WHERE entidade = 'empresa' AND detalhes LIKE 'GAMA%'").fetchall()}
+    assert autores == {"Claude (assistente)"}
+    with pytest.raises(ToolError, match="Já existe"):
+        mcp.cadastrar_empresa("003", "outra")
+
+
+def test_socio_quadro_e_distribuicao(cenario, gravacao):
+    novo = mcp.cadastrar_socio("caio", "529.982.247-25")["socio_id"]
+    mcp.incluir_socio_na_empresa("001", str(novo), 10, 100, "01/01/2024")
+    nomes = {q["nome"] for q in mcp.ficha_empresa("001")["quadro_societario"]}
+    assert "CAIO" in nomes
+    mcp.alterar_participacao("001", "caio", 20, 200, "2024-06-01")
+    mcp.lancar_distribuicao("001", 2024, "caio", 500, pro_labore=100)
+    assert mcp.ficha_socio("caio")["total_recebido"] == 500
+    mcp.registrar_saida_de_socio("001", "caio", "2024-12-31")
+    assert "CAIO" not in {q["nome"] for q in mcp.ficha_empresa("001")["quadro_societario"]}
+    with pytest.raises(ToolError, match="não está no quadro"):
+        mcp.registrar_saida_de_socio("001", "caio", "2025-01-10")
+
+
+def test_regras_do_programa_valem_para_o_claude(cenario, gravacao):
+    with pytest.raises(ToolError, match="CPF"):
+        mcp.cadastrar_socio("outra ana", "123.456.789-09")  # CPF da ANA
+    mcp.trancar_periodo("001", 2024)
+    with pytest.raises(ToolError):
+        mcp.lancar_distribuicao("001", 2024, "ana", 1)
+    mcp.trancar_periodo("001", 2024, trancar=False)
+    mcp.lancar_distribuicao("001", 2024, "ana", 1)
+    with pytest.raises(ToolError, match="Data inválida"):
+        mcp.lancar_movimentacao("001", "ana", "Adiantamento de lucro", 10, "31-02-2024")
+    r = mcp.lancar_movimentacao("001", "ana", "adiantamento de lucro", 10, "2024-02-10")
+    assert any(m["id"] == r["movimentacao_id"] for m in mcp.ficha_socio("ana")["movimentacoes"])
+
+
+def test_importar_planilha_mostra_antes_e_grava_depois(cenario, conn, gravacao, tmp_path):
+    planilha = tmp_path / "importar.csv"
+    planilha.write_text(
+        "Nº empresa;Empresa;Sócio;CPF/CNPJ do sócio;% capital;Cotas do sócio;Data de entrada;Ano;Valor distribuído\n"
+        "010;Delta;Duda;;100;1000;2023-01-01;2024;3000\n",
+        encoding="utf-8",
+    )
+    previa = mcp.importar_planilha(str(planilha))
+    assert previa["gravado"] is False
+    assert previa["empresas_novas"] == ["DELTA"] and previa["socios_novos"] == ["DUDA"]
+    assert conn.execute("SELECT COUNT(*) FROM empresa").fetchone()[0] == 2  # nada gravado
+
+    feito = mcp.importar_planilha(str(planilha), gravar=True)
+    assert feito["ok"] and feito["socios_cadastrados"] == 1
+    assert mcp.ficha_empresa("010")["distribuicao_por_ano"][0]["total"] == 3000
+    with pytest.raises(ToolError, match="Não achei o arquivo"):
+        mcp.importar_planilha(str(tmp_path / "nao_existe.xlsx"))
