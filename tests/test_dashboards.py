@@ -17,6 +17,13 @@ def app():
     return QApplication.instance() or QApplication([])
 
 
+@pytest.fixture(autouse=True)
+def analise_na_hora(monkeypatch):
+    """Os testes de números leem o resultado logo depois de abrir a tela; o
+    segundo plano tem testes próprios (no fim do arquivo)."""
+    monkeypatch.setattr(DashboardVisaoGeralView, "assincrono", False)
+
+
 @pytest.fixture()
 def cenario(conn):
     acme = repo.salvar_empresa(conn, Empresa(None, "001", "ACME", "", 1000, 1000))
@@ -136,3 +143,86 @@ def test_atualizar_esquece_a_classificacao_guardada(conn, cenario):
     repo.salvar_distribuicao(conn, cenario["beta"], 2024, cenario["ana"], 9000)
     tela.atualizar()
     assert tela.valor_total.text() == "R$ 13.000,00"
+
+
+# ------------------------------------------------- análise em segundo plano --
+
+
+def _esperar(condicao, limite_ms=8000):
+    from PySide6.QtTest import QTest
+
+    passou = 0
+    while not condicao() and passou < limite_ms:
+        QTest.qWait(20)
+        passou += 20
+    assert condicao(), "a análise em segundo plano não terminou"
+
+
+def test_analise_em_segundo_plano_nao_trava_e_mostra_o_resultado(conn, cenario, monkeypatch):
+    monkeypatch.setattr(DashboardVisaoGeralView, "assincrono", True)
+    tela = DashboardVisaoGeralView(conn)
+    tela.resize(1100, 800)
+    tela.show()
+    tela.atualizar()
+    # O painel azul sai na hora; a classificação ainda não.
+    assert tela.valor_total.text() == "R$ 6.000,00"
+    assert tela._resultado is None and not tela.btn_exportar_excel.isEnabled()
+    _esperar(lambda: tela._resultado is not None)
+    assert tela.atencao_desproporcional.property("tom") == "alerta"
+    assert tela.btn_exportar_excel.isEnabled()
+    assert not tela.carregando.isVisible()
+
+
+def test_trocar_o_periodo_no_meio_fica_com_a_analise_nova(conn, cenario, monkeypatch):
+    monkeypatch.setattr(DashboardVisaoGeralView, "assincrono", True)
+    tela = DashboardVisaoGeralView(conn)
+    tela.periodo.escolher(2023, 2023)
+    tela.periodo.escolher(2024, 2024)
+    _esperar(lambda: tela._resultado is not None and tela._trabalho is None)
+    assert tela._resultado["total_distribuido"] == 6000  # 2024, não 2023
+
+
+def test_cancelar_limpa_os_cartoes_em_vez_de_mostrar_outro_periodo(conn, cenario, monkeypatch):
+    monkeypatch.setattr(DashboardVisaoGeralView, "assincrono", True)
+    tela = DashboardVisaoGeralView(conn)
+    tela.periodo.escolher(2024, 2024)
+    tela.carregando.cancelar.emit()
+    assert tela._resultado is None
+    assert "cancelada" in tela.atencao_desproporcional.explicacao.text()
+    assert not tela.btn_exportar_pdf.isEnabled()
+
+
+def test_voltar_ao_dashboard_sem_gravacao_nao_refaz_a_conta(conn, cenario, monkeypatch):
+    chamadas = []
+    original = repo.visao_geral
+    monkeypatch.setattr(repo, "visao_geral", lambda *a, **k: chamadas.append(1) or original(*a, **k))
+    tela = DashboardVisaoGeralView(conn)
+    tela.atualizar()
+    tela.atualizar()
+    assert len(chamadas) == 1
+    repo.salvar_distribuicao(conn, cenario["beta"], 2024, cenario["ana"], 9000)
+    tela.atualizar()
+    assert len(chamadas) == 2
+
+
+def test_progresso_pode_cancelar_a_analise(conn, cenario):
+    vistas = []
+
+    def progresso(feitas, total, nome):
+        vistas.append(nome)
+        raise repo.AnaliseCancelada()
+
+    with pytest.raises(repo.AnaliseCancelada):
+        repo.visao_geral(conn, 2024, 2024, 0, progresso)
+    assert vistas == ["ACME"]
+
+
+def test_aviso_de_carregamento_desenha(conn, cenario):
+    tela = DashboardVisaoGeralView(conn)
+    tela.resize(900, 700)
+    tela.carregando.comecar("Analisando 2021 a 2025…")
+    tela.carregando._aparecer()
+    tela.carregando.andamento(40, 214, "MEDTÓRAX")
+    assert not tela.carregando.grab().isNull()
+    tela.carregando.terminar()
+    assert not tela.carregando.isVisible()

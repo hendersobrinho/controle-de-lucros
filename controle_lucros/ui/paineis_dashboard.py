@@ -17,7 +17,10 @@ cliente.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF, QSize, Qt, Signal
+import math
+import time
+
+from PySide6.QtCore import QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QFrame,
@@ -31,6 +34,7 @@ from PySide6.QtWidgets import (
 )
 
 from .common import formatar_percentual, formatar_valor_br, pintura_segura
+from .marca import desenhar_simbolo
 from .painel_distribuicao import _Animado, _compacto, iniciais
 from .theme import cor
 from .theme import estado as tema_estado
@@ -503,3 +507,171 @@ def bloco(titulo: str, subtitulo: str = "") -> tuple[QFrame, QVBoxLayout]:
     coluna.addLayout(cabeca)
     return quadro, coluna
 
+
+
+class CarregandoAnalise(QWidget):
+    """O aviso de "analisando" por cima do dashboard enquanto a conta das
+    empresas roda em segundo plano. Antes, a conta rodava na frente e a
+    janela congelava — o sistema chegava a oferecer "forçar fechamento".
+
+    Cobre o painel inteiro com um véu e mostra, num cartão, as barras do
+    símbolo se mexendo, a empresa da vez e quanto já foi feito. Só aparece
+    se a conta passar de um instante: análise rápida não pisca na tela."""
+
+    cancelar = Signal()
+
+    ATRASO_MS = 180
+
+    def __init__(self, parent: QWidget):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_NoSystemBackground)
+        self.hide()
+        self._titulo = "Analisando as empresas…"
+        self._detalhe = ""
+        self._feitas = 0
+        self._total = 0
+        self._inicio = 0.0
+        self._relogio = QTimer(self)
+        # 30 quadros por segundo: suave, e deixa a conta das empresas (que
+        # roda ao lado, no mesmo processo) com o processador quase todo.
+        self._relogio.setInterval(33)
+        self._relogio.timeout.connect(self._quadro)
+        self._espera = QTimer(self)
+        self._espera.setSingleShot(True)
+        self._espera.timeout.connect(self._aparecer)
+        self.botao_cancelar = QPushButton("Cancelar", self)
+        self.botao_cancelar.setCursor(Qt.PointingHandCursor)
+        self.botao_cancelar.clicked.connect(self.cancelar.emit)
+        # Até onde o véu sobe: quem usa a tela diz (o dashboard deixa de fora a
+        # barra do período, que continua clicável durante a análise).
+        self.topo = lambda: 0
+        parent.installEventFilter(self)
+
+    # -- ciclo --
+
+    def comecar(self, titulo: str) -> None:
+        self._titulo = titulo
+        self._detalhe = "Preparando…"
+        self._feitas = self._total = 0
+        if not self.isVisible() and not self._espera.isActive():
+            self._espera.start(self.ATRASO_MS)
+
+    def andamento(self, feitas: int, total: int, detalhe: str) -> None:
+        self._feitas, self._total, self._detalhe = feitas, total, detalhe
+
+    def _quadro(self) -> None:
+        """Enquanto o véu escurece, redesenha tudo; depois, só o cartão. O
+        véu é transparente: redesenhá-lo inteiro a cada quadro obrigava o
+        dashboard por baixo (gráficos, rankings) a se redesenhar junto, e a
+        animação roubava da conta o dobro do tempo."""
+        if (time.monotonic() - self._inicio) * 1000 < 260:
+            self.update()
+        else:
+            self.update(self._cartao().toAlignedRect().adjusted(-16, -12, 16, 20))
+
+    def terminar(self) -> None:
+        self._espera.stop()
+        self._relogio.stop()
+        self.hide()
+
+    def _aparecer(self) -> None:
+        self._inicio = time.monotonic()
+        self._posicionar()
+        self.raise_()
+        self.show()
+        self._relogio.start()
+
+    def _posicionar(self) -> None:
+        area = self.parentWidget().rect()
+        area.setTop(max(0, min(self.topo(), area.height() - 260)))
+        self.setGeometry(area)
+
+    def eventFilter(self, objeto, evento):
+        if objeto is self.parentWidget() and evento.type() == evento.Type.Resize and self.isVisible():
+            self._posicionar()
+        return False
+
+    # -- desenho --
+
+    def _cartao(self) -> QRectF:
+        largura, altura = 440.0, 250.0
+        centro = QRectF(self.rect()).center()
+        return QRectF(centro.x() - largura / 2, min(centro.y() - altura / 2, 120), largura, altura)
+
+    def resizeEvent(self, _evento) -> None:
+        cartao = self._cartao()
+        self.botao_cancelar.adjustSize()
+        self.botao_cancelar.move(int(cartao.center().x() - self.botao_cancelar.width() / 2),
+                                 int(cartao.bottom() - self.botao_cancelar.height() - 18))
+
+    def paintEvent(self, _evento) -> None:
+        t = (time.monotonic() - self._inicio) * 1000
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setRenderHint(QPainter.TextAntialiasing)
+
+        veu = QColor(cor("PAPER"))
+        veu.setAlpha(min(int(t / 200 * 205), 205))
+        p.fillRect(self.rect(), veu)
+
+        cartao = self._cartao()
+        sombra = QColor(0, 0, 0, 28)
+        for i in range(6):
+            sombra.setAlpha(14 - i * 2)
+            p.setPen(Qt.NoPen)
+            p.setBrush(sombra)
+            p.drawRoundedRect(cartao.adjusted(-i * 2, -i * 2 + 4, i * 2, i * 2 + 4), 16 + i, 16 + i)
+        p.setBrush(QColor(cor("PAPER_RAISED")))
+        p.setPen(QPen(QColor(cor("HAIRLINE")), 1))
+        p.drawRoundedRect(cartao, 16, 16)
+
+        # As barras do símbolo, subindo e descendo fora de fase — o mesmo
+        # movimento da tela de carregamento do programa.
+        alturas = [0.62 + 0.38 * (0.5 + 0.5 * math.sin(t / 260 + i * 1.1)) for i in range(3)]
+        icone = QRectF(cartao.left() + 26, cartao.top() + 22, 64, 64)
+        desenhar_simbolo(p, icone, fundo=QColor("#203461"), alturas=alturas)
+
+        p.setPen(QColor(cor("INK")))
+        fonte = QFont(self.font())
+        fonte.setPointSizeF(13.5)
+        fonte.setWeight(QFont.DemiBold)
+        p.setFont(fonte)
+        texto = QRectF(icone.right() + 16, cartao.top() + 28, cartao.right() - icone.right() - 40, 24)
+        p.drawText(texto, Qt.AlignLeft | Qt.AlignVCenter, self._titulo)
+        fonte.setPointSizeF(9.5)
+        fonte.setWeight(QFont.Normal)
+        p.setFont(fonte)
+        p.setPen(QColor(cor("INK_MUTED")))
+        if self._total:
+            andamento = f"Empresa {min(self._feitas + 1, self._total)} de {self._total}"
+        else:
+            andamento = "Preparando…"
+        p.drawText(texto.translated(0, 24), Qt.AlignLeft | Qt.AlignVCenter, andamento)
+        detalhe = QFontMetrics(fonte).elidedText(self._detalhe if self._total else "", Qt.ElideRight,
+                                                 int(texto.width()))
+        p.drawText(texto.translated(0, 42), Qt.AlignLeft | Qt.AlignVCenter, detalhe)
+
+        # A barra de progresso: o que já foi, em laranja, com a porcentagem.
+        trilho = QRectF(cartao.left() + 26, cartao.top() + 126, cartao.width() - 52, 8)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(cor("HAIRLINE")))
+        p.drawRoundedRect(trilho, 4, 4)
+        fracao = self._feitas / self._total if self._total else 0.0
+        if fracao > 0:
+            cheio = QRectF(trilho)
+            cheio.setWidth(max(trilho.height(), trilho.width() * fracao))
+            p.setBrush(QColor(cor("BRASS")))
+            p.drawRoundedRect(cheio, 4, 4)
+        # A porcentagem em cima da barra, à direita; o recado embaixo, sozinho
+        # na linha.
+        p.setPen(QColor(cor("INK")))
+        fonte.setWeight(QFont.DemiBold)
+        p.setFont(fonte)
+        p.drawText(QRectF(trilho.left(), trilho.top() - 22, trilho.width(), 18), Qt.AlignRight | Qt.AlignVCenter,
+                   f"{fracao * 100:.0f}%")
+        fonte.setWeight(QFont.Normal)
+        fonte.setPointSizeF(9)
+        p.setFont(fonte)
+        p.setPen(QColor(cor("INK_MUTED")))
+        p.drawText(QRectF(trilho.left(), trilho.bottom() + 8, trilho.width(), 18), Qt.AlignLeft | Qt.AlignVCenter,
+                   "O programa continua respondendo: dá para trocar o período.")

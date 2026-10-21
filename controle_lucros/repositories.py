@@ -1433,7 +1433,13 @@ def panorama_distribuicao_anual(conn: Conexao, empresa_id: int, ano_base: int) -
 
     distribuicoes = {d.socio_id: d for d in listar_distribuicoes(conn, empresa_id, ano_base)}
     total_distribuido = total_distribuido_empresa_ano(conn, empresa_id, ano_base)
-    socios = {s.id: s for s in listar_socios(conn)}
+    # Só os sócios desta empresa no ano: montar o cadastro inteiro (mais de
+    # mil sócios) para cada empresa e cada ano era 70% do tempo da visão
+    # geral — 10 s no período todo.
+    socios = {
+        r["id"]: Socio(**dict(r))
+        for r in conn.execute("SELECT * FROM socio WHERE id = ANY(%s)", (socios_no_ano,)).fetchall()
+    } if socios_no_ano else {}
     acumulado = acumulado_trimestral(conn, empresa_id, ano_base)
 
     linhas = []
@@ -2095,20 +2101,38 @@ def analise_empresa_periodo(
     return resultado
 
 
-def visao_geral(conn: Conexao, ano_de: int, ano_ate: int, tolerancia: float) -> dict:
+def versao_dos_dados(conn: Conexao) -> tuple:
+    """Muda sempre que alguém grava alguma coisa — toda gravação deixa uma
+    linha no log de atividade. Serve para quem guarda uma conta cara saber se
+    ela ainda vale, sem refazê-la."""
+    linha = conn.execute("SELECT COALESCE(MAX(id), 0) AS ultimo, COUNT(*) AS quantos FROM log_atividade").fetchone()
+    return (linha["ultimo"], linha["quantos"])
+
+
+class AnaliseCancelada(Exception):
+    """Quem pediu a visão geral desistiu no meio (trocou de período)."""
+
+
+def visao_geral(conn: Conexao, ano_de: int, ano_ate: int, tolerancia: float, progresso=None) -> dict:
     """Panorama de todas as empresas no período: quanto foi distribuído
     proporcional/desproporcionalmente, quanto foi emprestado, e quais
-    empresas não distribuíram nada no período."""
+    empresas não distribuíram nada no período.
+
+    progresso(feitas, total, nome_da_empresa) é chamado a cada empresa — é
+    a conta demorada do sistema, e a tela mostra o andamento. Se ele
+    levantar AnaliseCancelada, a análise para ali."""
     with conn.leituras_repetidas_em_cache():
-        return _visao_geral(conn, ano_de, ano_ate, tolerancia)
+        return _visao_geral(conn, ano_de, ano_ate, tolerancia, progresso)
 
 
-def _visao_geral(conn: Conexao, ano_de: int, ano_ate: int, tolerancia: float) -> dict:
+def _visao_geral(conn: Conexao, ano_de: int, ano_ate: int, tolerancia: float, progresso=None) -> dict:
     empresas = listar_empresas(conn)
     linhas_todas: list[dict] = []
     resumo_empresas: list[dict] = []
 
-    for empresa in empresas:
+    for feitas, empresa in enumerate(empresas):
+        if progresso is not None:
+            progresso(feitas, len(empresas), empresa.nome)
         linhas_empresa = analise_empresa_periodo(conn, empresa.id, ano_de, ano_ate, tolerancia)
         for linha in linhas_empresa:
             linhas_todas.append({**linha, "empresa_id": empresa.id, "empresa_nome": empresa.nome})

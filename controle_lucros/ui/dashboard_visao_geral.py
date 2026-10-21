@@ -14,11 +14,11 @@ De cima para baixo, na ordem em que se pergunta:
 from __future__ import annotations
 
 import datetime as dt
+import threading
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtWidgets import (
-    QApplication,
     QDoubleSpinBox,
     QFileDialog,
     QFrame,
@@ -33,14 +33,22 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import repositories as repo
+from .. import db, repositories as repo
 from ..analise import sem_pro_labore
 from ..planilha import exportar_relatorio_excel
 from . import formulario as form_ui
 from .classificacao import CLASSE_PDF, LABEL
 from .common import formatar_percentual, formatar_valor_br
 from .painel_distribuicao import divisor_hero, kpi
-from .paineis_dashboard import CartaoAtencao, EvolucaoAnos, Ranking, SeletorPeriodo, bloco, nomes_unicos
+from .paineis_dashboard import (
+    CarregandoAnalise,
+    CartaoAtencao,
+    EvolucaoAnos,
+    Ranking,
+    SeletorPeriodo,
+    bloco,
+    nomes_unicos,
+)
 from .paineis_dashboard import reais as _reais
 from .relatorio_pdf import exportar_relatorio_pdf
 
@@ -55,6 +63,10 @@ def _rotulo_periodo(de: int, ate: int) -> str:
 
 
 class DashboardVisaoGeralView(QWidget):
+    # A análise de todas as empresas roda em segundo plano, com o aviso de
+    # andamento por cima. Os testes desligam para conferir os números na hora.
+    assincrono = True
+
     def __init__(self, conn, parent=None):
         super().__init__(parent)
         self.conn = conn
@@ -64,6 +76,7 @@ class DashboardVisaoGeralView(QWidget):
         # guardada por período e tolerância, e esquecida em atualizar(), que é
         # quando os dados podem ter mudado.
         self._cache_classificacao: dict[tuple, dict] = {}
+        self._versao_dos_dados = repo.versao_dos_dados(conn)
         # A janela principal liga: abrir a análise de uma empresa e a ficha de um sócio.
         self.ao_abrir_empresa = None
         self.ao_abrir_socio = None
@@ -88,7 +101,12 @@ class DashboardVisaoGeralView(QWidget):
         self.tolerancia.setValue(0)
         self.tolerancia.setSuffix(" p.p.")
         self.tolerancia.setFixedWidth(100)
-        self.tolerancia.valueChanged.connect(lambda _: self._carregar())
+        # Digitar "1,5" passa por 1 e por 1,5: espera parar de digitar.
+        self._tolerancia_parada = QTimer(self)
+        self._tolerancia_parada.setSingleShot(True)
+        self._tolerancia_parada.setInterval(450)
+        self._tolerancia_parada.timeout.connect(self._carregar)
+        self.tolerancia.valueChanged.connect(lambda _: self._tolerancia_parada.start())
 
         self.btn_exportar_excel = QPushButton("Exportar Excel")
         self.btn_exportar_excel.clicked.connect(self._exportar_excel)
@@ -206,8 +224,22 @@ class DashboardVisaoGeralView(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(rolagem)
 
+        self.carregando = CarregandoAnalise(self)
+        self.carregando.cancelar.connect(self._cancelar)
+        # O véu começa no painel azul: a barra do período fica de fora, para
+        # dar para trocar de ano no meio da análise.
+        self.carregando.topo = lambda: self.hero.mapTo(self, QPoint(0, 0)).y() - 6
+        self._geracao = 0
+        self._trabalho: dict | None = None
+        self._vigia = QTimer(self)
+        self._vigia.setInterval(30)
+        self._vigia.timeout.connect(self._acompanhar)
+
         self.periodo.definir_anos(repo.anos_disponiveis(conn), ano, ano)
-        self._carregar()
+        # Em segundo plano, a primeira análise sai quando a tela é aberta
+        # (atualizar); não precisa rodar já na abertura do programa.
+        if not self.assincrono:
+            self._carregar()
 
     # ------------------------------------------------------------ período --
     def _ao_mudar_periodo(self, de: int, ate: int) -> None:
@@ -216,7 +248,12 @@ class DashboardVisaoGeralView(QWidget):
         self._carregar()
 
     def atualizar(self) -> None:
-        self._cache_classificacao.clear()
+        # A análise guardada só é jogada fora se alguém gravou algo desde
+        # ela: voltar ao dashboard sem mudança não refaz a conta.
+        versao = repo.versao_dos_dados(self.conn)
+        if versao != self._versao_dos_dados:
+            self._cache_classificacao.clear()
+            self._versao_dos_dados = versao
         self.periodo.definir_anos(repo.anos_disponiveis(self.conn), self.ano_de.value(), self.ano_ate.value())
         self._carregar()
 
@@ -232,15 +269,95 @@ class DashboardVisaoGeralView(QWidget):
     def _carregar(self) -> None:
         de, ate = self.ano_de.value(), self.ano_ate.value()
         chave = (de, ate, self.tolerancia.value())
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            self._painel = repo.painel_geral(self.conn, de, ate)
-            if chave not in self._cache_classificacao:
-                self._cache_classificacao[chave] = repo.visao_geral(self.conn, de, ate, self.tolerancia.value())
-            self._resultado = self._cache_classificacao[chave]
-        finally:
-            QApplication.restoreOverrideCursor()
+        self._geracao += 1
+        # O painel azul e a evolução são uma consulta só, rápida: saem já.
+        self._painel = repo.painel_geral(self.conn, de, ate)
         self._mostrar_painel(de, ate)
+        if chave in self._cache_classificacao:
+            self._aplicar_classificacao(chave)
+            return
+        if not self.assincrono:
+            self._cache_classificacao[chave] = repo.visao_geral(self.conn, de, ate, chave[2])
+            self._aplicar_classificacao(chave)
+            return
+        self._analisar_em_segundo_plano(chave)
+
+    def _analisar_em_segundo_plano(self, chave: tuple) -> None:
+        """A conta das empresas numa thread com conexão própria — a do
+        programa continua livre para a tela. Trocar de período no meio
+        abandona esta análise (o progresso dela levanta AnaliseCancelada)."""
+        geracao = self._geracao
+        de, ate, tolerancia = chave
+        trabalho = {"geracao": geracao, "chave": chave, "feitas": 0, "total": 0, "nome": "",
+                    "resultado": None, "erro": None, "pronto": False}
+        self._trabalho = trabalho
+
+        def progresso(feitas, total, nome):
+            if self._geracao != geracao:
+                raise repo.AnaliseCancelada()
+            trabalho.update(feitas=feitas, total=total, nome=nome)
+
+        def rodar():
+            conn = None
+            try:
+                conn = db.Conexao(self.conn.parametros)
+                trabalho["resultado"] = repo.visao_geral(conn, de, ate, tolerancia, progresso)
+            except repo.AnaliseCancelada:
+                pass
+            except Exception as erro:  # noqa: BLE001 — devolvido para a tela mostrar
+                trabalho["erro"] = erro
+            finally:
+                if conn is not None:
+                    conn.close()
+                trabalho["pronto"] = True
+
+        # Até a análise nova chegar, nada da anterior fica na tela: exportar
+        # ou ler um cartão de outro período seria pior que esperar.
+        self._resultado = None
+        self._limpar_atencao("Analisando…")
+        self.btn_exportar_excel.setEnabled(False)
+        self.btn_exportar_pdf.setEnabled(False)
+        self.carregando.comecar(f"Analisando {_rotulo_periodo(de, ate)}…")
+        threading.Thread(target=rodar, daemon=True).start()
+        self._vigia.start()
+
+    def _acompanhar(self) -> None:
+        trabalho = self._trabalho
+        if trabalho is None:
+            self._vigia.stop()
+            return
+        self.carregando.andamento(trabalho["feitas"], trabalho["total"], trabalho["nome"])
+        if not trabalho["pronto"]:
+            return
+        self._vigia.stop()
+        self._trabalho = None
+        if trabalho["geracao"] != self._geracao:
+            return  # período trocado no meio: a análise nova já está a caminho
+        self.carregando.terminar()
+        if trabalho["erro"] is not None:
+            self._atualizar_disponibilidade_botoes()
+            raise trabalho["erro"]  # vai para o relatório de erro do programa
+        if trabalho["resultado"] is not None:
+            self._cache_classificacao[trabalho["chave"]] = trabalho["resultado"]
+            self._aplicar_classificacao(trabalho["chave"])
+
+    def _cancelar(self) -> None:
+        """Desiste da análise em andamento; a tela fica com o painel do
+        período e os pontos de atenção da análise anterior."""
+        self._geracao += 1
+        self._trabalho = None
+        self._vigia.stop()
+        self.carregando.terminar()
+        self._limpar_atencao("Análise cancelada. Clique num ano para analisar de novo.")
+        self._atualizar_disponibilidade_botoes()
+
+    def _limpar_atencao(self, motivo: str) -> None:
+        for cartao in (self.atencao_desproporcional, self.atencao_pro_labore,
+                       self.atencao_sem_distribuicao, self.atencao_emprestimos):
+            cartao.definir("—", motivo, [], "info")
+
+    def _aplicar_classificacao(self, chave: tuple) -> None:
+        self._resultado = self._cache_classificacao[chave]
         self._mostrar_atencao()
         self._atualizar_disponibilidade_botoes()
 
