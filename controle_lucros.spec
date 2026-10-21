@@ -15,11 +15,16 @@ não é reconhecido mesmo com o pacote instalado.
 
 Depois, no Windows, o controle_lucros.iss transforma dist/ControleDeLucros/
 num instalador — e lê a versão do próprio .exe gerado aqui.
+
+A mesma pasta leva um segundo executável, ControleDeLucrosMCP.exe: o
+servidor MCP que deixa o Claude consultar o sistema (ver
+controle_lucros/mcp_servidor.py). É de console, porque o Claude conversa com
+ele pela entrada e saída padrão, e não leva o Qt.
 """
 
 import sys
 
-from PyInstaller.utils.hooks import collect_dynamic_libs, collect_submodules
+from PyInstaller.utils.hooks import collect_dynamic_libs, collect_submodules, copy_metadata
 from pathlib import Path
 
 RAIZ = Path(SPECPATH)
@@ -28,6 +33,7 @@ sys.path.insert(0, str(RAIZ))
 from controle_lucros import __version__ as VERSAO  # noqa: E402
 
 APP = "ControleDeLucros"
+APP_MCP = "ControleDeLucrosMCP"
 ICONE = "controle_lucros/ui/assets/logo.ico"
 
 
@@ -45,7 +51,7 @@ def _versao_para_o_instalador() -> None:
     )
 
 
-def _arquivo_de_versao() -> str | None:
+def _arquivo_de_versao(nome: str = APP, descricao: str = "Controle de Distribuição de Lucros") -> str | None:
     """Grava o recurso de versão que o Windows mostra nas propriedades do
     arquivo (aba Detalhes). Sem ele o .exe aparece sem nome nem fabricante, o
     que além de feio pesa contra na heurística dos antivírus — e é dele que o
@@ -57,7 +63,7 @@ def _arquivo_de_versao() -> str | None:
 
     partes = tuple(int(p) for p in VERSAO.split(".")) + (0, 0, 0, 0)
     quadra = partes[:4]
-    destino = RAIZ / "build" / "versao_windows.txt"
+    destino = RAIZ / "build" / f"versao_windows_{nome}.txt"
     destino.parent.mkdir(parents=True, exist_ok=True)
     # 0x0416 = português do Brasil, 0x04B0 = 1200 (Unicode).
     destino.write_text(
@@ -69,11 +75,11 @@ def _arquivo_de_versao() -> str | None:
   kids=[
     StringFileInfo([StringTable('041604B0', [
       StringStruct('CompanyName', 'HenderLab'),
-      StringStruct('FileDescription', 'Controle de Distribuição de Lucros'),
+      StringStruct('FileDescription', '{descricao}'),
       StringStruct('FileVersion', '{VERSAO}'),
-      StringStruct('InternalName', '{APP}'),
+      StringStruct('InternalName', '{nome}'),
       StringStruct('LegalCopyright', 'HenderLab'),
-      StringStruct('OriginalFilename', '{APP}.exe'),
+      StringStruct('OriginalFilename', '{nome}.exe'),
       StringStruct('ProductName', 'Controle de Distribuição de Lucros'),
       StringStruct('ProductVersion', '{VERSAO}'),
     ])]),
@@ -169,10 +175,51 @@ exe = EXE(
     version=_arquivo_de_versao(),
 )
 
+
+# --- Servidor MCP --------------------------------------------------------
+# Análise à parte: sem PySide6 (que ele não usa, e que o PyInstaller puxaria
+# pelos módulos irmãos), e com o que o MCP carrega de um jeito que a análise
+# não enxerga — o anyio escolhe o motor assíncrono por nome, em tempo de
+# execução.
+b = Analysis(
+    ["servidor_mcp.py"],
+    pathex=[],
+    binaries=collect_dynamic_libs("psycopg_binary") + _libs_do_psycopg(),
+    datas=copy_metadata("mcp") + copy_metadata("pglast"),
+    hiddenimports=[
+        *collect_submodules("psycopg_binary"),
+        *collect_submodules("anyio._backends"),
+        *collect_submodules("pglast"),
+    ],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=["tkinter", "PySide6", "shiboken6"],
+    noarchive=False,
+)
+pyz_mcp = PYZ(b.pure)
+exe_mcp = EXE(
+    pyz_mcp,
+    b.scripts,
+    [],
+    exclude_binaries=True,
+    name=APP_MCP,
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=False,
+    console=True,
+    icon=ICONE,
+    version=_arquivo_de_versao(APP_MCP, "Controle de Lucros — servidor MCP para o Claude"),
+)
+
 coll = COLLECT(
     exe,
     a.binaries,
     a.datas,
+    exe_mcp,
+    b.binaries,
+    b.datas,
     strip=False,
     upx=False,
     upx_exclude=[],

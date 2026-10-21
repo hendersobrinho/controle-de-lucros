@@ -21,6 +21,7 @@ from .. import preferencias, repositories as repo
 from ..models import Usuario
 from . import theme
 from .icones import pasta_assets
+from .conectar_claude import DialogoConectarClaude
 from .local_banco import DialogoConexao
 
 LARGURA_ENTRADA = 420
@@ -97,6 +98,15 @@ def _botao_discreto(texto: str) -> QPushButton:
         f" font-size: 13px; padding: 6px 10px; }}"
         f"QPushButton:hover {{ color: {theme.INK()}; text-decoration: underline; }}"
     )
+    return botao
+
+
+def _botao_claude(parent) -> QPushButton:
+    """Logo na entrada, para dar para ligar o Claude antes mesmo de entrar —
+    ele usa a conexão deste PC com o banco, não a conta de quem está aqui."""
+    botao = _botao_discreto("Conectar ao Claude…")
+    botao.setToolTip("Deixa o Claude consultar o sistema (só leitura).")
+    botao.clicked.connect(lambda: DialogoConectarClaude(parent).exec())
     return botao
 
 
@@ -180,6 +190,7 @@ class DialogoPrimeiroUsuario(QDialog):
         rodape = QHBoxLayout()
         rodape.addStretch()
         rodape.addWidget(usar_servidor)
+        rodape.addWidget(_botao_claude(self))
         rodape.addWidget(sair)
         rodape.addStretch()
         layout.addLayout(rodape)
@@ -288,6 +299,7 @@ class DialogoLogin(QDialog):
 
         rodape = QHBoxLayout()
         rodape.addStretch()
+        rodape.addWidget(_botao_claude(self))
         rodape.addWidget(sair)
         rodape.addStretch()
         layout.addLayout(rodape)

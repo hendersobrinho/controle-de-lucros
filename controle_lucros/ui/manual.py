@@ -921,6 +921,18 @@ o servidor: veja o tópico <b>Servidor PostgreSQL</b>.</p>
 servidor ou a rede cair, o programa avisa em vez de fechar — espere voltar e
 tente de novo.</p>
 
+<h3>Consultar pelo Claude</h3>
+<p>O botão <b>Conectar ao Claude…</b>, na tela de entrada e em Backup, liga o
+Claude Desktop ou o Claude Code a este computador. Depois de fechar e abrir o
+Claude, dá para perguntar em português — "quanto a 275 distribuiu em 2024 e
+para quem?", "quem recebeu lucro sem pró-labore no ano passado?". O Claude
+<b>só lê</b>: não grava, não altera e não apaga nada, e não vê usuários,
+senhas nem o log.</p>
+<p>O que ele consulta sai do escritório e vai para a Anthropic, empresa do
+Claude: nomes e valores. O CPF dos sócios vai mascarado, a menos que se marque
+"Enviar o CPF completo". Para desligar, use <b>Desconectar</b> na mesma
+janela.</p>
+
 <h3>Backup</h3>
 <p>Não há nuvem: se o servidor for perdido ou o disco dele falhar, o backup
 é a única recuperação possível.</p>

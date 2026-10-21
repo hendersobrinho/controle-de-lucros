@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 
 from .. import backup, db
 from .common import TabelaLista
+from .conectar_claude import DialogoConectarClaude
 from .local_banco import DialogoConexao, botao_tutorial, descrever_conexao
 from .ocupado import ocupado
 
@@ -60,6 +61,10 @@ class BackupView(QWidget):
 
         linha_local = QHBoxLayout()
         linha_local.addWidget(btn_alterar_conexao)
+        btn_claude = QPushButton("Conectar ao Claude…")
+        btn_claude.setToolTip("Deixa o Claude Desktop ou o Claude Code consultarem o sistema (só leitura).")
+        btn_claude.clicked.connect(lambda: DialogoConectarClaude(self).exec())
+        linha_local.addWidget(btn_claude)
         linha_local.addSpacing(8)
         linha_local.addWidget(botao_tutorial(self))
         linha_local.addStretch()

@@ -1,0 +1,7 @@
+-r requirements.txt
+# Servidor MCP (controle_lucros/mcp_servidor.py), para o Claude consultar o
+# sistema. Fica fora do requirements.txt: o programa empacotado não usa.
+mcp>=2.3,<3
+# Analisador de SQL do próprio PostgreSQL: é ele que decide o que a
+# consultar_sql pode ler.
+pglast>=7

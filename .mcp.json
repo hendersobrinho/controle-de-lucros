@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "controle-de-lucros": {
+      "command": ".venv/bin/python",
+      "args": ["servidor_mcp.py"]
+    }
+  }
+}

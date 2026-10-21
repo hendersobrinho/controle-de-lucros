@@ -312,6 +312,82 @@ porta, banco, usuário, senha) e, com o banco vazio, pede pra criar o primeiro
 usuário (administrador). O banco e o usuário precisam existir antes — veja
 [Servidor PostgreSQL](#servidor-postgresql).
 
+## Consultar pelo Claude (servidor MCP)
+
+[mcp_servidor.py](controle_lucros/mcp_servidor.py) é um servidor
+[MCP](https://modelcontextprotocol.io): com ele, o Claude (Desktop ou Code)
+responde perguntas como "quanto a 275 distribuiu em 2024 e para quem?" ou
+"quais sócios receberam lucro sem pró-labore no ano passado?" lendo o banco
+direto. Usa a conexão já configurada no PC pelo programa.
+
+Ferramentas: `resumo_geral`, `pontos_de_atencao`, `buscar_empresas`,
+`ficha_empresa`, `distribuicao_da_empresa`, `buscar_socios`, `ficha_socio`,
+`esquema_do_banco` e `consultar_sql` (um SELECT livre, até 500 linhas).
+Empresa é chamada pelo código, CNPJ ou parte do nome; se o nome servir para
+mais de uma, a resposta lista os códigos.
+
+**Só lê.** A conexão abre com `default_transaction_read_only`, e o SQL livre
+passa antes pelo analisador do próprio PostgreSQL
+([pglast](https://pypi.org/project/pglast/)): só entra um SELECT sobre as
+tabelas do negócio, usando funções de cálculo de uma lista fechada (soma,
+média, datas, texto...). Isso barra o que a trava de leitura sozinha não
+barra — `pg_terminate_backend` derrubando quem está no programa,
+`pg_advisory_lock`, SQL montado dentro de `query_to_xml` — e mantém fora a
+tabela de usuários (hash das senhas), o log de atividade e os acessos
+lembrados. Para uma trava a mais, configure no PC um usuário do PostgreSQL
+que só tenha `SELECT`.
+
+**O que sai vai para fora do escritório.** As respostas são enviadas ao
+Claude. O CPF dos sócios sai mascarado (`***.456.789-**`) e o SQL livre não
+lê a coluna — nem por `*`, apelido ou cálculo; para mandar completo, defina
+`CONTROLE_LUCROS_MCP_DOCUMENTOS=completos`. Nomes e valores saem como estão.
+
+**Pelo programa (o jeito normal).** O pacote do Windows traz o servidor
+pronto, `ControleDeLucrosMCP.exe`, ao lado do `ControleDeLucros.exe`. Na tela
+de entrada (ou em Backup) há o botão **Conectar ao Claude…**: ele grava o
+servidor na configuração do Claude Desktop — preservando o que já houver lá e
+guardando uma cópia `.bak` — e, se o Claude Code estiver instalado, registra
+nele com `claude mcp add --scope user`. Depois é fechar e abrir o Claude.
+O código está em [conexao_claude.py](controle_lucros/conexao_claude.py).
+
+O executável do MCP usa a mesma pasta de configuração do programa
+(`%PROGRAMDATA%\ControleDeLucros`), então conecta no mesmo banco, sem
+configurar nada à parte.
+
+À mão, a partir do código-fonte:
+
+```bash
+pip install -r requirements-mcp.txt
+```
+
+O servidor abre pelo [servidor_mcp.py](servidor_mcp.py) da raiz, chamado pelo
+caminho completo — assim funciona de qualquer pasta, sem instalar o pacote.
+
+**Claude Code** — o [.mcp.json](.mcp.json) da raiz já registra o servidor
+(caminho do Python do Linux; no Windows troque por
+`.venv\Scripts\python.exe`). Ao abrir o Claude Code na pasta, ele pede para
+aprovar o servidor. Para tê-lo em qualquer pasta:
+
+```bash
+claude mcp add --scope user controle-de-lucros -- /caminho/controle-de-lucros/.venv/bin/python /caminho/controle-de-lucros/servidor_mcp.py
+```
+
+**Claude Desktop** — em Configurações → Desenvolvedor → Editar configuração
+(`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "controle-de-lucros": {
+      "command": "C:\\caminho\\controle-de-lucros\\.venv\\Scripts\\python.exe",
+      "args": ["C:\\caminho\\controle-de-lucros\\servidor_mcp.py"]
+    }
+  }
+}
+```
+
+e reinicie o Claude Desktop.
+
 ## Ícone do programa
 
 `controle_lucros/ui/assets/logo.svg` é a fonte; `logo.png` e `logo.ico` são
@@ -346,7 +422,9 @@ roda em qualquer Windows sem precisar instalar Python nela.
    ```
 
 3. O resultado fica em `dist\ControleDeLucros\` — uma pasta com
-   `ControleDeLucros.exe` e todos os arquivos que ele precisa. **É essa
+   `ControleDeLucros.exe`, o `ControleDeLucrosMCP.exe` (servidor para o
+   Claude, ver [Consultar pelo Claude](#consultar-pelo-claude-servidor-mcp))
+   e todos os arquivos que eles precisam. **É essa
    pasta inteira** que deve ser copiada/distribuída (zipar e mandar, ou
    copiar direto) — não só o `.exe` sozinho, ele não roda fora da pasta.
 
