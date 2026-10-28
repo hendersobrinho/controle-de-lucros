@@ -497,7 +497,7 @@ def test_importacao_cadastro_reconhece_empresa_e_socio_existentes(conn):
     assert pronta["socio_id"] == socio_id
 
     aplicado = repo.aplicar_importacao_cadastro(conn, resultado["prontas"])
-    assert aplicado == {"empresas_criadas": 0, "vinculos_criados": 1, "vinculos_ja_existentes": 0, "vinculos_encerrados": 0, "participacoes_atualizadas": 0, "participacoes_nao_atualizadas": 0, "distribuicoes_lancadas": 0, "alteracoes_criadas": 0}
+    assert aplicado == {"empresas_criadas": 0, "vinculos_criados": 1, "vinculos_ja_existentes": 0, "vinculos_encerrados": 0, "participacoes_atualizadas": 0, "participacoes_nao_atualizadas": 0, "distribuicoes_lancadas": 0, "alteracoes_criadas": 0, "alteracoes_trancadas": 0}
     vinculos = repo.listar_vinculos_empresa(conn, empresa_id)
     assert len(vinculos) == 1
     assert vinculos[0].socio_id == socio_id
@@ -517,7 +517,7 @@ def test_importacao_cadastro_nao_duplica_vinculo_ja_ativo(conn):
 
     resultado = repo.preparar_importacao_cadastro(conn, [_linha_cadastro()])
     aplicado = repo.aplicar_importacao_cadastro(conn, resultado["prontas"])
-    assert aplicado == {"empresas_criadas": 0, "vinculos_criados": 0, "vinculos_ja_existentes": 1, "vinculos_encerrados": 0, "participacoes_atualizadas": 0, "participacoes_nao_atualizadas": 0, "distribuicoes_lancadas": 0, "alteracoes_criadas": 0}
+    assert aplicado == {"empresas_criadas": 0, "vinculos_criados": 0, "vinculos_ja_existentes": 1, "vinculos_encerrados": 0, "participacoes_atualizadas": 0, "participacoes_nao_atualizadas": 0, "distribuicoes_lancadas": 0, "alteracoes_criadas": 0, "alteracoes_trancadas": 0}
     assert len(repo.listar_vinculos_empresa(conn, empresa_id)) == 1
 
 
@@ -1688,3 +1688,34 @@ def test_nomes_ficam_em_maiusculo_ao_salvar(conn):
     empresa = repo.buscar_empresa(conn, empresa_id)
     assert (empresa.nome, empresa.numero_chamada) == ("CLÍNICA AMMARE LTDA", "042")
     assert next(s for s in repo.listar_socios(conn) if s.id == socio_id).nome == "JOÃO DA SILVA"
+
+
+def _empresa_com_alteracao_no_dia(conn, data, fechada=False):
+    empresa_id = repo.salvar_empresa(conn, Empresa(None, "001", "ACME LTDA", "00000000000100", 10000, 1000))
+    alteracao_id = repo.salvar_alteracao(conn, AlteracaoContratual(
+        None, empresa_id, 4, data, "ACME LTDA", 10000, 1000, "Contrato feito à mão"))
+    if fechada:
+        repo.fechar_alteracao(conn, alteracao_id)
+    repo.salvar_socio(conn, Socio(id=None, nome="FULANO DE TAL", cpf="111.111.111-11"))
+    return empresa_id, alteracao_id
+
+
+def test_importacao_no_dia_de_alteracao_existente_nao_conta_como_criada(conn, ano_2024):
+    empresa_id, alteracao_id = _empresa_com_alteracao_no_dia(conn, "2024-01-01")
+    resultado = repo.preparar_importacao_cadastro(conn, [_linha_cadastro()])
+    aplicado = repo.aplicar_importacao_cadastro(conn, resultado["prontas"], criar_alteracao_por_empresa=True)
+
+    assert aplicado["alteracoes_criadas"] == 0
+    (vinculo,) = repo.listar_vinculos_empresa(conn, empresa_id)
+    assert vinculo.alteracao_entrada_id == alteracao_id
+
+
+def test_importacao_com_alteracao_trancada_no_dia_entra_sem_alteracao(conn, ano_2024):
+    """Antes parava no meio, com parte das linhas já gravada."""
+    empresa_id, _ = _empresa_com_alteracao_no_dia(conn, "2024-01-01", fechada=True)
+    resultado = repo.preparar_importacao_cadastro(conn, [_linha_cadastro()])
+    aplicado = repo.aplicar_importacao_cadastro(conn, resultado["prontas"], criar_alteracao_por_empresa=True)
+
+    assert (aplicado["alteracoes_criadas"], aplicado["alteracoes_trancadas"]) == (0, 1)
+    (vinculo,) = repo.listar_vinculos_empresa(conn, empresa_id)
+    assert vinculo.alteracao_entrada_id is None

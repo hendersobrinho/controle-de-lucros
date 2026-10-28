@@ -415,11 +415,40 @@ class _DialogoEditarVinculo(QDialog):
         self.observacao = QLineEdit(vinculo.observacao or "")
         self.observacao.setPlaceholderText("Opcional")
 
+        # Participação que é de uma alteração contratual: o que ela registrou
+        # se corrige aqui (valores, data de entrada), mas trocar de alteração
+        # — ou mexer numa saída que é a participação nova de outra — é feito
+        # na própria alteração, para uma não mudar a outra sem ninguém ver.
+        self._saida_travada = False
+        self.aviso_alteracao = form_ui.dica()
+        self.aviso_alteracao.hide()
+        por_numero = {a.id: a.numero for a in alteracoes}
+        if vinculo.alteracao_entrada_id is not None:
+            self.alteracao_entrada.setEnabled(False)
+            self.alteracao_saida.setEnabled(False)
+            texto = (f"Esta participação foi registrada pela alteração contratual Nº "
+                     f"{por_numero.get(vinculo.alteracao_entrada_id, '?')}: o que você corrigir aqui muda o "
+                     "que ela registrou, e só ela.")
+            # Saída pela mesma alteração da entrada fica no próprio movimento
+            # dela, e se corrige aqui.
+            if vinculo.alteracao_saida_id not in (None, vinculo.alteracao_entrada_id):
+                saida = conn.execute(
+                    "SELECT tipo FROM alteracao_movimento WHERE alteracao_id = %s AND socio_id = %s",
+                    (vinculo.alteracao_saida_id, vinculo.socio_id),
+                ).fetchone()
+                if saida is None or saida["tipo"] != "saida":
+                    self._saida_travada = True
+                    texto += (f" Ela termina na participação nova da alteração Nº "
+                              f"{por_numero.get(vinculo.alteracao_saida_id, '?')} — a data de saída se muda lá.")
+            self.aviso_alteracao.setText(texto + " Para trocar de alteração, use Alterações contratuais.")
+            self.aviso_alteracao.show()
+
         bloco_participacao, col = form_ui.secao(
             "Participação",
             info="Corrige este registro como está — não cria alteração contratual. Para registrar uma "
                  "mudança com histórico, cadastre a alteração em Alterações contratuais e escolha-a abaixo.",
         )
+        col.addWidget(self.aviso_alteracao)
         col.addWidget(self.campos.montar_visual())
 
         bloco_entrada, col = form_ui.secao("Entrada")
@@ -482,8 +511,9 @@ class _DialogoEditarVinculo(QDialog):
 
     def _ajustar_saida(self, *_args) -> None:
         saiu = self.saiu.isChecked()
-        self.data_saida.setEnabled(saiu)
-        self.alteracao_saida.setEnabled(saiu)
+        self.saiu.setEnabled(not self._saida_travada)
+        self.data_saida.setEnabled(saiu and not self._saida_travada)
+        self.alteracao_saida.setEnabled(saiu and self.vinculo.alteracao_entrada_id is None)
         # Sem saída, os campos dela nem aparecem: menos coisa na tela.
         self.campos_saida.setVisible(saiu)
 

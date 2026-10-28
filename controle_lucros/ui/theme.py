@@ -6,7 +6,8 @@ nativas do Windows, com fallback razoável em outros SOs para
 desenvolvimento."""
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
 from .. import preferencias
@@ -112,7 +113,7 @@ class _EstadoTema(QObject):
         preferencias.salvar_chave("modo", self.modo)
         app = QApplication.instance()
         if app is not None:
-            app.setStyleSheet(build_stylesheet())
+            aplicar(app)
         self.mudou.emit()
 
 
@@ -187,6 +188,61 @@ def _rgb(hex_cor: str) -> str:
     """"#RRGGBB" -> "R, G, B", pra usar dentro de rgba(...) no QSS."""
     h = hex_cor.lstrip("#")
     return f"{int(h[0:2], 16)}, {int(h[2:4], 16)}, {int(h[4:6], 16)}"
+
+
+def _paleta_qt(p: dict) -> QPalette:
+    """As cores do tema também como paleta do Qt — é dela que saem o texto
+    de dica dos campos, a seleção, as listas que se abrem, o calendário e o
+    texto desativado, que a folha de estilo não alcança."""
+    paleta = QPalette()
+    cores = {
+        QPalette.Window: p["PAPER"],
+        QPalette.WindowText: p["INK"],
+        QPalette.Base: p["PAPER_RAISED"],
+        QPalette.AlternateBase: p["ALT_ROW"],
+        QPalette.Text: p["INK"],
+        QPalette.PlaceholderText: p["INK_MUTED"],
+        QPalette.Button: p["PAPER_RAISED"],
+        QPalette.ButtonText: p["INK"],
+        QPalette.BrightText: "#FFFFFF",
+        QPalette.Highlight: p["BRASS"],
+        QPalette.HighlightedText: "#203461",
+        QPalette.ToolTipBase: p["PAPER_RAISED"],
+        QPalette.ToolTipText: p["INK"],
+        QPalette.Link: p["BRASS_DARK"],
+        QPalette.Light: p["PAPER_RAISED"],
+        QPalette.Midlight: p["ALT_ROW"],
+        QPalette.Mid: p["HAIRLINE"],
+        QPalette.Dark: p["INK_MUTED"],
+        QPalette.Shadow: p["INK"],
+    }
+    for papel, valor in cores.items():
+        paleta.setColor(papel, QColor(valor))
+    for papel in (QPalette.WindowText, QPalette.Text, QPalette.ButtonText):
+        paleta.setColor(QPalette.Disabled, papel, QColor(p["INK_MUTED"]))
+    paleta.setColor(QPalette.Disabled, QPalette.Base, QColor(p["PAPER"]))
+    return paleta
+
+
+def aplicar(app: QApplication) -> None:
+    """O visual inteiro do programa, sem herdar nada do sistema.
+
+    No Windows 11 o Qt usa por padrão o estilo "windows11", que segue o modo
+    escuro do Windows e ignora parte das cores da folha de estilo: com o
+    Windows escuro e o programa claro, campos de número ficavam com texto
+    branco sobre fundo branco. Aqui o estilo é sempre o Fusion — o mesmo em
+    que as telas são feitas e conferidas —, a paleta é a do tema, e o Qt é
+    avisado de que o modo é o do programa, não o do sistema."""
+    # O estilo uma vez só: trocá-lo de novo a cada troca de tema faz o Qt
+    # refazer todas as janelas abertas à toa — a paleta e a folha de estilo
+    # já trazem as cores novas.
+    if app.property("estilo_do_programa") != "Fusion":
+        app.setStyle("Fusion")
+        app.setProperty("estilo_do_programa", "Fusion")
+    escuro = _estado.modo == "escuro"
+    app.styleHints().setColorScheme(Qt.ColorScheme.Dark if escuro else Qt.ColorScheme.Light)
+    app.setPalette(_paleta_qt(_estado.paleta()))
+    app.setStyleSheet(build_stylesheet())
 
 
 def build_stylesheet() -> str:

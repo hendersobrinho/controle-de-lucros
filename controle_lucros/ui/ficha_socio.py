@@ -28,7 +28,7 @@ LIMITE_NOME_ABA = 24
 ETIQUETAS_MOVIMENTO = {
     "entrou": ("Entrou", "ativo"),
     "saiu": ("Saiu", "saiu"),
-    "mudou": ("Participação refeita", "mudou"),
+    "mudou": ("Participação nova", "mudou"),
 }
 
 

@@ -267,3 +267,84 @@ def test_alteracao_trancada_nao_deixa_editar_nem_movimentar(conn, empresa):
     assert not ficha.btn_editar.isEnabled()
     assert not ficha.btn_incluir_socio.isEnabled()
     assert ficha.btn_trancar.text() == "Destrancar período"
+
+
+# ------------------------------------------- movimentos da alteração na ficha --
+
+
+@pytest.fixture()
+def duas(conn, empresa):
+    """Nº 1: ANA entra com 60%, BIA com 40%. Nº 2: ainda vazia."""
+    ana = repo.salvar_socio(conn, Socio(None, "ANA", ""))
+    bia = repo.salvar_socio(conn, Socio(None, "BIA", ""))
+    a1 = repo.salvar_alteracao(conn, _alteracao(empresa, 1, "2023-01-01"))
+    a2 = repo.salvar_alteracao(conn, _alteracao(empresa, 2, "2024-01-01"))
+    repo.salvar_movimento(conn, a1, ana, "entrada", percentual=60, cotas=600)
+    repo.salvar_movimento(conn, a1, bia, "entrada", percentual=40, cotas=400)
+    return {"ana": ana, "bia": bia, "a1": a1, "a2": a2}
+
+
+def _ficha(conn, empresa, alteracao_id):
+    return AlteracaoCard(conn, empresa, repo.buscar_alteracao(conn, alteracao_id), lambda _f: None)
+
+
+def test_ficha_lista_os_movimentos_com_os_valores_dela(conn, empresa, duas):
+    ficha = _ficha(conn, empresa, duas["a1"])
+    textos = " ".join(w.text() for w in ficha.findChildren(mod.QLabel))
+    assert "ANA" in textos and "60,0000%" in textos and "600 cotas" in textos
+    assert {b.text() for b in ficha.findChildren(mod.QPushButton)} >= {"Corrigir", "Tirar", "Participação nova"}
+
+
+def test_participacao_nova_numa_alteracao_nao_mexe_na_anterior(conn, empresa, duas, monkeypatch):
+    def preencher(dialogo):
+        dialogo.socio.setCurrentIndex(dialogo.socio.findData(duas["ana"]))
+        assert dialogo.campos.percentual.value() == 60  # começa com a de antes
+        dialogo.campos.percentual.setValue(70)
+        dialogo.campos.cotas.setValue(700)
+        return QDialog.Accepted
+
+    monkeypatch.setattr(mod._DialogoMovimento, "exec", preencher)
+    _ficha(conn, empresa, duas["a2"])._participacao_nova()
+
+    (nova,) = repo.listar_movimentos(conn, duas["a2"])
+    assert (nova["tipo"], nova["percentual_capital"]) == ("participacao", 70)
+    anteriores = {m["socio_nome"]: m["percentual_capital"] for m in repo.listar_movimentos(conn, duas["a1"])}
+    assert anteriores == {"ANA": 60, "BIA": 40}
+
+
+def test_corrigir_e_tirar_ficam_na_propria_alteracao(conn, empresa, duas, monkeypatch):
+    repo.salvar_movimento(conn, duas["a2"], duas["bia"], "saida")
+    ficha = _ficha(conn, empresa, duas["a1"])
+    (ana,) = [m for m in repo.listar_movimentos(conn, duas["a1"]) if m["socio_id"] == duas["ana"]]
+
+    def corrigir(dialogo):
+        dialogo.campos.percentual.setValue(65)
+        return QDialog.Accepted
+
+    monkeypatch.setattr(mod._DialogoMovimento, "exec", corrigir)
+    ficha._corrigir_movimento(ana)
+    assert {m["socio_nome"]: m["percentual_capital"] for m in repo.listar_movimentos(conn, duas["a1"])}["ANA"] == 65
+    assert [m["tipo"] for m in repo.listar_movimentos(conn, duas["a2"])] == ["saida"]  # a Nº 2 continua igual
+
+    monkeypatch.setattr(mod.QMessageBox, "question", lambda *a, **k: mod.QMessageBox.Yes)
+    ficha_2 = _ficha(conn, empresa, duas["a2"])
+    (tirar,) = [b for b in ficha_2.findChildren(mod.QPushButton) if b.text() == "Tirar"]
+    tirar.click()  # pelo botão de verdade: é ele que diz de qual sócio é
+    assert repo.listar_movimentos(conn, duas["a2"]) == []
+    assert {v.socio_id for v in repo.listar_vinculos_empresa(conn, empresa) if v.data_saida is None} == {
+        duas["ana"], duas["bia"]}
+
+
+def test_incluir_socio_pela_ficha_vira_movimento_desta_alteracao(conn, empresa, duas, monkeypatch):
+    caio = repo.salvar_socio(conn, Socio(None, "CAIO", ""))
+
+    def escolher(dialogo):
+        assert duas["ana"] not in {s.id for s in dialogo._todos}  # quem já é sócio não aparece
+        dialogo._selecionar(caio)
+        dialogo.campos.percentual.setValue(10)
+        return QDialog.Accepted
+
+    monkeypatch.setattr(mod._DialogoIncluirSocio, "exec", escolher)
+    _ficha(conn, empresa, duas["a2"])._incluir_socio()
+    (entrada,) = repo.listar_movimentos(conn, duas["a2"])
+    assert (entrada["socio_nome"], entrada["tipo"]) == ("CAIO", "entrada")

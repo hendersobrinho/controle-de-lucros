@@ -342,9 +342,10 @@ class _CamposNaAlteracao(_CamposParticipacao):
     cotas o desta alteração, e não o de hoje: o % de quem entra é sobre o
     capital que o contrato tinha naquela data."""
 
-    def __init__(self, conn, empresa_id: int, alteracao: AlteracaoContratual | None):
+    def __init__(self, conn, empresa_id: int, alteracao: AlteracaoContratual | None,
+                 vinculo: VinculoSocietario | None = None):
         self._alteracao = alteracao
-        super().__init__(conn, lambda: empresa_id)
+        super().__init__(conn, lambda: empresa_id, vinculo)
 
     def _estado(self) -> dict | None:
         if self._alteracao is None:
@@ -429,28 +430,86 @@ class _DialogoNovoSocio(QDialog):
         )
 
 
-class _DialogoSaidaSocio(QDialog):
-    def __init__(self, vinculos_ativos: list[VinculoSocietario], nomes: dict[int, str], parent=None):
+class _DialogoMovimento(QDialog):
+    """Saída ou participação nova de um sócio nesta alteração — ou a
+    correção de um movimento que ela já tem. Só mexe no que esta alteração
+    registrou: as outras continuam com o que registraram."""
+
+    def __init__(self, conn, alteracao: AlteracaoContratual, tipo: str, socios: dict[int, str],
+                 atual: dict | None = None, valores_de_antes: dict[int, dict] | None = None, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Registrar saída de sócio")
+        self.tipo = tipo
+        self._valores_de_antes = valores_de_antes or {}
+        titulos = {"saida": "Saída de sócio", "participacao": "Participação nova", "entrada": "Entrada de sócio"}
+        self.setWindowTitle(f"{titulos[tipo]} — alteração Nº {alteracao.numero}")
+        self.setMinimumWidth(560)
 
-        self.vinculo = QComboBox()
-        for v in vinculos_ativos:
-            self.vinculo.addItem(nomes.get(v.socio_id, "?"), v.id)
+        self.socio = QComboBox()
+        for socio_id, nome in sorted(socios.items(), key=lambda par: par[1]):
+            self.socio.addItem(nome, socio_id)
+        if atual is not None:
+            self.socio.setCurrentIndex(max(self.socio.findData(atual["socio_id"]), 0))
+            self.socio.setEnabled(False)
 
-        form = QFormLayout()
-        form.addRow("Sócio", self.vinculo)
+        self.data = QDateEdit(calendarPopup=True)
+        self.data.setDisplayFormat("dd/MM/yyyy")
+        data = (atual or {}).get("data_efetiva") or alteracao.data
+        self.data.setDate(dt.datetime.strptime(data, "%Y-%m-%d").date())
+        self.data.setMaximumWidth(180)
+
+        blocos = []
+        bloco_quem, col = form_ui.secao("Sócio", "1")
+        col.addLayout(form_ui.linha(form_ui.campo("Sócio", self.socio),
+                                    form_ui.campo("Data", self.data,
+                                                  form_ui.dica("Já vem com a data da alteração.")),
+                                    esticar=(3, 1)))
+        blocos.append(bloco_quem)
+
+        self.campos = None
+        if tipo != "saida":
+            referencia = VinculoSocietario(
+                None, alteracao.empresa_id, 0,
+                (atual or {}).get("percentual_capital") or 0, (atual or {}).get("quantidade_cotas"),
+                data, None, valor_capital=(atual or {}).get("valor_capital"),
+            ) if atual is not None else None
+            self.campos = _CamposNaAlteracao(conn, alteracao.empresa_id, alteracao, referencia)
+            bloco_valores, col = form_ui.secao("Participação nesta alteração", "2")
+            col.addWidget(self.campos.montar_visual())
+            blocos.append(bloco_valores)
+            if atual is None:
+                self.socio.currentIndexChanged.connect(self._trazer_valores_de_antes)
+                self._trazer_valores_de_antes()
 
         botoes = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        botoes.button(QDialogButtonBox.Ok).setText("Salvar")
+        botoes.button(QDialogButtonBox.Ok).setProperty("role", "primario")
+        botoes.button(QDialogButtonBox.Cancel).setText("Cancelar")
         botoes.accepted.connect(self.accept)
         botoes.rejected.connect(self.reject)
 
         layout = QVBoxLayout(self)
-        layout.addLayout(form)
+        layout.setContentsMargins(22, 18, 22, 16)
+        layout.setSpacing(12)
+        layout.addLayout(form_ui.cabecalho(self.windowTitle()))
+        for bloco in blocos:
+            layout.addWidget(bloco)
         layout.addWidget(botoes)
 
-    def vinculo_id(self) -> int | None:
-        return self.vinculo.currentData()
+    def _trazer_valores_de_antes(self, *_args) -> None:
+        """Participação nova começa com a de antes: quase sempre muda um
+        número só."""
+        antes = self._valores_de_antes.get(self.socio.currentData())
+        if antes and self.campos is not None:
+            self.campos.cotas.setValue(antes.get("quantidade_cotas") or 0)
+            self.campos.percentual.setValue(antes.get("percentual_capital") or 0)
+            self.campos.capital.setValue(antes.get("valor_capital") or 0)
+
+    def dados(self) -> dict:
+        resultado = {"socio_id": self.socio.currentData(), "data": self.data.date().toString("yyyy-MM-dd")}
+        if self.campos is not None:
+            resultado.update(percentual=self.campos.percentual.value(), cotas=self.campos.cotas.value() or None,
+                             capital=self.campos.capital.value() or None)
+        return resultado
 
 
 def confirmar_e_excluir(parent, conn, alteracao: AlteracaoContratual) -> bool:
@@ -651,7 +710,7 @@ class _LinhaSocio(QWidget):
     fatia, o percentual, as cotas e, se for o caso, a etiqueta dizendo que
     ele entrou ou teve a participação refeita nesta alteração."""
 
-    ETIQUETAS = {"entrou": ("Entrou nesta alteração", "ativo"), "mudou": ("Participação refeita", "mudou")}
+    ETIQUETAS = {"entrou": ("Entrou nesta alteração", "ativo"), "mudou": ("Participação nova", "mudou")}
 
     def __init__(self, socio: dict, parent=None):
         super().__init__(parent)
@@ -781,6 +840,11 @@ class AlteracaoCard(QWidget):
         self.btn_saida_socio = QPushButton("Registrar saída")
         self.btn_saida_socio.setToolTip("Encerra a participação de um sócio na data desta alteração.")
         self.btn_saida_socio.clicked.connect(self._registrar_saida)
+        self.btn_participacao = QPushButton("Participação nova")
+        self.btn_participacao.setToolTip(
+            "Quem continua na sociedade com outras cotas ou outro percentual a partir desta alteração."
+        )
+        self.btn_participacao.clicked.connect(self._participacao_nova)
         self.btn_importar_relatorio = QPushButton("Importar relatório de sócios…")
         self.btn_importar_relatorio.setToolTip(
             "Lê o relatório \"Cadastro de Sócios\" de outro sistema contábil — em PDF ou "
@@ -791,6 +855,7 @@ class AlteracaoCard(QWidget):
         self._botoes_movimento = QHBoxLayout()
         self._botoes_movimento.setSpacing(8)
         self._botoes_movimento.addWidget(self.btn_incluir_socio)
+        self._botoes_movimento.addWidget(self.btn_participacao)
         self._botoes_movimento.addWidget(self.btn_saida_socio)
         self._botoes_movimento.addWidget(self.btn_importar_relatorio)
         self._botoes_movimento.addStretch()
@@ -880,9 +945,10 @@ class AlteracaoCard(QWidget):
             self.btn_importar_relatorio.setEnabled(True)
             self.btn_incluir_socio.setEnabled(False)
             self.btn_saida_socio.setEnabled(False)
+            self.btn_participacao.setEnabled(False)
             return
         if self.btn_importar_relatorio.parent() is not self.documento:
-            self._botoes_movimento.insertWidget(2, self.btn_importar_relatorio)
+            self._botoes_movimento.insertWidget(3, self.btn_importar_relatorio)
 
         a = ficha["alteracao"]
         self.alteracao = a
@@ -909,7 +975,8 @@ class AlteracaoCard(QWidget):
             "Volta a permitir mudanças nesta alteração." if a.fechada
             else "Trava esta alteração para ninguém mudar o que já foi conferido."
         )
-        for botao in (self.btn_incluir_socio, self.btn_saida_socio, self.btn_importar_relatorio):
+        for botao in (self.btn_incluir_socio, self.btn_saida_socio, self.btn_participacao,
+                      self.btn_importar_relatorio):
             botao.setEnabled(editavel)
 
         self._mostrar_numeros(ficha)
@@ -949,18 +1016,20 @@ class AlteracaoCard(QWidget):
             self._numeros.setColumnStretch(coluna, 1)
 
     def _mostrar_movimentos(self, ficha: dict) -> None:
-        linhas = (
-            [(nome, "Entrou", "ativo") for nome in ficha["entradas"]]
-            + [(s["nome"], "Saiu", "saiu") for s in ficha["saidas"]]
-            + [(nome, "Participação refeita", "mudou") for nome in ficha["mudancas"]]
-        )
-        if not linhas:
+        movimentos = ficha["movimentos"]
+        if not movimentos:
             self._movimentos.addWidget(_dica(
-                "Nenhum sócio entrou ou saiu por esta alteração ainda. Inclua quem entrou, registre "
-                "quem saiu, ou importe o relatório de sócios do outro sistema."
+                "Nenhum sócio entrou, saiu ou mudou de participação por esta alteração ainda. Inclua quem "
+                "entrou, registre quem saiu, ou importe o relatório de sócios do outro sistema."
             ))
             return
-        for nome, texto, tom in linhas:
+        editavel = not ficha["alteracao"].fechada
+        etiquetas = {"entrada": ("Entrou", "ativo"), "saida": ("Saiu", "saiu"),
+                     "participacao": ("Participação nova", "mudou")}
+        for m in movimentos:
+            texto, tom = etiquetas[m["tipo"]]
+            if m["tipo"] != "saida" and m["saida_nesta"]:
+                texto, tom = "Entrou e saiu", "saiu"
             # Layout, e não QWidget: widget solto herda o fundo da página e
             # vira uma faixa colorida dentro do cartão branco.
             arranjo = QHBoxLayout()
@@ -971,10 +1040,59 @@ class AlteracaoCard(QWidget):
             etiqueta.setFixedWidth(150)
             etiqueta.setAlignment(Qt.AlignCenter)
             arranjo.addWidget(etiqueta)
-            rotulo_nome = QLabel(nome)
+            nome = QVBoxLayout()
+            nome.setSpacing(0)
+            rotulo_nome = QLabel(m["socio_nome"])
             rotulo_nome.setProperty("role", "valorCampo")
-            arranjo.addWidget(rotulo_nome, 1)
+            nome.addWidget(rotulo_nome)
+            nome.addWidget(_dica(self._detalhe_do_movimento(m)))
+            arranjo.addLayout(nome, 1)
+            if editavel:
+                # O sócio vai no próprio botão, e o clique num método da
+                # ficha: uma lambda segurando a ficha prende os dois num laço
+                # que o PySide desfaz fora de hora — a ficha refeita depois de
+                # "Tirar" derrubava o programa ao ser recolhida.
+                corrigir = QPushButton("Corrigir")
+                corrigir.setToolTip("Muda o que esta alteração registrou deste sócio. As outras não mudam.")
+                corrigir.setProperty("socio_id", m["socio_id"])
+                corrigir.clicked.connect(self._ao_clicar_corrigir)
+                tirar = QPushButton("Tirar")
+                tirar.setToolTip("Tira este sócio desta alteração, como se ela não tivesse registrado nada dele.")
+                tirar.setProperty("socio_id", m["socio_id"])
+                tirar.clicked.connect(self._ao_clicar_tirar)
+                arranjo.addWidget(corrigir)
+                arranjo.addWidget(tirar)
             self._movimentos.addLayout(arranjo)
+
+    def _movimento_do_botao(self) -> dict | None:
+        socio_id = self.sender().property("socio_id") if self.sender() is not None else None
+        return next((m for m in repo.listar_movimentos(self.conn, self.alteracao.id)
+                     if m["socio_id"] == socio_id), None)
+
+    def _ao_clicar_corrigir(self) -> None:
+        movimento = self._movimento_do_botao()
+        if movimento is not None:
+            self._corrigir_movimento(movimento)
+
+    def _ao_clicar_tirar(self) -> None:
+        movimento = self._movimento_do_botao()
+        if movimento is not None:
+            self._tirar_movimento(movimento)
+
+    @staticmethod
+    def _detalhe_do_movimento(m: dict) -> str:
+        partes = []
+        if m["tipo"] != "saida":
+            if m["percentual_capital"] is not None:
+                partes.append(formatar_percentual(m["percentual_capital"]))
+            if m["quantidade_cotas"]:
+                partes.append(f"{formatar_valor_br(m['quantidade_cotas'], 0)} cotas")
+            if m["valor_capital"]:
+                partes.append(f"R$ {formatar_valor_br(m['valor_capital'])}")
+        partes.append(("em " if m["tipo"] == "saida" else "a partir de ") + formatar_data_br(m["data_efetiva"]))
+        if m["tipo"] != "saida" and m["fim"]:
+            partes.append(f"até {formatar_data_br(m['fim'])}")
+        return " · ".join(partes)
 
     def _mostrar_quadro(self, ficha: dict) -> None:
         quantidade = len(ficha["quadro"])
@@ -1055,65 +1173,88 @@ class AlteracaoCard(QWidget):
         self._preencher()
         self._ao_mudar(self)
 
-    def _incluir_socio(self) -> None:
-        if self.alteracao is None:
-            return
-        vinculos = repo.listar_vinculos_empresa(self.conn, self.empresa_id)
-        ativos_ids = {
-            v.socio_id
-            for v in vinculos
-            if v.data_saida is None or v.data_saida > self.alteracao.data
-        }
-        # Sem sócio disponível o diálogo abre assim mesmo: ele diz o que
-        # houve e deixa cadastrar um novo ali dentro, que é justamente o caso
-        # em que antes a tela só avisava e fechava.
-        dialogo = _DialogoIncluirSocio(self.conn, self.empresa_id, ativos_ids, self, alteracao=self.alteracao)
-        if dialogo.exec() != QDialog.Accepted:
-            return
-        socio_id, percentual, cotas, data_entrada, capital = dialogo.dados()
-        novo = VinculoSocietario(
-            id=None,
-            empresa_id=self.empresa_id,
-            socio_id=socio_id,
-            percentual_capital=percentual,
-            quantidade_cotas=cotas,
-            data_entrada=data_entrada,
-            data_saida=None,
-            alteracao_entrada_id=self.alteracao.id,
-            valor_capital=capital,
-        )
+    def _socios_de_antes(self) -> dict[int, dict]:
+        """Quem era sócio logo antes desta alteração — de quem ela pode
+        registrar saída ou participação nova."""
+        return repo.quadro_antes_da_alteracao(self.conn, self.alteracao.id)
+
+    def _nomes(self, ids) -> dict[int, str]:
+        nomes = {s.id: s.nome for s in repo.listar_socios(self.conn)}
+        return {i: nomes.get(i, "?") for i in ids}
+
+    def _gravar(self, titulo: str, acao) -> None:
         try:
-            repo.salvar_vinculo(self.conn, novo)
+            acao()
         except ValueError as exc:
-            QMessageBox.warning(self, "Erro ao incluir sócio", str(exc))
+            QMessageBox.warning(self, titulo, str(exc))
             return
-        dialogo.campos.gravar_valor_da_cota()
         self._preencher()
         self._ao_mudar(self)
 
-    def _registrar_saida(self) -> None:
+    def _incluir_socio(self) -> None:
         if self.alteracao is None:
             return
-        vinculos = repo.listar_vinculos_empresa(self.conn, self.empresa_id)
-        ativos = [
-            v
-            for v in vinculos
-            if v.data_entrada <= self.alteracao.data and (v.data_saida is None or v.data_saida > self.alteracao.data)
-        ]
-        if not ativos:
-            QMessageBox.information(self, "Registrar saída", "Não há sócios ativos para retirar.")
-            return
-        nomes = {s.id: s.nome for s in repo.listar_socios(self.conn)}
-        dialogo = _DialogoSaidaSocio(ativos, nomes, self)
+        ja = set(self._socios_de_antes()) | {m["socio_id"] for m in repo.listar_movimentos(self.conn, self.alteracao.id)}
+        # Sem sócio disponível o diálogo abre assim mesmo: ele diz o que
+        # houve e deixa cadastrar um novo ali dentro.
+        dialogo = _DialogoIncluirSocio(self.conn, self.empresa_id, ja, self, alteracao=self.alteracao)
         if dialogo.exec() != QDialog.Accepted:
             return
-        try:
-            repo.encerrar_vinculo(self.conn, dialogo.vinculo_id(), self.alteracao.data, self.alteracao.id)
-        except ValueError as exc:
-            QMessageBox.warning(self, "Erro ao registrar saída", str(exc))
+        socio_id, percentual, cotas, data_entrada, capital = dialogo.dados()
+        self._gravar("Erro ao incluir sócio", lambda: repo.salvar_movimento(
+            self.conn, self.alteracao.id, socio_id, "entrada", data=data_entrada,
+            percentual=percentual, cotas=cotas or None, capital=capital,
+        ))
+        dialogo.campos.gravar_valor_da_cota()
+
+    def _escolher_de_antes(self, tipo: str, titulo: str) -> None:
+        antes = self._socios_de_antes()
+        ja = {m["socio_id"] for m in repo.listar_movimentos(self.conn, self.alteracao.id)}
+        candidatos = {i: n for i, n in self._nomes(antes).items() if i not in ja}
+        if not candidatos:
+            QMessageBox.information(self, titulo, "Não há sócios de antes desta alteração sem movimento nela.")
             return
-        self._preencher()
-        self._ao_mudar(self)
+        dialogo = _DialogoMovimento(self.conn, self.alteracao, tipo, candidatos, valores_de_antes=antes, parent=self)
+        if dialogo.exec() != QDialog.Accepted:
+            return
+        d = dialogo.dados()
+        extra = {} if tipo == "saida" else {"percentual": d["percentual"], "cotas": d["cotas"], "capital": d["capital"]}
+        self._gravar(titulo, lambda: repo.salvar_movimento(
+            self.conn, self.alteracao.id, d["socio_id"], tipo, data=d["data"], **extra))
+
+    def _registrar_saida(self) -> None:
+        if self.alteracao is not None:
+            self._escolher_de_antes("saida", "Registrar saída")
+
+    def _participacao_nova(self) -> None:
+        if self.alteracao is not None:
+            self._escolher_de_antes("participacao", "Participação nova")
+
+    def _corrigir_movimento(self, m: dict) -> None:
+        dialogo = _DialogoMovimento(self.conn, self.alteracao, m["tipo"], {m["socio_id"]: m["socio_nome"]},
+                                    atual=m, parent=self)
+        if dialogo.exec() != QDialog.Accepted:
+            return
+        d = dialogo.dados()
+        # A saída que o movimento já tinha (inclusive a registrada aqui
+        # mesmo) continua depois da correção — tudo numa gravação só.
+        extra = {} if m["tipo"] == "saida" else {
+            "percentual": d["percentual"], "cotas": d["cotas"], "capital": d["capital"],
+            "fim": m["fim"], "saida_nesta": bool(m["saida_nesta"]),
+        }
+        self._gravar("Corrigir", lambda: repo.salvar_movimento(
+            self.conn, self.alteracao.id, m["socio_id"], m["tipo"], data=d["data"], **extra))
+
+    def _tirar_movimento(self, m: dict) -> None:
+        resposta = QMessageBox.question(
+            self, "Tirar da alteração",
+            f"Tirar {m['socio_nome']} desta alteração? O quadro volta a ser como se ela não tivesse "
+            "registrado nada dele. As outras alterações não mudam.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if resposta == QMessageBox.Yes:
+            self._gravar("Tirar da alteração", lambda: repo.remover_movimento(
+                self.conn, self.alteracao.id, m["socio_id"]))
 
     def _importar_relatorio_socios(self) -> None:
         """Lê o relatório "Cadastro de Sócios" de outro sistema contábil e

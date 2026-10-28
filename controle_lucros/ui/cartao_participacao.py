@@ -229,8 +229,8 @@ class CartaoParticipacao(QFrame):
         if na_empresa_desde and na_empresa_desde != vinculo.data_entrada:
             alteracao = alteracoes.get(vinculo.alteracao_entrada_id)
             texto_entrada = (
-                f"Participação refeita pela alteração Nº {alteracao.numero}, de {formatar_data_br(alteracao.data)}"
-                if alteracao else f"Participação refeita em {formatar_data_br(vinculo.data_entrada)}"
+                f"Participação nova pela alteração Nº {alteracao.numero}, de {formatar_data_br(alteracao.data)}"
+                if alteracao else f"Participação nova em {formatar_data_br(vinculo.data_entrada)}"
             )
         else:
             texto_entrada = _texto_alteracao(alteracoes.get(vinculo.alteracao_entrada_id), "Entrou", "Entrada")

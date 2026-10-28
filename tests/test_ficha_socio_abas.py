@@ -68,7 +68,7 @@ def test_cartao_diz_desde_quando_esta_na_empresa_e_nao_desde_a_refeita(conn, cen
     aba = _aba(conn)
     textos = _textos(aba.cartoes[0])
     assert "desde 01/01/2020" in textos
-    assert "Participação refeita pela alteração Nº 2" in textos
+    assert "Participação nova pela alteração Nº 2" in textos
 
 
 def test_abas_sao_visao_geral_e_uma_por_empresa_so_com_o_nome(conn, cenario):

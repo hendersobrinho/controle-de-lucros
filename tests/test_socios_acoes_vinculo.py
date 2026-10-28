@@ -486,3 +486,25 @@ def test_campos_da_saida_so_aparecem_quando_o_socio_saiu(conn, cenario):
     assert dialogo.campos_saida.isHidden()
     dialogo.saiu.setChecked(True)
     assert not dialogo.campos_saida.isHidden()
+
+
+def test_participacao_de_alteracao_trava_a_troca_de_alteracao(conn):
+    from controle_lucros.models import Empresa, Socio
+    from controle_lucros.ui.socios_tab import _DialogoEditarVinculo
+
+    empresa = repo.salvar_empresa(conn, Empresa(None, "050", "OMEGA", "", 1000, 1000))
+    ana = repo.salvar_socio(conn, Socio(None, "ANA", ""))
+    a1 = repo.salvar_alteracao(conn, AlteracaoContratual(None, empresa, 1, "2023-01-01", "OMEGA", 1000, 1000, ""))
+    a2 = repo.salvar_alteracao(conn, AlteracaoContratual(None, empresa, 2, "2024-01-01", "OMEGA", 1000, 1000, ""))
+    repo.salvar_movimento(conn, a1, ana, "entrada", percentual=100, cotas=1000)
+    repo.salvar_movimento(conn, a2, ana, "participacao", percentual=100, cotas=2000)
+    (primeira,) = [v for v in repo.listar_vinculos_empresa(conn, empresa) if v.alteracao_entrada_id == a1]
+
+    dialogo = _DialogoEditarVinculo(conn, primeira, "OMEGA")
+    assert not dialogo.alteracao_entrada.isEnabled() and not dialogo.alteracao_saida.isEnabled()
+    assert not dialogo.data_saida.isEnabled()  # a saída é a participação nova da Nº 2
+    assert "Nº 1" in dialogo.aviso_alteracao.text() and "Nº 2" in dialogo.aviso_alteracao.text()
+    dialogo.cotas.setValue(900)
+    dialogo._salvar()
+    cotas = {m["alteracao_id"]: m["quantidade_cotas"] for a in (a1, a2) for m in repo.listar_movimentos(conn, a)}
+    assert cotas == {a1: 900, a2: 2000}

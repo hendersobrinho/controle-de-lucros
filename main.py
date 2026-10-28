@@ -14,7 +14,7 @@ from controle_lucros.ui.login import DialogoLogin, DialogoPrimeiroUsuario, entra
 from controle_lucros.ui.main_window import MainWindow
 from controle_lucros.ui.marca import TelaCarregando
 from controle_lucros.ui.reportar_erro import CapturaDeErros, abrir_para_fechamento
-from controle_lucros.ui.theme import build_stylesheet
+from controle_lucros.ui.theme import aplicar as aplicar_tema
 
 
 def _preparar_registro_de_falhas(pasta) -> str:
@@ -92,7 +92,8 @@ def main() -> None:
     app = QApplication(sys.argv)
     traducao.instalar(app)
     app.setWindowIcon(icone_app())
-    app.setStyleSheet(build_stylesheet())
+    # Estilo, paleta e cores do programa — nada herdado do Windows (ver theme.aplicar).
+    aplicar_tema(app)
 
     captura = CapturaDeErros()
     captura.instalar()

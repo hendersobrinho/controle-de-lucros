@@ -321,21 +321,32 @@ responde perguntas como "quanto a 275 distribuiu em 2024 e para quem?" ou
 direto. Usa a conexão já configurada no PC pelo programa.
 
 Consulta: `resumo_geral`, `pontos_de_atencao`, `buscar_empresas`,
-`ficha_empresa`, `distribuicao_da_empresa`, `buscar_socios`, `ficha_socio`,
+`ficha_empresa`, `ficha_alteracao_contratual`, `distribuicao_da_empresa`, `buscar_socios`, `ficha_socio`,
 `esquema_do_banco` e `consultar_sql` (um SELECT livre, até 500 linhas).
 
 Gravação: `cadastrar_empresa`, `editar_empresa`, `cadastrar_socio`,
-`editar_socio`, `incluir_socio_na_empresa`, `registrar_saida_de_socio`,
-`alterar_participacao`, `definir_valor_da_cota`, `lancar_distribuicao`,
+`editar_socio`, `registrar_alteracao_contratual` (uma alteração inteira de uma
+vez: número, data, capital, cotas, entradas, saídas e participações novas — é
+como o Claude deve lançar um contrato), `editar_alteracao_contratual`,
+`incluir_socio_na_empresa`, `registrar_saida_de_socio`, `alterar_participacao`
+(estas três vão para a alteração de número informado, ou para a da empresa
+naquele dia), `definir_valor_da_cota`, `lancar_distribuicao`,
 `lancar_distribuicao_trimestral`, `lancar_movimentacao`, `trancar_periodo`,
 `trancar_alteracao_contratual` e `importar_planilha` (primeiro mostra o que vai
 entrar, depois grava; aceita o formato padrão ou um layout do escritório).
+Para corrigir e excluir: `corrigir_participacao` (como "Editar" na aba Sócios,
+inclusive desfazer a saída), `excluir_participacao`,
+`corrigir_movimento_da_alteracao`, `tirar_socio_da_alteracao`,
+`mover_socio_de_alteracao`, `excluir_alteracao_contratual` e `excluir_empresa`
+(as duas primeiro mostram o que vai junto e só apagam com `confirmar=true`),
+`excluir_socio`, `excluir_distribuicao` (anual ou de um trimestre),
+`editar_movimentacao` e `excluir_movimentacao`.
 Cada uma chama a mesma função do repositório que a tela chama, então valem as
 mesmas regras (período trancado, CPF repetido, alteração contratual
 automática). Toda gravação vai para o Log de atividades com o autor "Claude
 (assistente)", e antes da primeira gravação de cada sessão sai um backup
-completo na pasta de backups do PC. **Não há ferramenta de excluir** — excluir,
-usuários, senhas e restauração de backup ficam só no programa.
+completo na pasta de backups do PC — é a rede de segurança das exclusões.
+Usuários, senhas e restauração de backup ficam só no programa.
 Empresa é chamada pelo código, CNPJ ou parte do nome; se o nome servir para
 mais de uma, a resposta lista os códigos.
 

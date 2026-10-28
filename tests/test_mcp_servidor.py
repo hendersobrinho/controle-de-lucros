@@ -32,15 +32,17 @@ def chamar(nome, **argumentos):
     return asyncio.run(mcp.servidor.call_tool(nome, argumentos))
 
 
-def test_consultas_sao_so_leitura_e_nao_ha_ferramenta_de_excluir():
+def test_consultas_sao_so_leitura_e_exclusoes_sao_marcadas():
     ferramentas = {f.name: f for f in asyncio.run(mcp.servidor.list_tools())}
     for nome in ("resumo_geral", "ficha_empresa", "ficha_socio", "consultar_sql", "pontos_de_atencao"):
         assert ferramentas[nome].annotations.read_only_hint
     for nome in ("cadastrar_empresa", "lancar_distribuicao", "importar_planilha"):
         assert not ferramentas[nome].annotations.read_only_hint
-    # Excluir fica só no programa.
-    assert not [n for n in ferramentas if "exclu" in n or "apag" in n or "remov" in n]
-    assert not any(f.annotations.destructive_hint for f in ferramentas.values())
+    # O Claude avisa antes de usar o que é destrutivo.
+    destrutivas = {n for n, f in ferramentas.items() if f.annotations.destructive_hint}
+    assert {n for n in ferramentas if "exclu" in n or n.startswith("tirar_")} == destrutivas
+    # Usuários e senhas ficam só no programa.
+    assert not [n for n in ferramentas if "usuario" in n or "senha" in n]
 
 
 def test_resumo_geral_abre_no_ultimo_ano(cenario):
@@ -243,3 +245,141 @@ def test_importar_planilha_mostra_antes_e_grava_depois(cenario, conn, gravacao, 
     assert mcp.ficha_empresa("010")["distribuicao_por_ano"][0]["total"] == 3000
     with pytest.raises(ToolError, match="Não achei o arquivo"):
         mcp.importar_planilha(str(tmp_path / "nao_existe.xlsx"))
+
+
+# ------------------------------------------------- alteração contratual inteira --
+
+
+def test_registrar_alteracao_inteira_e_uma_so(cenario, gravacao):
+    mcp.cadastrar_socio("caio", "529.982.247-25")
+    mcp.cadastrar_socio("dora", "111.444.777-35")
+    r = mcp.registrar_alteracao_contratual(
+        "001", 5, "2025-04-01", capital_social=2000, quantidade_cotas=2000, descricao="Entrada de dois",
+        entradas=[{"socio": "caio", "percentual": 25, "cotas": 500}, {"socio": "dora", "percentual": 25, "cotas": 500}],
+        saidas=["bia"],
+        participacoes=[{"socio": "ana", "percentual": 50, "cotas": 1000}],
+    )
+    assert r["ok"]
+    ficha = mcp.ficha_alteracao_contratual("001", 5)
+    assert ficha["capital_social"] == 2000
+    assert {(m["socio"], m["tipo"]) for m in ficha["movimentos"]} == {
+        ("CAIO", "Entrou"), ("DORA", "Entrou"), ("BIA", "Saiu"), ("ANA", "Participação nova")}
+    assert {q["socio"] for q in ficha["quadro_depois"]} == {"ANA", "CAIO", "DORA"}
+    assert [a["numero"] for a in mcp.ficha_empresa("001")["alteracoes_contratuais"]] == [5]
+
+
+def test_alteracao_inteira_e_tudo_ou_nada(cenario, gravacao):
+    mcp.cadastrar_socio("caio", "529.982.247-25")
+    mcp.cadastrar_socio("dora", "111.444.777-35")
+    # A entrada do CAIO é válida; a participação nova da DORA, que não é
+    # sócia, não é — e leva a alteração inteira junto.
+    with pytest.raises(ToolError, match="Nada foi gravado.*não é sócio"):
+        mcp.registrar_alteracao_contratual("001", 6, "2025-04-01",
+                                           entradas=[{"socio": "caio", "percentual": 10, "cotas": 100}],
+                                           participacoes=[{"socio": "dora", "percentual": 1}])
+    assert mcp.ficha_empresa("001")["alteracoes_contratuais"] == []
+    assert "CAIO" not in {q["nome"] for q in mcp.ficha_empresa("001")["quadro_societario"]}
+
+
+def test_socio_por_socio_no_mesmo_dia_cai_na_mesma_alteracao(cenario, gravacao):
+    for nome, cpf in (("caio", "529.982.247-25"), ("dora", "111.444.777-35")):
+        mcp.cadastrar_socio(nome, cpf)
+        mcp.incluir_socio_na_empresa("001", nome, 10, 100, "2026-02-01")
+    mcp.registrar_saida_de_socio("001", "bia", "2026-02-01")
+    (alteracao,) = mcp.ficha_empresa("001")["alteracoes_contratuais"]
+    assert len(mcp.ficha_alteracao_contratual("001", alteracao["numero"])["movimentos"]) == 3
+
+
+def test_editar_alteracao_leva_a_data_junto(cenario, gravacao):
+    mcp.registrar_alteracao_contratual("001", 5, "2025-04-01", saidas=["bia"])
+    mcp.editar_alteracao_contratual("001", 5, data="2025-09-01", capital_social=3000)
+    ficha = mcp.ficha_alteracao_contratual("001", 5)
+    assert ficha["data"] == "2025-09-01" and ficha["capital_social"] == 3000
+    assert ficha["movimentos"][0]["data"] == "2025-09-01"
+
+
+def test_alteracao_inteira_desfaz_com_qualquer_erro(cenario, gravacao, monkeypatch):
+    mcp.cadastrar_socio("caio", "529.982.247-25")
+    with pytest.raises(ToolError, match="objeto"):
+        mcp.registrar_alteracao_contratual("001", 7, "2025-04-01", entradas=["caio"])
+    original = mcp.repo.salvar_movimento
+
+    def falha_no_segundo(conn, alteracao_id, socio_id, tipo, **kwargs):
+        if tipo == "saida":
+            raise RuntimeError("conexão caiu")
+        return original(conn, alteracao_id, socio_id, tipo, **kwargs)
+
+    monkeypatch.setattr(mcp.repo, "salvar_movimento", falha_no_segundo)
+    with pytest.raises(RuntimeError):
+        mcp.registrar_alteracao_contratual("001", 7, "2025-04-01",
+                                           entradas=[{"socio": "caio", "percentual": 10}], saidas=["bia"])
+    assert mcp.ficha_empresa("001")["alteracoes_contratuais"] == []
+
+
+# ------------------------------------------------------ corrigir e excluir --
+
+
+def test_excluir_empresa_mostra_antes_e_so_apaga_confirmado(cenario, gravacao):
+    previa = mcp.excluir_empresa("002")
+    assert previa["excluido"] is False and previa["vai_junto"]
+    assert mcp.ficha_empresa("002")
+    mcp.excluir_empresa("002", confirmar=True)
+    with pytest.raises(ToolError):
+        mcp.ficha_empresa("002")
+    assert mcp.ficha_socio("ana")  # o sócio fica
+
+
+def test_excluir_alteracao_mostra_antes_e_desfaz(cenario, gravacao):
+    mcp.cadastrar_socio("caio", "529.982.247-25")
+    mcp.registrar_alteracao_contratual("001", 5, "2025-04-01",
+                                       entradas=[{"socio": "caio", "percentual": 10, "cotas": 100}])
+    assert mcp.excluir_alteracao_contratual("001", 5)["entradas"] == ["CAIO"]
+    assert [a["numero"] for a in mcp.ficha_empresa("001")["alteracoes_contratuais"]] == [5]
+    mcp.excluir_alteracao_contratual("001", 5, confirmar=True)
+    assert mcp.ficha_empresa("001")["alteracoes_contratuais"] == []
+    assert "CAIO" not in {q["nome"] for q in mcp.ficha_empresa("001")["quadro_societario"]}
+
+
+def test_corrigir_tirar_e_mover_movimento_entre_alteracoes(cenario, gravacao):
+    mcp.cadastrar_socio("caio", "529.982.247-25")
+    mcp.registrar_alteracao_contratual("001", 5, "2025-04-01",
+                                       entradas=[{"socio": "caio", "percentual": 10, "cotas": 100}])
+    mcp.registrar_alteracao_contratual("001", 6, "2025-08-01", saidas=["bia"])
+    mcp.corrigir_movimento_da_alteracao("001", 5, "caio", percentual=12)
+    (mov,) = mcp.ficha_alteracao_contratual("001", 5)["movimentos"]
+    assert mov["percentual"] == 12
+
+    mcp.mover_socio_de_alteracao("001", 5, 6, "caio")
+    assert mcp.ficha_alteracao_contratual("001", 5)["movimentos"] == []
+    assert {m["socio"] for m in mcp.ficha_alteracao_contratual("001", 6)["movimentos"]} == {"BIA", "CAIO"}
+
+    mcp.tirar_socio_da_alteracao("001", 6, "bia")
+    assert "BIA" in {q["nome"] for q in mcp.ficha_empresa("001")["quadro_societario"]}
+
+
+def test_corrigir_e_excluir_participacao(cenario, conn, gravacao):
+    mcp.corrigir_participacao("001", "bia", percentual=40, observacao="conferido")
+    vinculo = next(v for v in repo.listar_vinculos_empresa(conn, cenario["acme"]) if v.percentual_capital == 40)
+    assert vinculo.observacao == "conferido"
+    mcp.registrar_saida_de_socio("001", "bia", "2025-02-01")
+    mcp.corrigir_participacao("001", "bia", desfazer_saida=True)
+    assert "BIA" in {q["nome"] for q in mcp.ficha_empresa("001")["quadro_societario"]}
+    mcp.excluir_participacao("001", "bia")
+    assert "BIA" not in {q["nome"] for q in mcp.ficha_empresa("001")["quadro_societario"]}
+
+
+def test_excluir_distribuicao_movimentacao_e_socio(cenario, gravacao):
+    mcp.excluir_distribuicao("001", 2024, "bia")
+    with pytest.raises(ToolError, match="Não há distribuição"):
+        mcp.excluir_distribuicao("001", 2024, "bia")
+    (mov,) = mcp.ficha_socio("ana")["movimentacoes"]
+    mcp.editar_movimentacao(mov["id"], valor=800)
+    assert mcp.ficha_socio("ana")["movimentacoes"][0]["valor"] == 800
+    mcp.excluir_movimentacao(mov["id"])
+    assert mcp.ficha_socio("ana")["movimentacoes"] == []
+    with pytest.raises(ToolError, match="Não é possível excluir"):
+        mcp.excluir_socio("ana")
+    mcp.cadastrar_socio("caio", "529.982.247-25")
+    mcp.excluir_socio("caio")
+    with pytest.raises(ToolError):
+        mcp.ficha_socio("caio")

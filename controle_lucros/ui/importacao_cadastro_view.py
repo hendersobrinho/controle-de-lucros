@@ -1432,6 +1432,11 @@ class ImportacaoCadastroView(QWidget):
                 if qtd == 1
                 else f"\n{qtd} alterações contratuais criadas automaticamente pra registrar a movimentação."
             )
+        if aplicado.get("alteracoes_trancadas"):
+            resumo += (
+                f"\n⚠ {aplicado['alteracoes_trancadas']} empresa(s) já têm alteração trancada nesse dia: a "
+                "movimentação delas entrou sem alteração contratual. Destranque e associe pela aba Sócios."
+            )
         if nao_aplicadas > 0:
             resumo += f"\n{nao_aplicadas} linha(s) não foram aplicadas"
             resumo += f" ({len(conflitos)} por dados contraditórios)." if conflitos else "."

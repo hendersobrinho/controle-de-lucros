@@ -159,8 +159,23 @@ dela —, e as setas <b>←</b> e <b>→</b> do teclado andam uma por vez. Se as
 primeiras não foram cadastradas, a linha começa com um trecho tracejado
 ("Nº 1 a 6 não registradas"). O selo <b>+</b> no fim cadastra a próxima.</p>
 <p>A ficha mostra data, capital, cotas, valor da cota (capital ÷ cotas, com o
-que era antes), a descrição, quem <b>entrou</b>, quem <b>saiu</b> e quem teve a
-<b>participação refeita</b>, e o quadro societário como ficou depois dela.</p>
+que era antes), a descrição, o que ela registrou de cada sócio — quem
+<b>entrou</b>, quem <b>saiu</b> e quem ficou com <b>participação nova</b>, com
+os valores daquela alteração — e o quadro societário como ficou depois dela.</p>
+
+<h3>Cada alteração é um documento</h3>
+<p>Uma alteração contratual é <b>uma só</b>, com tudo o que aquele contrato
+trouxe: se saem 2 sócios, entram 3 e o capital muda, é uma alteração com as
+cinco movimentações e o capital novo. Ela guarda <b>as próprias
+informações</b>: corrigir o que a Nº 6 registrou não muda o que a Nº 7
+registrou.</p>
+<p>O quadro da empresa e o histórico de cada sócio (a aba Sócios) saem das
+alterações, na ordem das datas — é a alteração que atualiza o quadro.</p>
+<p>Na ficha, cada movimentação tem <b>Corrigir</b> (muda os valores ou a data
+que esta alteração registrou daquele sócio) e <b>Tirar</b> (como se esta
+alteração não tivesse registrado nada dele). Abaixo da lista ficam
+<b>+ Incluir sócio</b> (quem entra), <b>Participação nova</b> (quem continua com
+outras cotas ou outro percentual) e <b>Registrar saída</b> (quem sai).</p>
 <p>A ficha só mostra. Para mudar alguma coisa use <b>Editar alteração</b>; a exclusão também fica nessa janela. Para cadastrar,
 <b>Nova alteração</b>.</p>
 
@@ -202,9 +217,11 @@ resolve ali mesmo, sem precisar sair para a aba Sócios e voltar — o
 recém-cadastrado já fica selecionado.</p>
 
 <h3>Alterações criadas automaticamente</h3>
-<p><b>+ Associar empresa</b> pela aba Sócios, e importar o relatório de
-sócios, geram uma alteração contratual sozinhos — <b>só para movimento do ano
-corrente</b>. Sócio que entrou em anos anteriores fica com a data de entrada
+<p><b>+ Associar empresa</b> pela aba Sócios, o Claude, e importar o relatório
+de sócios lançam a movimentação na <b>alteração daquele dia</b>: se a empresa já
+tem uma alteração naquela data, entra nela; se não tem, uma é criada. Dez sócios
+entrando juntos são <b>uma</b> alteração com dez entradas. Isso vale <b>só para
+movimento do ano corrente</b>. Sócio que entrou em anos anteriores fica com a data de entrada
 certa e <b>sem alteração</b>: criar uma "nova" datada lá atrás inventaria um
 evento que o escritório não registrou.</p>
 <p>Para ligar depois o vínculo à alteração certa: cadastre a alteração aqui (se
@@ -212,11 +229,16 @@ ainda não existir) e, na aba Sócios, abra <b>Editar participação</b> na fich
 empresa e escolha-a em <b>Alteração contratual</b>, na parte de entrada (ou de
 saída).</p>
 
+<p>Na aba Sócios, <b>Editar participação</b> de uma participação que veio de
+uma alteração corrige o que <b>aquela</b> alteração registrou (valores e data
+de entrada). Trocar a participação de alteração é feito na própria
+alteração.</p>
+
 <h3>Excluir alteração</h3>
-<p>Excluir uma alteração <b>desfaz o que ela registrou</b>: o vínculo de quem
-entrou por ela é apagado, e quem saiu por ela volta a ficar ativo. Assim,
-excluir uma atualização de cotas devolve o sócio às cotas de antes. A pergunta
-de confirmação lista os sócios afetados.</p>
+<p>Excluir uma alteração <b>desfaz o que ela registrou</b>: quem entrou por ela
+deixa de ter entrado, quem saiu por ela volta a ficar ativo, e quem teve
+participação nova volta à de antes. As outras alterações continuam com o que
+registraram. A pergunta de confirmação lista os sócios afetados.</p>
 <p>Alteração <b>fechada</b> não pode ser excluída — destranque antes.</p>
 """
 
@@ -934,8 +956,11 @@ pedir que ele cadastre, lance ou importe uma planilha.</p>
 continua trancado, CPF repetido é recusado. Antes de gravar ele diz o que vai
 fazer e espera você confirmar; antes da primeira gravação de cada conversa ele
 faz um backup completo; e tudo o que ele grava aparece no <b>Log de
-atividades</b> com o nome "Claude (assistente)". Ele <b>nunca exclui</b> nada —
-excluir é só pelo programa — e não mexe em usuários nem senhas.</p>
+atividades</b> com o nome "Claude (assistente)". Ele também <b>corrige e
+exclui</b> (participações, alterações, distribuições, movimentações, empresas e
+sócios): antes de excluir ele diz exatamente o que vai sumir e só apaga depois
+que você confirmar. Se algo sair errado, o backup daquela conversa tem tudo
+como estava. Usuários e senhas ele não mexe.</p>
 <p>O que ele consulta sai do escritório e vai para a Anthropic, empresa do
 Claude: nomes e valores. O CPF dos sócios vai mascarado, a menos que se marque
 "Enviar o CPF completo". Para desligar, use <b>Desconectar</b> na mesma
