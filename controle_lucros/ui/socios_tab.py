@@ -438,6 +438,9 @@ class _DialogoEditarVinculo(QDialog):
                 ).fetchone()
                 if saida is None or saida["tipo"] != "saida":
                     self._saida_travada = True
+                    # Não é saída do sócio: a participação de antes só fecha
+                    # para a nova começar. O texto não pode dizer "saiu".
+                    self.saiu.setText("Esta participação terminou (o sócio continua, com a participação nova)")
                     texto += (f" Ela termina na participação nova da alteração Nº "
                               f"{por_numero.get(vinculo.alteracao_saida_id, '?')} — a data de saída se muda lá.")
             self.aviso_alteracao.setText(texto + " Para trocar de alteração, use Alterações contratuais.")
