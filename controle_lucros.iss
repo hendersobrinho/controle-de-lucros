@@ -121,4 +121,6 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 [Run]
 ; runasoriginaluser: o instalador roda como administrador, e a primeira
 ; abertura é a que configura a conexão — tem que ser como quem usa o PC.
-Filename: "{app}\{#MyAppExeName}"; Description: "Abrir {#MyAppName} agora"; Flags: nowait postinstall skipifsilent runasoriginaluser
+; Sem skipifsilent de propósito: a atualização automática roda este instalador
+; com /SILENT, e o sistema precisa abrir de novo sozinho no fim.
+Filename: "{app}\{#MyAppExeName}"; Description: "Abrir {#MyAppName} agora"; Flags: nowait postinstall runasoriginaluser

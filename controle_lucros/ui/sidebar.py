@@ -130,7 +130,7 @@ class Sidebar(QFrame):
         self.btn_claude = QPushButton("Conectar ao Claude")
         self.btn_claude.setProperty("role", "navSub")
         self.btn_claude.setCursor(Qt.PointingHandCursor)
-        self.btn_claude.setToolTip("Deixa o Claude consultar e lançar no sistema (nunca exclui).")
+        self.btn_claude.setToolTip("Deixa o Claude consultar, lançar, corrigir e excluir no sistema (pedindo a sua confirmação).")
         self.btn_claude.clicked.connect(self.claude.emit)
 
         layout.addWidget(self._rotulo_usuario)

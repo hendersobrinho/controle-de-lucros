@@ -3,7 +3,7 @@ desenvolveu. A logo fica sobre uma placa clara fixa (não segue o tema),
 porque o traço preto do arquivo original só é legível em fundo claro."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtSvgWidgets import QSvgWidget
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
@@ -16,6 +16,8 @@ SITE_URL = "https://www.henderlab.com.br/"
 
 
 class SobreView(QWidget):
+    verificar_atualizacao = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
 
@@ -68,10 +70,15 @@ class SobreView(QWidget):
         btn_site = QPushButton("Visitar site")
         btn_site.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(SITE_URL)))
 
+        btn_atualizar = QPushButton("Verificar atualizações")
+        btn_atualizar.setToolTip("Vê no GitHub se há uma versão mais nova do sistema e, se houver, instala.")
+        btn_atualizar.clicked.connect(self.verificar_atualizacao.emit)
+
         linha_link = QHBoxLayout()
         linha_link.addWidget(link)
         linha_link.addStretch()
         linha_link.addWidget(btn_site)
+        linha_link.addWidget(btn_atualizar)
 
         conteudo_card = QVBoxLayout(card)
         conteudo_card.setContentsMargins(24, 24, 24, 24)

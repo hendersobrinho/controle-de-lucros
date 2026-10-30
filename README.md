@@ -592,6 +592,32 @@ Como o `AppId` não muda entre versões, instalar por cima é reconhecido pelo
 Windows como **atualização** — a entrada em "Aplicativos instalados" continua
 sendo uma só, e os dados do usuário não são tocados.
 
+4. No GitHub, crie a **release** com a tag `v<versão>` (ex.: `v2.2.0`) e anexe
+   o instalador `installer\ControleDeLucros_Setup_<versão>.exe`, **com esse
+   nome**. O texto da release é o que as pessoas leem na janela de
+   atualização (aceita Markdown): escreva em português simples o que mudou.
+
+### Atualização automática
+
+O programa instalado consulta, ao abrir (e no botão **Verificar
+atualizações**, na tela **Sobre**), a última release do repositório
+[hendersobrinho/controle-de-lucros](https://github.com/hendersobrinho/controle-de-lucros/releases).
+Se a versão publicada for mais nova que a instalada, abre a janela **Nova
+versão disponível** com as notas da release. No **Atualizar agora**, baixa o
+instalador, confere o arquivo com o sha256 que o GitHub calcula, e roda o
+instalador com `/SILENT`: o Windows pede a permissão de administrador (uma
+vez, o **Sim** de sempre), o sistema fecha, os arquivos são trocados e ele
+abre sozinho de novo. O banco e a configuração do PC não são tocados.
+
+- Sem internet ou com o GitHub fora do ar, a consulta automática é silenciosa;
+  só o botão da tela **Sobre** avisa que não conseguiu.
+- Só o programa instalado (`.exe`) consulta sozinho. Rodando do código-fonte,
+  não. `CONTROLE_LUCROS_SEM_ATUALIZACAO=1` desliga a consulta automática.
+- Prerelease e rascunho no GitHub não são oferecidos: dá para publicar uma
+  versão de teste sem que os PCs do escritório a peguem.
+- O código está em [atualizacao.py](controle_lucros/atualizacao.py) (lógica) e
+  [ui/atualizacao.py](controle_lucros/ui/atualizacao.py) (janela).
+
 ### Se o build falhar reclamando de gráficos (QtCharts) ou exportação em PDF
 
 Em builds mais antigas de PyInstaller isso pode não detectar esses módulos

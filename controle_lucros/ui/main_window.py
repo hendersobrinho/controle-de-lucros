@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QStackedWidget, QVBoxLayout, QWidget
 
+from .. import atualizacao
 from ..models import Usuario
 from .alteracoes_view import AlteracoesView
+from .atualizacao import VerificadorDeAtualizacao
 from .backup_view import BackupView
 from .conectar_claude import DialogoConectarClaude, texto_do_menu
 from .dashboard_empresa import DashboardEmpresaView
@@ -104,6 +107,12 @@ class MainWindow(QMainWindow):
         self.sidebar.claude.connect(self._conectar_claude)
         self.sidebar.btn_claude.setText(texto_do_menu())
         self.sidebar.sair.connect(self._sair)
+        # Atualização automática: depois de a tela já estar de pé, uma consulta
+        # discreta ao GitHub (só no programa instalado; ver atualizacao.py).
+        self.atualizador = VerificadorDeAtualizacao(self)
+        self.sobre_view.verificar_atualizacao.connect(self._verificar_atualizacao)
+        if atualizacao.verificacao_automatica_ligada():
+            QTimer.singleShot(4000, self.atualizador.verificar)
         tema_estado().mudou.connect(self._retemar_pagina_atual)
 
         central = QWidget()
@@ -163,6 +172,9 @@ class MainWindow(QMainWindow):
         Vai junto a tela em que ela estava, que costuma ser a primeira
         pergunta de quem recebe."""
         abrir_para_relato(self.titulo_pagina.text(), self)
+
+    def _verificar_atualizacao(self) -> None:
+        self.atualizador.verificar(manual=True)
 
     def _conectar_claude(self) -> None:
         DialogoConectarClaude(self).exec()
